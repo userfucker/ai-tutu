@@ -20,7 +20,7 @@
  * ImagePaths（参考图），没有清晰度参数，1:1 出图是 1024×1024。agy 有时自己调，
  * 有时委派给内部子智能体 image-generator（输出里 step_type 是 "subagent"）。
  * 为了不让它到处翻文件：工作目录是系统临时目录里只放原图的空目录；
- * 并且盯着每一步工具调用，越权就立刻结束（见 ALLOWED_TOOLS）。
+ * 并且盯着每一步工具调用，越权就结束（见 ALLOWED_TOOLS / DANGEROUS_TOOL）。
  * 同一天第二轮实测：agy 自己直接调 generate_image（带 ImagePaths）没出图，
  * 委派 image-generator 才稳定出图，所以页面固定用委派；图片一落盘就结束 agy。
  *
@@ -211,9 +211,12 @@ function sendJson(res, status, obj) {
 // ---------------------------------------------------------------- 精修一张图
 
 /**
- * 允许 agy 用的工具（2026-10-08 实测后定的）。看原图、生图、委派生图子智能体，
- * 以及等子智能体时可能用到的几个"等待/收消息"类工具；其余一律算越权。
- * view_file 只允许看原图和这次会话自己生成的图片。
+ * 越权检查分两段（2026-10-08 实测后定的）：
+ *  - 委派生图之前：只允许下面这些工具（看原图、委派生图子智能体、等待/查进度），
+ *    view_file 只允许看原图；其余一律结束 agy——这时还没开始生图，结束了不浪费。
+ *  - 委派生图之后：生图已经在谷歌那边跑了，结束 agy 等于白费这次生图。所以只有
+ *    DANGEROUS_TOOL（运行命令、写文件、操作浏览器等）才结束，其余只记一条警告。
+ *    实测 agy 会在等子智能体时调 manage_task {"Action":"list"} 查进度。
  */
 const ALLOWED_TOOLS = new Set([
   "view_file",
@@ -224,7 +227,10 @@ const ALLOWED_TOOLS = new Set([
   "wait_5_seconds",
   "manage_inbox",
   "manage_subagents",
+  "manage_task",
 ]);
+const DANGEROUS_TOOL =
+  /^(run_command|send_command_input|write_to_file|replace_file_content|multi_replace_file_content|sed_file|notebook_edit|notebook_execution|call_mcp_tool|schedule|define_subagent|delete_knowledge|search_web|read_url_content|open_browser_url)$|browser/;
 
 /** 在会话记录里找 generate_image 的实际参数（委派模式下它在子智能体的会话里）。 */
 async function findGenerateImageCalls(startedAt, inputPath) {
@@ -395,6 +401,8 @@ async function handleRefine(req, res) {
   let result = null;
   let genStartAt = 0; // 第一次调用 generate_image 或委派 image-generator 的时刻
   let violation = null;
+  let delegated = false; // 已经委派生图（之后只拦危险操作）
+  const softViolations = []; // 委派之后的非危险越权，只记警告
   const toolCalls = [];
 
   /** 检查一次工具调用是否越权，越权返回原因。 */
@@ -443,11 +451,17 @@ async function handleRefine(req, res) {
         send({ type: "tool", ...item });
         if (guard && s.state === "ACTIVE" && !violation) {
           const why = checkTool(name, parameters, subagents);
-          if (why) {
+          if (why && delegated && !DANGEROUS_TOOL.test(name)) {
+            softViolations.push(`第 ${item.at} 秒 ${why}`);
+            send({ type: "softViolation", name, detail: why, at: item.at });
+          } else if (why) {
             violation = { name, detail: why, at: item.at };
             send({ type: "violation", ...violation });
             killChild("越权：" + why);
           }
+        }
+        if (s.state === "ACTIVE" && (name === "invoke_subagent" || name === "generate_image") && !violation) {
+          delegated = true;
         }
       }
     } else if (ev.event === "result") {
@@ -506,7 +520,9 @@ async function handleRefine(req, res) {
   const warnings = [];
   if (killedReason && !violation && !earlyStop) warnings.push("已结束 agy：" + killedReason);
   if (!killedReason && !result) warnings.push(`agy 没有正常结束（退出码 ${exitCode}）`);
-  if (result && result.status && result.status !== "SUCCESS") {
+  for (const v of softViolations) warnings.push("越权（已在生图，没有结束）：" + v);
+  // 拿到图片后是我们主动结束的，agy 会报 "interrupted"，不算问题
+  if (result && result.status && result.status !== "SUCCESS" && !earlyStop) {
     warnings.push(`agy 返回状态 ${result.status}${result.error ? "：" + JSON.stringify(result.error) : ""}`);
   }
   let error = "";

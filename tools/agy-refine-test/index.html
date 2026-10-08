@@ -131,9 +131,26 @@
   .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid #d4d4d8; border-top-color: var(--text); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; place-items: center; z-index: 10; cursor: zoom-out; padding: 16px; }
-  .lightbox.show { display: grid; }
-  .lightbox img { max-width: 100%; max-height: 100%; }
+  /* 看大图：适应窗口、滚轮缩放、拖动 */
+  .viewer { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none; z-index: 10; overflow: hidden; touch-action: none; }
+  .viewer.show { display: block; }
+  .viewer img { position: absolute; left: 0; top: 0; transform-origin: 0 0; max-width: none; cursor: grab; user-select: none;
+    background: repeating-conic-gradient(#e4e4e7 0% 25%, #fff 0% 50%) 50% / 20px 20px; }
+  .viewer.dragging img { cursor: grabbing; }
+  .vbar { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; gap: 6px; align-items: center;
+    background: rgba(24,24,27,.9); color: #fff; border-radius: 999px; padding: 6px 10px; font-size: 13px; white-space: nowrap; }
+  .vbar button { border: 0; background: rgba(255,255,255,.12); color: #fff; border-radius: 999px; padding: 5px 12px; font: inherit; cursor: pointer; }
+  .vbar button:hover { background: rgba(255,255,255,.25); }
+  .vbar span { min-width: 48px; text-align: center; }
+  /* 处理模式 */
+  .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .modes button { border: 1px solid var(--border); background: var(--card); color: var(--text); border-radius: 14px; padding: 10px 8px; font: inherit; cursor: pointer; text-align: center; }
+  .modes button b { display: block; font-size: 14px; }
+  .modes button small { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+  .modes button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .modes button.active small { color: #d4d4d8; }
+  select:disabled { opacity: .55; cursor: not-allowed; }
+  .lock { font-size: 11px; color: var(--muted); margin-left: 4px; }
   .check { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 13px; cursor: pointer; }
   .check input { width: 16px; height: 16px; }
   .note { font-size: 12px; color: var(--muted); margin-top: 8px; padding: 8px 10px; background: var(--soft); border-radius: 10px; }
@@ -168,7 +185,7 @@
   <header>
     <span class="pill">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/></svg>
-      AI 产品精修 · agy 测试版 v3
+      AI 产品精修 · agy 测试版 v4
     </span>
     <h1>一键智能产品精修</h1>
     <p class="sub">上传产品图片，AI 自动分析并优化画质、去除瑕疵、增强细节</p>
@@ -177,6 +194,17 @@
 
   <div class="layout">
     <div class="col">
+      <!-- 处理模式 -->
+      <section class="card">
+        <div class="card-title" style="margin-bottom:10px">处理模式</div>
+        <div class="modes" id="modes">
+          <button type="button" data-mode="white"><b>抠白底图 1:1</b><small>白底或透明 PNG<br>800 / 1K / 2K</small></button>
+          <button type="button" data-mode="refine"><b>图片精修</b><small>去杂点杂质，不抠图<br>保持原图比例</small></button>
+          <button type="button" data-mode="free"><b>自由模式</b><small>所有参数<br>自己调</small></button>
+        </div>
+        <div class="hint" id="modeHint"></div>
+      </section>
+
       <!-- 产品图 -->
       <section class="card">
         <div class="card-head">
@@ -229,12 +257,10 @@
             </select>
           </label>
           <label class="f">输出尺寸
-            <select id="outSize">
-              <option value="800">800×800</option>
-              <option value="1024">1K（1024×1024）</option>
-              <option value="2048">2K（2048×2048）</option>
-              <option value="original">保持 AI 原图</option>
-            </select>
+            <select id="outSize"></select>
+          </label>
+          <label class="f">输出格式
+            <select id="format"></select>
           </label>
           <label class="f">主体大小
             <select id="fill">
@@ -262,12 +288,6 @@
         <details id="advanced">
           <summary>测试设置（高级）</summary>
           <div class="grid2">
-            <label class="f">输出格式
-              <select id="format">
-                <option value="jpeg">JPG（质量 92）</option>
-                <option value="png">PNG</option>
-              </select>
-            </label>
             <label class="f">同时处理几张
               <select id="concurrency">
                 <option value="1">1 张（测速度用）</option>
@@ -341,7 +361,17 @@
   </div>
 </div>
 
-<div class="lightbox" id="lightbox"><img alt=""></div>
+<div class="viewer" id="viewer">
+  <img id="viewerImg" alt="" draggable="false">
+  <div class="vbar" id="vbar">
+    <button type="button" data-z="out" title="缩小">－</button>
+    <span id="vzoom">100%</span>
+    <button type="button" data-z="in" title="放大">＋</button>
+    <button type="button" data-z="one">1:1 原始像素</button>
+    <button type="button" data-z="fit">适应窗口</button>
+    <button type="button" data-z="close">关闭</button>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -381,7 +411,49 @@ const ANGLE_TEXT = {
 const ANGLE_EXTRA = "原图里看不到的部分要符合产品的真实结构，不要编造文字、Logo 或零件。";
 const FILL_LABEL = { keep: "保持原图", 70: "适中 70%", 85: "饱满 85%" };
 const ANGLE_LABEL = { keep: "保持原图", auto: "自动摆正", front: "正面平视", 45: "45° 俯视", top: "正上方俯拍" };
-const SIZE_LABEL = { 800: "800", 1024: "1K", 2048: "2K", original: "保持 AI 原图" };
+const SIZE_LABEL = { 800: "800", 1024: "1K", 2048: "2K", original: "AI 原尺寸", source: "和原图一样大" };
+const FORMAT_LABEL = { jpeg: "JPG", png: "PNG", "png-alpha": "PNG 透明底" };
+
+/**
+ * 三种处理模式。locks = 锁死的参数（页面上变灰）；outSizes / formats = 这个模式下可选的项。
+ * 没锁的参数按模式分别记住（store("<模式>:<参数>")），切回来还是上次的设置。
+ */
+const MODES = {
+  white: {
+    label: "抠白底图 1:1",
+    hint: "比例固定 1:1、白底。JPG 是白底图；PNG 是透明底（程序从四周把白底抠掉，并处理边缘毛刺）。",
+    locks: { ratio: "1:1", background: "white" },
+    outSizes: ["800", "1024", "2048"],
+    formats: ["jpeg", "png-alpha"],
+    defaults: { outSize: "800", format: "jpeg", fill: "85", angle: "keep" },
+  },
+  refine: {
+    label: "图片精修",
+    hint: "只去掉杂点、灰尘、划痕，提升清晰度；不抠图、不改背景、构图和角度，比例跟原图（或框选区域）一样。",
+    locks: { ratio: "auto", background: "original", fill: "keep", angle: "keep", format: "jpeg" },
+    outSizes: ["original", "2048", "source"],
+    formats: ["jpeg"],
+    defaults: { outSize: "original" },
+  },
+  free: {
+    label: "自由模式",
+    hint: "所有参数自己调。PNG 透明底只能配白底图。",
+    locks: {},
+    outSizes: ["800", "1024", "2048", "original"],
+    formats: ["jpeg", "png", "png-alpha"],
+    defaults: { ratio: "1:1", background: "white", outSize: "800", format: "jpeg", fill: "85", angle: "keep" },
+  },
+};
+const MODE_FIELDS = ["background", "ratio", "outSize", "format", "fill", "angle"];
+function outSizeLabel(mode, v) {
+  if (mode === "refine") return { original: "AI 原尺寸（最清楚）", 2048: "2K（长边 2048）", source: "和原图一样大（放大，会偏软）" }[v];
+  if (mode === "white") return { 800: "800×800", 1024: "1K（1024×1024）", 2048: "2K（2048×2048）" }[v];
+  return { 800: "800（长边）", 1024: "1K（长边 1024）", 2048: "2K（长边 2048）", original: "AI 原尺寸" }[v];
+}
+function formatLabel(mode, v) {
+  if (v === "jpeg") return mode === "white" ? "JPG（白底）" : "JPG";
+  return v === "png" ? "PNG" : "PNG（透明底）";
+}
 // generate_image 的 AspectRatio 常用值。“自动”时从这里挑最接近原图（或框选区域）的。
 const AI_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
 
@@ -641,16 +713,58 @@ async function prepareInput(f) {
 
 // ---------------------------------------------------------------- 设置
 
-const settingIds = ["requirement", "background", "ratio", "outSize", "fill", "angle", "format", "concurrency"];
-const DEFAULTS = { ratio: "1:1", outSize: "800", fill: "85", angle: "keep", format: "jpeg" };
-for (const id of settingIds) {
+for (const id of ["requirement", "concurrency"]) {
   const saved = store(id);
-  const el = $(id);
-  const valid = saved !== null && (el.tagName !== "SELECT" || [...el.options].some((o) => o.value === saved));
-  if (valid) el.value = saved;
-  else if (DEFAULTS[id]) el.value = DEFAULTS[id];
-  el.addEventListener("change", () => { store(id, el.value); updateSizeNote(); });
+  if (saved !== null && (id !== "concurrency" || [...$(id).options].some((o) => o.value === saved))) $(id).value = saved;
+  $(id).addEventListener("change", () => store(id, $(id).value));
 }
+
+let mode = MODES[store("mode")] ? store("mode") : "white";
+
+/** 切换处理模式：锁住的参数变灰并设成固定值，其余恢复这个模式上次的设置。 */
+function applyMode(m) {
+  mode = m;
+  store("mode", m);
+  const cfg = MODES[m];
+  document.querySelectorAll("#modes button").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
+  $("modeHint").textContent = cfg.hint;
+  $("outSize").innerHTML = cfg.outSizes.map((v) => `<option value="${v}">${outSizeLabel(m, v)}</option>`).join("");
+  $("format").innerHTML = cfg.formats.map((v) => `<option value="${v}">${formatLabel(m, v)}</option>`).join("");
+  for (const id of MODE_FIELDS) {
+    const el = $(id);
+    const label = el.closest("label");
+    label.querySelector(".lock")?.remove();
+    if (id in cfg.locks) {
+      el.value = cfg.locks[id];
+      el.disabled = true;
+      label.insertAdjacentHTML("beforeend", `<span class="lock">🔒 由模式决定</span>`);
+    } else {
+      el.disabled = false;
+      const saved = store(`${m}:${id}`);
+      el.value = saved !== null && [...el.options].some((o) => o.value === saved) ? saved : cfg.defaults[id] ?? el.options[0].value;
+    }
+  }
+  fixPngAlpha();
+  updateSizeNote();
+}
+/** PNG 透明底只能配白底图（原图背景没法抠）。 */
+function fixPngAlpha() {
+  const opt = [...$("format").options].find((o) => o.value === "png-alpha");
+  if (!opt) return;
+  opt.disabled = $("background").value !== "white";
+  if (opt.disabled && $("format").value === "png-alpha") $("format").value = "png";
+}
+for (const id of MODE_FIELDS) {
+  $(id).addEventListener("change", () => {
+    if (!(id in MODES[mode].locks)) store(`${mode}:${id}`, $(id).value);
+    if (id === "background") fixPngAlpha();
+    updateSizeNote();
+  });
+}
+$("modes").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-mode]");
+  if (b && !running) applyMode(b.dataset.mode);
+});
 $("guard").checked = store("guard") !== "0";
 $("guard").addEventListener("change", () => store("guard", $("guard").checked ? "1" : "0"));
 $("template").value = store(TEMPLATE_KEY) || DEFAULT_TEMPLATE;
@@ -691,6 +805,8 @@ document.addEventListener("click", (e) => {
 
 function settings() {
   return {
+    mode,
+    modeLabel: MODES[mode].label,
     requirement: $("requirement").value.trim(),
     model: $("model").value,
     modelName: $("model").selectedOptions[0]?.textContent || "",
@@ -718,32 +834,43 @@ function updateSizeNote() {
   const s = settings();
   const el = $("sizeNote");
   const parts = [];
+  const fmt = FORMAT_LABEL[s.format];
   if (s.outSize === "original") {
-    parts.push("输出：不缩放，AI 出多大就是多大（1:1 时是 1024×1024）。");
+    parts.push(`输出：AI 原尺寸（长边约 1024～1264），${fmt}，最清楚。`);
+  } else if (s.outSize === "source") {
+    parts.push(`输出：和原图（或框选区域）一样大，${fmt}。AI 出图长边只有约 1264，大图会被放大好几倍，画面偏软。`);
   } else {
     const L = Number(s.outSize);
-    parts.push(s.ratio === "auto" ? `输出：长边 ${L} 像素，比例跟 AI 出图一致。` : (() => { const t = sizeFor(ratioValue(s.ratio), L); return `输出：${t.w}×${t.h}，${s.format === "png" ? "PNG" : "JPG"}。`; })());
+    parts.push(s.ratio === "auto" ? `输出：长边 ${L} 像素，比例跟原图一致，${fmt}。` : (() => { const t = sizeFor(ratioValue(s.ratio), L); return `输出：${t.w}×${t.h}，${fmt}。`; })());
     if (L > 1024) parts.push("AI 出图长边约 1024，2K 是放大出来的，细节不会增加。");
   }
+  if (s.format === "png-alpha") parts.push("透明底由程序抠图：只抠和四周相连的白色，产品内部的白色高光保留；产品边缘如果也是很亮的白色，可能被抠掉一点，请重点看轮廓。");
   if (s.fill !== "keep") parts.push(s.background === "white" ? `白底图会自动校准到商品约占 ${s.fill}%。` : `原图背景无法自动校准主体大小，只靠 AI 按要求构图。`);
   if (s.angle !== "keep") parts.push("改了角度：AI 要补画原图看不到的部分，请逐张核对文字和零件。");
-  el.className = (s.outSize !== "original" && Number(s.outSize) > 1024) || s.angle !== "keep" ? "note warn" : "note";
+  el.className = s.outSize === "source" || Number(s.outSize) > 1024 || s.angle !== "keep" ? "note warn" : "note";
   el.textContent = parts.join(" ");
 }
 
 function buildPrompt(s, f) {
   const aiRatio = aiRatioFor(s, f);
   const call = `立即调用 invoke_subagent，子智能体类型 image-generator，让它只调用一次 generate_image、只生成这一张图，参数：ImageName: "refined"；AspectRatio: "${aiRatio}"；ImagePaths: ["{{图片路径}}"]（原图作为参考图）；Prompt: 你看完原图后用英文写的画面描述（写进交给它的说明里，让它原样使用）。`;
-  const compose = s.fill === "keep"
+  let compose = s.fill === "keep"
     ? `画面比例 ${aiRatio}。产品在画面中的大小和位置参考原图，完整显示，不要裁掉产品任何部分。`
     : `画面比例 ${aiRatio}。产品完整显示、居中，主体约占画面的 ${s.fill}%${s.fill === "85" ? "（主体饱满）" : ""}，四周留出${s.fill === "85" ? "少量" : "适当"}空白，不要裁掉产品任何部分。`;
+  let background = BACKGROUND_TEXT[s.background];
+  if (s.mode === "refine") {
+    compose = `画面比例 ${aiRatio}（和原图一致）。这是精修，不是重新设计：保持原图的构图、取景、产品位置和大小完全不变，不要裁剪、不要重新构图；只去除杂点、杂质、灰尘、划痕和噪点，提升清晰度，不改变产品颜色和光影风格。`;
+    background = "保留原图的背景、场景、光线和色调，只去掉背景里的杂点、污渍和灰尘，不要换背景，不要改变画面风格。";
+  } else if (s.format === "png-alpha") {
+    background = "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物；不要任何投影、倒影和阴影（之后要抠成透明底）；产品边缘清晰锐利、轮廓干净，没有毛边和白边。";
+  }
   const angle = s.angle === "keep" ? ANGLE_TEXT.keep : ANGLE_TEXT[s.angle] + ANGLE_EXTRA;
   return {
     aiRatio,
     prompt: s.template
       .split("{{调用说明}}").join(call)
       .split("{{角度要求}}").join(angle)
-      .split("{{背景要求}}").join(BACKGROUND_TEXT[s.background])
+      .split("{{背景要求}}").join(background)
       .split("{{构图要求}}").join(compose)
       .split("{{额外要求}}").join(s.requirement || "无"),
   };
@@ -801,6 +928,83 @@ function edgeColor(img) {
   return r > 235 && gr > 235 && b > 235 ? "#ffffff" : `rgb(${r},${gr},${b})`;
 }
 
+/**
+ * 抠透明底（只用于白底图）：
+ *  1. 从图片四周往里找“和外边相连的白色”，这部分是背景；产品内部的白色高光不和外边相连，保留。
+ *  2. 被产品围起来的大块纯白（比如环形零件中间的孔）也算背景；小块的白算高光，保留。
+ *  3. 背景里零星的小杂点去掉。
+ *  4. 边缘 1 像素做柔和过渡（去锯齿），并把边缘残留的白色去掉（去白边）。
+ */
+function cutoutWhite(g, W, H) {
+  const im = g.getImageData(0, 0, W, H);
+  const d = im.data;
+  const N = W * H;
+  const dist = new Uint8Array(N); // 离纯白有多远：0 = 纯白
+  for (let i = 0; i < N; i++) dist[i] = 255 - Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
+  const T = 24; // 算“白”的容差
+  const bg = new Uint8Array(N);
+  const q = new Int32Array(N);
+  let qh = 0, qt = 0;
+  const seed = (i) => { if (!bg[i] && dist[i] <= T) { bg[i] = 1; q[qt++] = i; } };
+  for (let x = 0; x < W; x++) { seed(x); seed((H - 1) * W + x); }
+  for (let y = 0; y < H; y++) { seed(y * W); seed(y * W + W - 1); }
+  while (qh < qt) {
+    const i = q[qh++], x = i % W;
+    if (x > 0) seed(i - 1);
+    if (x < W - 1) seed(i + 1);
+    if (i >= W) seed(i - W);
+    if (i < N - W) seed(i + W);
+  }
+  // 连通块：flag=1 找“被围住的白色”（大块算孔），flag=0 找“前景”（小块算杂点）
+  const seen = new Uint8Array(N);
+  const holeMin = Math.max(200, N * 0.002);
+  const speckMax = Math.max(20, N * 0.00015);
+  for (const white of [1, 0]) {
+    seen.fill(0);
+    for (let start = 0; start < N; start++) {
+      if (bg[start] || seen[start] || (dist[start] <= T) !== Boolean(white)) continue;
+      qh = 0; qt = 0;
+      q[qt++] = start; seen[start] = 1;
+      while (qh < qt) {
+        const i = q[qh++], x = i % W;
+        const nb = [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W];
+        for (const j of nb) {
+          if (j < 0 || j >= N || seen[j] || bg[j] || (dist[j] <= T) !== Boolean(white)) continue;
+          seen[j] = 1;
+          q[qt++] = j;
+        }
+      }
+      if (white ? qt >= holeMin : qt <= speckMax) for (let k = 0; k < qt; k++) bg[q[k]] = 1;
+    }
+  }
+  // 透明度 + 边缘处理
+  const alpha = new Uint8Array(N);
+  for (let i = 0; i < N; i++) alpha[i] = bg[i] ? 0 : 255;
+  const out = new Uint8ClampedArray(d);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    if (bg[i]) { out[i * 4 + 3] = 0; continue; }
+    // 只处理挨着背景的边缘像素
+    let edge = false, sum = 0, n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const xx = x + dx, yy = y + dy;
+      if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+      const j = yy * W + xx;
+      if (bg[j]) edge = true;
+      sum += alpha[j]; n++;
+    }
+    if (!edge) continue;
+    // cover：这个像素里产品占多少（越接近白色越少）。白边像素按 cover 把混进去的白色减掉（去白边）；
+    // 透明度再和周围平均一下（去锯齿）。深色边缘 cover = 1，颜色不动，只做柔和过渡。
+    const cover = Math.max(0.08, Math.min(1, dist[i] / (T * 3)));
+    if (cover < 1) {
+      for (let c = 0; c < 3; c++) out[i * 4 + c] = Math.round((d[i * 4 + c] - 255 * (1 - cover)) / cover);
+    }
+    out[i * 4 + 3] = Math.round(Math.max(0.08, Math.min(cover, sum / n / 255)) * 255);
+  }
+  g.putImageData(new ImageData(out, W, H), 0, 0);
+}
+
 /** AI 出图 → 最终输出。 */
 async function makeOutput(job, ai) {
   const s = batch;
@@ -809,20 +1013,25 @@ async function makeOutput(job, ai) {
   const iw = img.naturalWidth, ih = img.naturalHeight;
   const calibrate = s.fill !== "keep" && s.background === "white";
   const subject = calibrate ? findSubject(img) : null;
-  if (s.outSize === "original" && !subject) return { ...ai, same: true };
+  const alpha = s.format === "png-alpha";
 
-  // 目标画布
-  const r = s.ratio === "auto" ? iw / ih : ratioValue(s.ratio);
+  // 目标比例：选了比例就用它；“自动”跟交给 AI 的图（原图或框选区域）一样
+  const r = s.ratio === "auto" ? job.inputRatio : ratioValue(s.ratio);
+  const closeToAi = Math.abs(Math.log(iw / ih / r)) < 0.03;
+  if (s.outSize === "original" && !subject && !alpha && s.format === "jpeg" && closeToAi) return { ...ai, same: true };
+
   let W, H;
   if (s.outSize === "original") ({ w: W, h: H } = sizeFor(r, Math.max(iw, ih)));
+  else if (s.outSize === "source") ({ w: W, h: H } = job.inputSize);
   else ({ w: W, h: H } = sizeFor(r, Number(s.outSize)));
 
   const c = document.createElement("canvas");
   c.width = W; c.height = H;
-  const g = c.getContext("2d");
+  const g = c.getContext("2d", { willReadFrequently: alpha });
   g.imageSmoothingEnabled = true;
   g.imageSmoothingQuality = "high";
-  let scale, dx, dy, note = "";
+  let scale, dx, dy;
+  const notes = [];
   if (subject) {
     // 主体校准：商品的长边（相对画布）正好占 fill%，居中
     const f = Number(s.fill) / 100;
@@ -830,7 +1039,7 @@ async function makeOutput(job, ai) {
     dx = W / 2 - (subject.x + subject.w / 2) * scale;
     dy = H / 2 - (subject.y + subject.h / 2) * scale;
     g.fillStyle = "#ffffff";
-    note = `主体校准 ${s.fill}%`;
+    notes.push(`主体校准 ${s.fill}%`);
   } else {
     // AI 出的比例和目标差不多（3% 以内）就铺满、裁掉边上几个像素；差得多就完整放进去、补边
     const close = Math.abs(Math.log(iw / ih / (W / H))) < 0.03;
@@ -838,20 +1047,24 @@ async function makeOutput(job, ai) {
     dx = (W - iw * scale) / 2;
     dy = (H - ih * scale) / 2;
     g.fillStyle = s.background === "white" ? "#ffffff" : edgeColor(img);
-    if (!close) note = "比例不符，已补边";
-    if (calibrate && !subject) note = "没找到商品边界，未校准";
+    if (!close) notes.push("比例不符，已补边");
+    if (calibrate) notes.push("没找到商品边界，未校准");
   }
   g.fillRect(0, 0, W, H);
   g.drawImage(img, dx, dy, iw * scale, ih * scale);
-  const type = s.format === "png" ? "image/png" : "image/jpeg";
-  const blob = await canvasToBlob(c, type, 0.92);
+  if (alpha) {
+    cutoutWhite(g, W, H);
+    notes.push("透明底");
+  }
+  const png = s.format !== "jpeg";
+  const blob = await canvasToBlob(c, png ? "image/png" : "image/jpeg", 0.92);
   return {
     url: URL.createObjectURL(blob),
     w: W, h: H,
     bytes: blob.size,
-    ext: s.format === "png" ? ".png" : ".jpg",
+    ext: png ? ".png" : ".jpg",
     upscaled: scale > 1.001,
-    note,
+    note: notes.join("，"),
     subjectPct: subject ? Math.round(Math.max(subject.w / iw, subject.h / ih) * 100) : null,
   };
 }
@@ -1000,6 +1213,8 @@ function handleEvent(j, a, ev) {
     else a.steps.push(`${ev.at}s ${ev.name} 完成${ev.seconds ? `（${Number(ev.seconds).toFixed(1)} 秒）` : ""}`);
   } else if (ev.type === "violation") {
     a.steps.push(`${ev.at}s ⚠ 越权，已结束：${ev.detail}`);
+  } else if (ev.type === "softViolation") {
+    a.steps.push(`${ev.at}s ⚠ 越权（已在生图，没有结束）：${ev.detail}`);
   } else if (ev.type === "text") {
     j.text += ev.text;
   } else if (ev.type === "done") {
@@ -1066,13 +1281,16 @@ $("startBtn").addEventListener("click", async () => {
   let id = 0;
   jobs = files.map((f) => {
     const aiRatio = aiRatioFor(s, f);
-    let finalLabel = "不缩放";
-    if (s.outSize !== "original") {
-      const L = Number(s.outSize);
-      if (s.ratio !== "auto") { const t = sizeFor(ratioValue(s.ratio), L); finalLabel = `输出 ${t.w}×${t.h}`; }
-      else finalLabel = `输出长边 ${L}`;
+    const inSize = inputSize(f);
+    const inputRatio = inSize.w / inSize.h;
+    let finalLabel = "AI 原尺寸";
+    if (s.outSize === "source") finalLabel = `输出 ${inSize.w}×${inSize.h}（原图大小）`;
+    else if (s.outSize !== "original") {
+      const t = sizeFor(s.ratio === "auto" ? inputRatio : ratioValue(s.ratio), Number(s.outSize));
+      finalLabel = `输出 ${t.w}×${t.h}`;
     }
-    return { id: ++id, file: f, aiRatio, finalLabel, status: "waiting", attempts: [], outputs: [], text: "", error: "" };
+    finalLabel += " " + FORMAT_LABEL[s.format];
+    return { id: ++id, file: f, aiRatio, inputRatio, inputSize: inSize, finalLabel, status: "waiting", attempts: [], outputs: [], text: "", error: "" };
   });
   jobs.forEach(renderJob);
   renderSummary();
@@ -1108,10 +1326,11 @@ $("copyLog").addEventListener("click", async () => {
   if (!jobs.length) return;
   const b = batch;
   const lines = [];
-  lines.push("# agy 产品精修测试结果（v3）");
+  lines.push("# agy 产品精修测试结果（v4）");
   lines.push(`时间（北京）：${beijingTime(b.startedAt)}${b.endedAt ? " ~ " + beijingTime(b.endedAt) : "（进行中）"}`);
   lines.push(`浏览器：${navigator.userAgent}`);
-  lines.push(`设置：模型 ${b.modelName}（${b.model || "默认"}）；背景 ${b.background === "white" ? "白底图" : "原图背景"}；比例 ${b.ratioLabel}；输出尺寸 ${SIZE_LABEL[b.outSize]}；主体大小 ${FILL_LABEL[b.fill]}；拍摄角度 ${ANGLE_LABEL[b.angle]}；格式 ${b.format === "png" ? "PNG" : "JPG"}`);
+  lines.push(`处理模式：${b.modeLabel}`);
+  lines.push(`设置：模型 ${b.modelName}（${b.model || "默认"}）；背景 ${b.background === "white" ? "白底图" : "原图背景"}；比例 ${b.ratioLabel}；输出尺寸 ${SIZE_LABEL[b.outSize]}；格式 ${FORMAT_LABEL[b.format]}；主体大小 ${FILL_LABEL[b.fill]}；拍摄角度 ${ANGLE_LABEL[b.angle]}`);
   lines.push(`测试设置：委派 image-generator；越权即结束 ${b.guard ? "开" : "关"}；同时处理 ${b.concurrency} 张；模板${b.template === DEFAULT_TEMPLATE ? "默认" : "改过"}`);
   lines.push(`精修要求：${b.requirement || "（无）"}`);
   lines.push($("summary").textContent);
@@ -1168,22 +1387,91 @@ $("copyLog").addEventListener("click", async () => {
   toast("结果日志已复制，可以直接粘贴发给 AI");
 });
 
-// ---------------------------------------------------------------- 看大图
+// ---------------------------------------------------------------- 看大图（适应窗口、滚轮缩放、拖动）
+
+const view = { s: 1, x: 0, y: 0, fit: 1, drag: null };
+function viewApply() {
+  $("viewerImg").style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.s})`;
+  $("vzoom").textContent = Math.round(view.s * 100) + "%";
+}
+function viewFit() {
+  const img = $("viewerImg");
+  const vw = window.innerWidth, vh = window.innerHeight - 70; // 底部留给按钮条
+  view.fit = Math.min((vw - 32) / img.naturalWidth, (vh - 32) / img.naturalHeight, 1);
+  view.s = view.fit;
+  view.x = (vw - img.naturalWidth * view.s) / 2;
+  view.y = (vh - img.naturalHeight * view.s) / 2;
+  viewApply();
+}
+/** 以屏幕上 (cx, cy) 这一点为中心缩放到 s。 */
+function viewZoomTo(s, cx = window.innerWidth / 2, cy = (window.innerHeight - 70) / 2) {
+  s = Math.min(16, Math.max(0.05, s));
+  view.x = cx - (cx - view.x) * (s / view.s);
+  view.y = cy - (cy - view.y) * (s / view.s);
+  view.s = s;
+  viewApply();
+}
+function openViewer(src) {
+  const img = $("viewerImg");
+  img.onload = viewFit;
+  img.src = src;
+  $("viewer").classList.add("show");
+}
+function closeViewer() { $("viewer").classList.remove("show"); }
 
 $("list").addEventListener("click", (e) => {
-  if (e.target.tagName === "IMG") {
-    $("lightbox").querySelector("img").src = e.target.src;
-    $("lightbox").classList.add("show");
-  }
+  if (e.target.tagName === "IMG") openViewer(e.target.src);
 });
-$("lightbox").addEventListener("click", () => $("lightbox").classList.remove("show"));
+$("viewer").addEventListener("wheel", (e) => {
+  e.preventDefault();
+  viewZoomTo(view.s * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY);
+}, { passive: false });
+$("viewer").addEventListener("pointerdown", (e) => {
+  if (e.target.closest("#vbar")) return;
+  view.drag = { x: e.clientX, y: e.clientY, ox: view.x, oy: view.y, moved: false, onImg: e.target === $("viewerImg") };
+  $("viewer").setPointerCapture(e.pointerId);
+});
+$("viewer").addEventListener("pointermove", (e) => {
+  const dg = view.drag;
+  if (!dg) return;
+  if (Math.abs(e.clientX - dg.x) + Math.abs(e.clientY - dg.y) > 3) dg.moved = true;
+  if (!dg.moved) return;
+  $("viewer").classList.add("dragging");
+  view.x = dg.ox + e.clientX - dg.x;
+  view.y = dg.oy + e.clientY - dg.y;
+  viewApply();
+});
+$("viewer").addEventListener("pointerup", () => {
+  const dg = view.drag;
+  view.drag = null;
+  $("viewer").classList.remove("dragging");
+  if (dg && !dg.moved && !dg.onImg) closeViewer(); // 点图片外面的空白处关闭
+});
+$("viewerImg").addEventListener("dblclick", (e) => {
+  if (Math.abs(view.s - 1) < 0.01) viewFit();
+  else viewZoomTo(1, e.clientX, e.clientY);
+});
+$("vbar").addEventListener("click", (e) => {
+  const z = e.target.dataset.z;
+  if (z === "in") viewZoomTo(view.s * 1.25);
+  else if (z === "out") viewZoomTo(view.s / 1.25);
+  else if (z === "one") viewZoomTo(1);
+  else if (z === "fit") viewFit();
+  else if (z === "close") closeViewer();
+});
+window.addEventListener("resize", () => { if ($("viewer").classList.contains("show")) viewFit(); });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    $("lightbox").classList.remove("show");
-    if ($("cropModal").classList.contains("show")) closeCrop();
+  if ($("viewer").classList.contains("show")) {
+    if (e.key === "Escape") closeViewer();
+    else if (e.key === "+" || e.key === "=") viewZoomTo(view.s * 1.25);
+    else if (e.key === "-") viewZoomTo(view.s / 1.25);
+    else if (e.key === "0") viewFit();
+    return;
   }
+  if (e.key === "Escape" && $("cropModal").classList.contains("show")) closeCrop();
 });
 
+applyMode(mode);
 loadModels(false);
 updateSizeNote();
 renderSummary();
