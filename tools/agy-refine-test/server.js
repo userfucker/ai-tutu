@@ -21,6 +21,8 @@
  * 有时委派给内部子智能体 image-generator（输出里 step_type 是 "subagent"）。
  * 为了不让它到处翻文件：工作目录是系统临时目录里只放原图的空目录；
  * 并且盯着每一步工具调用，越权就立刻结束（见 ALLOWED_TOOLS）。
+ * 同一天第二轮实测：agy 自己直接调 generate_image（带 ImagePaths）没出图，
+ * 委派 image-generator 才稳定出图，所以页面固定用委派；图片一落盘就结束 agy。
  *
  * 环境变量（都可以不设）：
  *   PORT=5260              端口
@@ -365,6 +367,25 @@ async function handleRefine(req, res) {
     if (!finished) killChild("浏览器取消");
   });
 
+  // 图片一落盘就结束 agy：后面它只是等子智能体回复、写总结，白白多等 20 秒左右。
+  // 每秒看一次主会话的 brain 目录，图片大小连续两次不变（写完了）就结束。
+  let earlyStop = false;
+  let lastSeen = "";
+  const watcher = setInterval(async () => {
+    if (!conversationId || killedReason || !/^[A-Za-z0-9._-]+$/.test(conversationId)) return;
+    const imgs = (await listImages(path.join(BRAIN_ROOT, conversationId))).filter(
+      (x) => x.mtimeMs >= startedAt - 5000 && x.size > 0,
+    );
+    if (!imgs.length) return;
+    const key = imgs.map((x) => `${x.name}:${x.size}`).join("|");
+    if (key === lastSeen) {
+      earlyStop = true;
+      clearInterval(watcher);
+      killChild("已拿到图片，提前结束");
+    }
+    lastSeen = key;
+  }, 1000);
+
   let stderrTail = "";
   child.stderr.on("data", (c) => {
     stderrTail = (stderrTail + c.toString("utf8")).slice(-4000);
@@ -443,6 +464,7 @@ async function handleRefine(req, res) {
     });
   });
   clearTimeout(timer);
+  clearInterval(watcher);
   rawLog.end();
   const endedAt = Date.now();
 
@@ -482,7 +504,7 @@ async function handleRefine(req, res) {
 
   // 出了图就算成功；agy 自己报的错（比如 503）降级成警告
   const warnings = [];
-  if (killedReason && !violation) warnings.push("已结束 agy：" + killedReason);
+  if (killedReason && !violation && !earlyStop) warnings.push("已结束 agy：" + killedReason);
   if (!killedReason && !result) warnings.push(`agy 没有正常结束（退出码 ${exitCode}）`);
   if (result && result.status && result.status !== "SUCCESS") {
     warnings.push(`agy 返回状态 ${result.status}${result.error ? "：" + JSON.stringify(result.error) : ""}`);
@@ -506,6 +528,7 @@ async function handleRefine(req, res) {
     error,
     warnings,
     violation,
+    earlyStop,
     runId,
     runDir,
     conversationId,
