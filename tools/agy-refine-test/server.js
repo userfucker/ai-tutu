@@ -16,6 +16,12 @@
  * 生成的图片在 ~/.gemini/antigravity-cli/brain/<conversation_id>/ 里，
  * 协议和回复里都不给路径，所以跑完后去这个目录收图片。
  *
+ * 2026-10-08 实测：generate_image 的参数是 ImageName、Prompt、AspectRatio、
+ * ImagePaths（参考图），没有清晰度参数，1:1 出图是 1024×1024。agy 有时自己调，
+ * 有时委派给内部子智能体 image-generator（输出里 step_type 是 "subagent"）。
+ * 为了不让它到处翻文件：工作目录是系统临时目录里只放原图的空目录；
+ * 并且盯着每一步工具调用，越权就立刻结束（见 ALLOWED_TOOLS）。
+ *
  * 环境变量（都可以不设）：
  *   PORT=5260              端口
  *   HOST=127.0.0.1         只允许本机访问；设成 0.0.0.0（或者加参数 --lan）才能
@@ -203,12 +209,73 @@ function sendJson(res, status, obj) {
 // ---------------------------------------------------------------- 精修一张图
 
 /**
+ * 允许 agy 用的工具（2026-10-08 实测后定的）。看原图、生图、委派生图子智能体，
+ * 以及等子智能体时可能用到的几个"等待/收消息"类工具；其余一律算越权。
+ * view_file 只允许看原图和这次会话自己生成的图片。
+ */
+const ALLOWED_TOOLS = new Set([
+  "view_file",
+  "generate_image",
+  "invoke_subagent",
+  "finish",
+  "wait",
+  "wait_5_seconds",
+  "manage_inbox",
+  "manage_subagents",
+]);
+
+/** 在会话记录里找 generate_image 的实际参数（委派模式下它在子智能体的会话里）。 */
+async function findGenerateImageCalls(startedAt, inputPath) {
+  const calls = [];
+  let dirs = [];
+  try {
+    dirs = await fsp.readdir(BRAIN_ROOT);
+  } catch {
+    return calls;
+  }
+  for (const d of dirs) {
+    const dir = path.join(BRAIN_ROOT, d);
+    const st = await fsp.stat(dir).catch(() => null);
+    if (!st || !st.isDirectory() || st.mtimeMs < startedAt - 5000) continue;
+    const file = path.join(dir, ".system_generated", "logs", "transcript_full.jsonl");
+    const text = await fsp.readFile(file, "utf8").catch(() => "");
+    if (!text.includes("generate_image") || !text.includes(inputPath)) continue;
+    for (const line of text.split("\n")) {
+      if (!line.includes('"generate_image"')) continue;
+      let obj;
+      try { obj = JSON.parse(line); } catch { continue; }
+      const walk = (v) => {
+        if (!v || typeof v !== "object") return;
+        if (Array.isArray(v)) return v.forEach(walk);
+        if (v.name === "generate_image" && v.args && typeof v.args === "object") {
+          const args = {};
+          for (const [k, val] of Object.entries(v.args)) {
+            if (/^tool(Action|Summary)$/.test(k)) continue;
+            // 有的版本把参数值再 JSON 编码一次（"\"ls -la\""），解开
+            if (typeof val === "string" && /^["[{]/.test(val)) {
+              try { args[k] = JSON.parse(val); continue; } catch {}
+            }
+            args[k] = val;
+          }
+          if (JSON.stringify(args).includes(inputPath)) calls.push({ conversationId: d, args });
+          return;
+        }
+        Object.values(v).forEach(walk);
+      };
+      walk(obj);
+    }
+  }
+  return calls;
+}
+
+/**
  * 跑一次 agy 精修一张图，进度一行一个 JSON 写回浏览器（NDJSON）：
- *   {type:"start", runId, agyPath, args}
+ *   {type:"start", runId, agyPath, args, inputPath}
  *   {type:"init", conversationId, tools}
- *   {type:"tool", name, parameters, state}
- *   {type:"text", text}                 agy 的回复文字（增量）
- *   {type:"done", ...}                  结束（成功或失败都只发一次）
+ *   {type:"tool", name, parameters, state, at}   普通工具和委派子智能体都走这个
+ *   {type:"violation", name, detail}             越权，马上结束 agy
+ *   {type:"text", text}                          agy 的回复文字（增量）
+ *   {type:"done", ...}                           结束（只发一次）
  */
 async function handleRefine(req, res) {
   let body;
@@ -218,7 +285,7 @@ async function handleRefine(req, res) {
     sendJson(res, 400, { error: "请求内容不对：" + e.message });
     return;
   }
-  const { fileName = "image.png", imageBase64, prompt, model } = body || {};
+  const { fileName = "image.png", imageBase64, prompt, model, guard = true } = body || {};
   if (!imageBase64 || !prompt) {
     sendJson(res, 400, { error: "缺少图片或提示词" });
     return;
@@ -230,7 +297,7 @@ async function handleRefine(req, res) {
     return;
   }
 
-  // 每张图一个独立目录：runs/<北京时间>-<随机>/
+  // 结果目录：runs/<北京时间>-<随机>/（提示词、日志、结果都在这里，agy 看不到）
   const stamp = beijingTime().replace(/[-: ]/g, "").replace(/^(\d{8})/, "$1-");
   const runId = `${stamp}-${crypto.randomBytes(3).toString("hex")}`;
   const runDir = path.join(RUNS_DIR, runId);
@@ -238,8 +305,13 @@ async function handleRefine(req, res) {
   await fsp.mkdir(outDir, { recursive: true });
   let ext = path.extname(String(fileName)).toLowerCase();
   if (!IMAGE_EXTS.has(ext)) ext = ".png";
-  const inputPath = path.join(runDir, "input" + ext);
-  await fsp.writeFile(inputPath, Buffer.from(String(imageBase64), "base64"));
+  const imageBytes = Buffer.from(String(imageBase64), "base64");
+  await fsp.writeFile(path.join(runDir, "input" + ext), imageBytes);
+
+  // agy 的工作目录：系统临时目录里一个空目录，只放这一张原图
+  const workDir = await fsp.mkdtemp(path.join(os.tmpdir(), "ai-tutu-agy-"));
+  const inputPath = path.join(workDir, "product" + ext);
+  await fsp.writeFile(inputPath, imageBytes);
 
   const message = String(prompt).split("{{图片路径}}").join(inputPath);
   await fsp.writeFile(path.join(runDir, "prompt.txt"), message);
@@ -262,11 +334,12 @@ async function handleRefine(req, res) {
   };
 
   const startedAt = Date.now();
-  send({ type: "start", runId, agyPath, args, startedAt: beijingTime(startedAt) });
+  const sec = (ms) => Math.round(ms / 100) / 10;
+  send({ type: "start", runId, agyPath, args, inputPath, startedAt: beijingTime(startedAt) });
 
   const rawLog = fs.createWriteStream(path.join(runDir, "agy-output.ndjson"));
   const child = spawn(agyPath, args, {
-    cwd: runDir,
+    cwd: workDir,
     env: process.env,
     stdio: ["pipe", "pipe", "pipe"],
     detached: true, // 结束时连 agy 的子进程一起结束
@@ -299,8 +372,25 @@ async function handleRefine(req, res) {
 
   let conversationId = "";
   let result = null;
-  let firstImageToolAt = 0;
+  let genStartAt = 0; // 第一次调用 generate_image 或委派 image-generator 的时刻
+  let violation = null;
   const toolCalls = [];
+
+  /** 检查一次工具调用是否越权，越权返回原因。 */
+  const checkTool = (name, parameters, subagents) => {
+    if (!ALLOWED_TOOLS.has(name)) return `调用了不允许的工具 ${name}`;
+    if (name === "view_file") {
+      const p = String((parameters && parameters.AbsolutePath) || "");
+      const ownBrain = conversationId ? path.join(BRAIN_ROOT, conversationId) + path.sep : "\0";
+      if (p !== inputPath && !p.startsWith(ownBrain)) return `查看了原图以外的文件 ${p}`;
+    }
+    if (name === "invoke_subagent" && subagents) {
+      const bad = subagents.map((s) => s.type_name).filter((t) => t !== "image-generator");
+      if (bad.length) return `委派了生图以外的子智能体 ${bad.join(",")}`;
+    }
+    return "";
+  };
+
   const rl = readline.createInterface({ input: child.stdout });
   rl.on("line", (line) => {
     rawLog.write(line + "\n");
@@ -316,22 +406,27 @@ async function handleRefine(req, res) {
       if (!conversationId && s.conversation_id) conversationId = s.conversation_id;
       if (s.step_type === "agent_response" && s.text_delta) {
         send({ type: "text", text: s.text_delta });
-      } else if (s.step_type === "tool") {
+      } else if (s.step_type === "tool" || s.step_type === "subagent") {
         const name = s.tool_name || (s.tool_info && s.tool_info.name) || "";
-        const parameters = (s.tool_info && s.tool_info.parameters) || undefined;
-        if (s.state === "ACTIVE" && name === "generate_image" && !firstImageToolAt) {
-          firstImageToolAt = Date.now();
+        let parameters = (s.tool_info && s.tool_info.parameters) || undefined;
+        const subagents = s.subagent_info && s.subagent_info.subagents;
+        if (subagents) {
+          parameters = subagents.map((x) => ({ type_name: x.type_name, role: x.role, initial_prompt: x.initial_prompt }));
         }
-        if (s.state === "ACTIVE" || s.state === "DONE") {
-          const item = {
-            name,
-            state: s.state,
-            parameters,
-            seconds: s.duration_seconds,
-            at: Math.round((Date.now() - startedAt) / 100) / 10,
-          };
-          if (s.state === "DONE") toolCalls.push(item);
-          send({ type: "tool", ...item });
+        if (s.state !== "ACTIVE" && s.state !== "DONE") return;
+        if (s.state === "ACTIVE" && !genStartAt && (name === "generate_image" || name === "invoke_subagent")) {
+          genStartAt = Date.now();
+        }
+        const item = { name, state: s.state, parameters, seconds: s.duration_seconds, at: sec(Date.now() - startedAt) };
+        if (s.state === "DONE") toolCalls.push(item);
+        send({ type: "tool", ...item });
+        if (guard && s.state === "ACTIVE" && !violation) {
+          const why = checkTool(name, parameters, subagents);
+          if (why) {
+            violation = { name, detail: why, at: item.at };
+            send({ type: "violation", ...violation });
+            killChild("越权：" + why);
+          }
         }
       }
     } else if (ev.event === "result") {
@@ -351,17 +446,27 @@ async function handleRefine(req, res) {
   rawLog.end();
   const endedAt = Date.now();
 
-  // 收图：brain/<conversation_id>/ 里的图片 + 工作目录里 agy 自己写的图片（除了原图）
+  // 收图：brain/<conversation_id>/ + 工作目录里 agy 自己写的图片（除了原图）
   const found = [];
   if (conversationId && /^[A-Za-z0-9._-]+$/.test(conversationId)) {
     found.push(...(await listImages(path.join(BRAIN_ROOT, conversationId))));
   }
-  for (const img of await listImages(runDir)) {
+  for (const img of await listImages(workDir)) {
     if (img.full !== inputPath) found.push(img);
+  }
+  const genCalls = await findGenerateImageCalls(startedAt, inputPath).catch(() => []);
+  // 主会话目录里没有图时，去生图子智能体的会话目录里找
+  if (found.length === 0) {
+    for (const c of genCalls) {
+      if (c.conversationId !== conversationId) {
+        found.push(...(await listImages(path.join(BRAIN_ROOT, c.conversationId))));
+      }
+    }
   }
   const images = [];
   let i = 0;
   for (const img of found) {
+    if (img.mtimeMs < startedAt - 5000) continue; // 不是这一次生成的
     i += 1;
     const name = `${String(i).padStart(2, "0")}-${img.name}`;
     await fsp.copyFile(img.full, path.join(outDir, name)).catch(() => {});
@@ -369,33 +474,51 @@ async function handleRefine(req, res) {
       url: `/runs/${runId}/out/${encodeURIComponent(name)}`,
       fileName: img.name,
       bytes: img.size,
-      readyAfterSec: Math.round((img.mtimeMs - startedAt) / 100) / 10,
+      readyAfterSec: sec(img.mtimeMs - startedAt),
+      mtimeMs: img.mtimeMs,
     });
   }
+  await fsp.rm(workDir, { recursive: true, force: true }).catch(() => {});
 
+  // 出了图就算成功；agy 自己报的错（比如 503）降级成警告
+  const warnings = [];
+  if (killedReason && !violation) warnings.push("已结束 agy：" + killedReason);
+  if (!killedReason && !result) warnings.push(`agy 没有正常结束（退出码 ${exitCode}）`);
+  if (result && result.status && result.status !== "SUCCESS") {
+    warnings.push(`agy 返回状态 ${result.status}${result.error ? "：" + JSON.stringify(result.error) : ""}`);
+  }
   let error = "";
-  if (killedReason) error = "已结束 agy：" + killedReason;
-  else if (!result) error = `agy 没有正常结束（退出码 ${exitCode}）`;
-  else if (result.status && result.status !== "SUCCESS") error = `agy 返回状态 ${result.status}`;
-  if (!error && images.length === 0) error = "agy 跑完了，但没有找到生成的图片";
+  if (images.length === 0) {
+    error = violation ? "越权，已结束 agy：" + violation.detail : warnings.shift() || "agy 跑完了，但没有找到生成的图片";
+  }
+
+  // 三段耗时：准备（开始 → 调用生图）、生图（→ 图片写入）、收尾（→ 结束）
+  const firstImgAt = images.length ? Math.min(...images.map((x) => x.mtimeMs)) : 0;
+  const phases = {
+    prepSec: genStartAt ? sec(genStartAt - startedAt) : null,
+    genSec: genStartAt && firstImgAt ? sec(firstImgAt - genStartAt) : null,
+    tailSec: firstImgAt ? sec(Math.max(0, endedAt - firstImgAt)) : null,
+  };
 
   const done = {
     type: "done",
-    ok: !error,
+    ok: images.length > 0,
     error,
+    warnings,
+    violation,
     runId,
     runDir,
     conversationId,
     exitCode,
-    wallSeconds: Math.round((endedAt - startedAt) / 100) / 10,
-    firstImageToolAfterSec: firstImageToolAt ? Math.round((firstImageToolAt - startedAt) / 100) / 10 : null,
+    wallSeconds: sec(endedAt - startedAt),
+    phases,
     agyStatus: result && result.status,
     agySeconds: result && result.duration_seconds,
     usage: result && result.usage,
     response: (result && result.response) || "",
-    resultError: result && result.error,
     toolCalls,
-    images,
+    genCalls,
+    images: images.map(({ mtimeMs, ...rest }) => rest),
     stderrTail: stderrTail.trim().slice(-2000),
     prompt: message,
     model: model || "",
@@ -406,7 +529,8 @@ async function handleRefine(req, res) {
   send(done);
   res.end();
   console.log(
-    `[${beijingTime()}] ${runId} ${done.ok ? "成功" : "失败"} ${done.wallSeconds}s 图片 ${images.length} 张${error ? " " + error : ""}`,
+    `[${beijingTime()}] ${runId} ${done.ok ? "成功" : "失败"} ${done.wallSeconds}s 图片 ${images.length} 张` +
+      `${error ? " " + error : ""}${warnings.length ? " 警告：" + warnings.join("；") : ""}`,
   );
 }
 

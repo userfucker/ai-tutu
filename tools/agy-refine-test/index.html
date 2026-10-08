@@ -134,15 +134,20 @@
   .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; place-items: center; z-index: 10; cursor: zoom-out; padding: 16px; }
   .lightbox.show { display: grid; }
   .lightbox img { max-width: 100%; max-height: 100%; }
+  .check { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 13px; cursor: pointer; }
+  .check input { width: 16px; height: 16px; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 8px; padding: 8px 10px; background: var(--soft); border-radius: 10px; }
+  .note.warn { color: var(--warn); background: var(--warn-bg); }
+  .steps .sep { color: var(--text); font-weight: 600; margin-top: 4px; }
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--accent); color: var(--accent-text); padding: 8px 16px; border-radius: 999px; display: none; z-index: 11; }
 </style>
-</head>
+
 <body>
 <div class="page">
   <header>
     <span class="pill">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/></svg>
-      AI 产品精修 · agy 测试版
+      AI 产品精修 · agy 测试版 v2
     </span>
     <h1>一键智能产品精修</h1>
     <p class="sub">上传产品图片，AI 自动分析并优化画质、去除瑕疵、增强细节</p>
@@ -201,33 +206,56 @@
               <option value="1:4">1:4 超长竖版</option>
             </select>
           </label>
-          <label class="f">清晰度
-            <select id="resolution">
-              <option value="512">0.5K 快速</option>
-              <option value="1024">1K 标准</option>
-              <option value="2048">2K 高清</option>
-              <option value="4096">4K 超清</option>
+          <label class="f">输出尺寸
+            <select id="outSize">
+              <option value="800">800×800</option>
+              <option value="1024">1K（1024×1024）</option>
+              <option value="2048">2K（2048×2048）</option>
+              <option value="original">保持 AI 原图</option>
             </select>
           </label>
         </div>
-        <div class="hint">这里的“模型”是 agy 里负责看图、写提示词的智能体模型；真正画图的是 agy 自带的 generate_image 工具。比例和清晰度没有专门的参数，只能写进提示词，实际尺寸以结果里量出来的为准。</div>
+        <div class="note" id="sizeNote"></div>
+        <div class="hint">“模型”是 agy 里负责看图、写画面描述的模型；画图用的是 agy 自带的生图工具，它没有清晰度参数（1:1 出图是 1024×1024），输出尺寸由本程序缩放得到。</div>
       </section>
 
       <!-- 测试设置 -->
       <section class="card">
         <details id="advanced">
           <summary>测试设置（高级）</summary>
-          <label class="f" style="margin-top:12px">同时处理几张
-            <select id="concurrency">
-              <option value="1">1 张（测速度时用这个）</option>
-              <option value="2">2 张</option>
-              <option value="3">3 张</option>
-            </select>
-          </label>
+          <div class="grid2">
+            <label class="f">生成方式
+              <select id="genMode">
+                <option value="pad">按原图比例生成，再补边</option>
+                <option value="ai">让 AI 直接按目标比例生成</option>
+              </select>
+            </label>
+            <label class="f">调用模式
+              <select id="callMode">
+                <option value="direct">直接调用 generate_image</option>
+                <option value="delegate">委派 image-generator</option>
+              </select>
+            </label>
+            <label class="f">输出格式
+              <select id="format">
+                <option value="jpeg">JPG（质量 92）</option>
+                <option value="png">PNG</option>
+              </select>
+            </label>
+            <label class="f">同时处理几张
+              <select id="concurrency">
+                <option value="1">1 张（测速度用）</option>
+                <option value="2">2 张</option>
+                <option value="3">3 张</option>
+              </select>
+            </label>
+          </div>
+          <div class="hint">“按原图比例生成，再补边”：AI 不用重新构图，产品角度不会变，比例由本程序补边得到（白底补白色，原图背景补边缘的平均色）。“让 AI 直接按目标比例生成”：AI 会重新构图，角度可能变。<br>没出图时自动再试 1 次，第 2 次用“委派 image-generator”。</div>
+          <label class="check"><input type="checkbox" id="guard" checked> 发现越权操作（运行命令、看别的文件等）立即结束这一张</label>
           <label class="f" style="margin-top:12px">发给 agy 的提示词模板
             <textarea id="template" class="mono" spellcheck="false"></textarea>
           </label>
-          <div class="hint">可用占位符：{{图片路径}}（程序自动填原图路径）、{{背景要求}}、{{比例要求}}、{{额外要求}}。改动会自动保存在这个浏览器里。</div>
+          <div class="hint">占位符：{{图片路径}}（程序自动填）、{{调用说明}}（按调用模式生成，含比例参数）、{{背景要求}}、{{构图要求}}、{{额外要求}}。改动会自动保存在这个浏览器里。</div>
           <div class="row">
             <button class="btn small" id="resetTemplate" type="button">恢复默认模板</button>
             <button class="btn small" id="previewPrompt" type="button">预览第 1 张图的提示词</button>
@@ -271,27 +299,34 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const MAX_FILES = 50;
+const TEMPLATE_KEY = "template-v2"; // 第一版的模板不再沿用
 
-const DEFAULT_TEMPLATE = `你是一名专业的电商产品图精修师。需要精修的产品原图在：{{图片路径}}
+const DEFAULT_TEMPLATE = `你是电商产品图精修师。产品原图：{{图片路径}}
 
-请直接按下面的步骤完成，不要向我提问，也不要做与精修无关的事情：
-1. 先用 view_file 打开这张原图，仔细看清产品的外形、颜色、材质、图案、文字和 Logo。
-2. 调用 generate_image 工具生成 1 张精修后的产品图，ImageName 用 refined。
-   如果 generate_image 有传入参考图或原图的参数（例如 ImagePaths），一定要把上面这张原图的完整路径传进去，在原图的基础上精修，而不是重新画一个新产品。
-   给 generate_image 的 Prompt 用英文写，把下面的要求全部写进去。
-3. 精修要求：
-   - 必须是原图里的同一个产品：外形、比例、颜色、材质、图案、文字和 Logo 都不能改，不能增加或减少部件。
-   - 去除灰尘、划痕、瑕疵和噪点，提升清晰度和细节，光线均匀柔和，质感真实，达到电商平台主图的水准。
-   - 背景：{{背景要求}}
-   - {{比例要求}}
-   - 用户的额外要求：{{额外要求}}
-4. 只生成 1 张图。完成后用一两句中文说明你做了哪些处理。`;
+只做下面 3 件事，按顺序做完就结束：
+1. 用 view_file 查看这张原图（只看这一个文件）。
+2. {{调用说明}}
+3. 用一两句中文说明做了哪些处理。
+
+禁止：运行任何命令、查看或搜索其他文件和目录、上网搜索、向我提问。生图工具的用法上面已经写清楚，不需要再确认或调查。
+
+英文 Prompt 必须包含以下全部要求：
+- 必须是参考图里的同一个产品：外形、结构、颜色、材质、图案、文字、Logo、零件数量都不能改，不能增加或减少任何部件。
+- 保持原图的拍摄角度、透视、产品朝向和摆放方式完全不变；线缆、线束和配件的走向与位置也不变；不要旋转、翻转或重新摆放任何部分。
+- 去除灰尘、划痕、瑕疵和噪点，提升清晰度和细节，光线均匀柔和，质感真实，达到电商平台主图的水准。
+- 背景：{{背景要求}}
+- 构图：{{构图要求}}
+- 用户的额外要求：{{额外要求}}`;
 
 const BACKGROUND_TEXT = {
-  white: "换成纯白色（RGB 255,255,255）的干净背景，去掉原背景里的所有杂物；产品居中，四周留出适当空白；可以保留产品下方自然、轻微的投影。",
-  original: "保留原图的背景、场景和构图，只清理背景里明显的杂物和污点，不要换背景。",
+  white: "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物和阴影边缘；可以保留产品下方自然、轻微的接触投影。",
+  original: "保留原图的背景和场景，只清理背景里明显的杂物和污点，不要换背景。",
 };
-const RES_LABEL = { 512: "0.5K 快速", 1024: "1K 标准", 2048: "2K 高清", 4096: "4K 超清" };
+const SIZE_LABEL = { 800: "800", 1024: "1K", 2048: "2K", original: "保持 AI 原图" };
+// generate_image 的 AspectRatio 常用值（Gemini 生图支持的比例）。按原图比例生成时从这里挑最接近的。
+const AI_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+const MODE_LABEL = { direct: "直接调用 generate_image", delegate: "委派 image-generator" };
+const GEN_LABEL = { pad: "按原图比例生成，再补边", ai: "让 AI 直接按目标比例生成" };
 
 // ---------------------------------------------------------------- 小工具
 
@@ -322,29 +357,26 @@ function simpleRatio(w, h) {
   const a = w / g, b = h / g;
   return a <= 50 && b <= 50 ? `${a}:${b}` : (w / h).toFixed(3);
 }
+function ratioValue(r) { const [a, b] = r.split(":").map(Number); return a / b; }
+function closestAiRatio(w, h) {
+  const v = Math.log(w / h);
+  return AI_RATIOS.reduce((best, r) => (Math.abs(Math.log(ratioValue(r)) - v) < Math.abs(Math.log(ratioValue(best)) - v) ? r : best));
+}
 function fmtBytes(n) {
   if (!n && n !== 0) return "";
   return n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " KB";
 }
-function loadImageSize(url) {
+function loadImage(url) {
   return new Promise((resolve) => {
     const img = new Image();
-    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onload = () => resolve(img);
     img.onerror = () => resolve(null);
     img.src = url;
   });
 }
-
-/** 目标尺寸：长边 = 清晰度（512/1024/2048/4096），短边按比例算，取 8 的倍数。 */
-function targetSize(ratio, res, src) {
-  let a, b;
-  if (ratio === "auto") { a = src.w; b = src.h; }
-  else [a, b] = ratio.split(":").map(Number);
-  const long = Number(res);
-  const round8 = (x) => Math.max(8, Math.round(x / 8) * 8);
-  return a >= b
-    ? { w: long, h: round8((long * b) / a), a, b }
-    : { w: round8((long * a) / b), h: long, a, b };
+/** 比例 r（宽/高）、长边 L → 宽×高 */
+function sizeFor(r, L) {
+  return r >= 1 ? { w: L, h: Math.round(L / r) } : { w: Math.round(L * r), h: L };
 }
 
 // ---------------------------------------------------------------- 上传
@@ -361,6 +393,7 @@ function renderThumbs() {
       <button type="button" data-remove="${f.id}" aria-label="移除">×</button>
     </div>`).join("");
   updateStartBtn();
+  updateSizeNote();
 }
 
 async function addFiles(list) {
@@ -375,8 +408,8 @@ async function addFiles(list) {
       r.onerror = reject;
       r.readAsDataURL(file);
     });
-    const size = (await loadImageSize(dataUrl)) || { w: 0, h: 0 };
-    files.push({ id: nextId++, name: file.name, size: file.size, dataUrl, base64: dataUrl.split(",")[1], w: size.w, h: size.h });
+    const img = await loadImage(dataUrl);
+    files.push({ id: nextId++, name: file.name, size: file.size, dataUrl, base64: dataUrl.split(",")[1], w: img?.naturalWidth || 0, h: img?.naturalHeight || 0 });
   }
   renderThumbs();
 }
@@ -396,19 +429,23 @@ $("thumbs").addEventListener("click", (e) => {
 
 // ---------------------------------------------------------------- 设置
 
-const settingIds = ["requirement", "background", "ratio", "resolution", "concurrency"];
+const settingIds = ["requirement", "background", "ratio", "outSize", "genMode", "callMode", "format", "concurrency"];
+const DEFAULTS = { ratio: "1:1", outSize: "800", genMode: "pad", callMode: "direct", format: "jpeg" };
 for (const id of settingIds) {
   const saved = store(id);
-  if (saved !== null) $(id).value = saved;
-  $(id).addEventListener("change", () => store(id, $(id).value));
+  const el = $(id);
+  const valid = saved !== null && (el.tagName !== "SELECT" || [...el.options].some((o) => o.value === saved));
+  if (valid) el.value = saved;
+  else if (DEFAULTS[id]) el.value = DEFAULTS[id];
+  $(id).addEventListener("change", () => { store(id, $(id).value); updateSizeNote(); });
 }
-if (!store("resolution")) $("resolution").value = "2048";
-if (!store("ratio")) $("ratio").value = "1:1";
-$("template").value = store("template") || DEFAULT_TEMPLATE;
-$("template").addEventListener("input", () => store("template", $("template").value));
+$("guard").checked = store("guard") !== "0";
+$("guard").addEventListener("change", () => store("guard", $("guard").checked ? "1" : "0"));
+$("template").value = store(TEMPLATE_KEY) || DEFAULT_TEMPLATE;
+$("template").addEventListener("input", () => store(TEMPLATE_KEY, $("template").value));
 $("resetTemplate").addEventListener("click", () => {
   $("template").value = DEFAULT_TEMPLATE;
-  store("template", DEFAULT_TEMPLATE);
+  store(TEMPLATE_KEY, DEFAULT_TEMPLATE);
   toast("已恢复默认模板");
 });
 $("model").addEventListener("change", () => store("model", $("model").value));
@@ -451,30 +488,60 @@ function settings() {
     background: $("background").value,
     ratio: $("ratio").value,
     ratioLabel: $("ratio").selectedOptions[0].textContent,
-    resolution: $("resolution").value,
+    outSize: $("outSize").value,
+    genMode: $("genMode").value,
+    callMode: $("callMode").value,
+    format: $("format").value,
     concurrency: Number($("concurrency").value) || 1,
+    guard: $("guard").checked,
     template: $("template").value,
   };
 }
 
-function buildPrompt(s, f) {
-  const t = targetSize(s.ratio, s.resolution, f);
-  const resText = RES_LABEL[s.resolution];
-  const ratioText = s.ratio === "auto"
-    ? `画面比例：和原图保持一致（原图 ${f.w}×${f.h}，约 ${simpleRatio(f.w, f.h)}）。目标尺寸约 ${t.w}×${t.h} 像素（${resText}）。`
-    : `画面比例：${s.ratioLabel}。目标尺寸约 ${t.w}×${t.h} 像素（${resText}）。如果原图比例不同，请重新构图（扩展背景或调整留白），不要拉伸、压扁或裁掉产品。`;
+/** 这张图交给 AI 的比例（AspectRatio）和最终输出的比例。 */
+function plan(s, f) {
+  const srcRatio = f.w && f.h ? f.w / f.h : 1;
+  const aiRatio = s.genMode === "pad" || s.ratio === "auto" ? closestAiRatio(f.w || 1, f.h || 1) : s.ratio;
+  const finalRatio = s.ratio === "auto" ? null : ratioValue(s.ratio); // null = 跟 AI 出图一致
+  return { srcRatio, aiRatio, finalRatio };
+}
+
+function updateSizeNote() {
+  const s = settings();
+  const el = $("sizeNote");
+  if (s.outSize === "original") {
+    el.className = "note";
+    el.textContent = "不缩放：AI 出多大就是多大（1:1 时是 1024×1024）。" + (s.genMode === "pad" && s.ratio !== "auto" ? "注意：按原图比例生成时，不缩放就不会补成所选比例。" : "");
+    return;
+  }
+  const L = Number(s.outSize);
+  const size = s.ratio === "auto" ? `长边 ${L} 像素，比例跟 AI 出图一致` : (() => { const t = sizeFor(ratioValue(s.ratio), L); return `${t.w}×${t.h}`; })();
+  el.className = L > 1024 ? "note warn" : "note";
+  el.textContent = `最终输出：${size}，${s.format === "png" ? "PNG" : "JPG"}。` + (L > 1024 ? "AI 出图长边约 1024，2K 是放大出来的，细节不会增加。" : "");
+}
+
+function buildPrompt(s, f, mode) {
+  const p = plan(s, f);
+  const call = mode === "delegate"
+    ? `立即调用 invoke_subagent，子智能体类型 image-generator，让它只调用一次 generate_image，参数：ImageName: "refined"；AspectRatio: "${p.aiRatio}"；ImagePaths: ["{{图片路径}}"]；Prompt: 你看完原图后用英文写的画面描述（写进交给它的说明里，让它原样使用）。`
+    : `立即调用一次 generate_image 工具，参数：ImageName: "refined"；AspectRatio: "${p.aiRatio}"；ImagePaths: ["{{图片路径}}"]（原图作为参考图）；Prompt: 你看完原图后用英文写的画面描述。`;
+  const compose = s.genMode === "pad" || s.ratio === "auto"
+    ? `画面比例 ${p.aiRatio}（和原图接近）。保持原图的取景、产品在画面中的位置和大小，不要裁掉产品任何部分，不要重新构图。`
+    : `画面比例 ${p.aiRatio}。产品完整显示、居中，四周留出适当空白；只能扩展或收缩背景来适应比例，产品本身的角度和摆放仍然不能变。`;
   return {
-    target: t,
+    plan: p,
     prompt: s.template
+      .split("{{调用说明}}").join(call)
       .split("{{背景要求}}").join(BACKGROUND_TEXT[s.background])
-      .split("{{比例要求}}").join(ratioText)
+      .split("{{构图要求}}").join(compose)
       .split("{{额外要求}}").join(s.requirement || "无"),
   };
 }
 
 $("previewPrompt").addEventListener("click", () => {
   if (!files.length) { toast("先上传一张图"); return; }
-  const { prompt } = buildPrompt(settings(), files[0]);
+  const s = settings();
+  const { prompt } = buildPrompt(s, files[0], s.callMode);
   alert(prompt.split("{{图片路径}}").join("<运行时自动填入原图路径>"));
 });
 
@@ -482,11 +549,71 @@ function updateStartBtn() {
   $("startBtn").disabled = running || files.length === 0;
 }
 
+// ---------------------------------------------------------------- 输出尺寸（浏览器里缩放、补边）
+
+/** 边缘一圈像素的平均色；接近白色就直接用纯白。 */
+function edgeColor(img) {
+  const c = document.createElement("canvas");
+  c.width = 64; c.height = 64;
+  const g = c.getContext("2d");
+  g.drawImage(img, 0, 0, 64, 64);
+  const d = g.getImageData(0, 0, 64, 64).data;
+  let r = 0, gr = 0, b = 0, n = 0;
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+    if (x > 1 && x < 62 && y > 1 && y < 62) continue;
+    const i = (y * 64 + x) * 4;
+    r += d[i]; gr += d[i + 1]; b += d[i + 2]; n++;
+  }
+  r = Math.round(r / n); gr = Math.round(gr / n); b = Math.round(b / n);
+  return r > 235 && gr > 235 && b > 235 ? "#ffffff" : `rgb(${r},${gr},${b})`;
+}
+
+/** AI 出图 → 最终输出（等比缩放完整放进目标尺寸，空的地方补边）。 */
+async function makeOutput(job, ai) {
+  const s = batch;
+  if (s.outSize === "original") return { ...ai, same: true };
+  const img = await loadImage(ai.url);
+  if (!img) return null;
+  const r = job.plan.finalRatio || img.naturalWidth / img.naturalHeight;
+  const { w, h } = sizeFor(r, Number(s.outSize));
+  const scale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+  const dw = Math.round(img.naturalWidth * scale), dh = Math.round(img.naturalHeight * scale);
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d");
+  g.fillStyle = s.background === "white" ? "#ffffff" : edgeColor(img);
+  g.fillRect(0, 0, w, h);
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = "high";
+  g.drawImage(img, Math.round((w - dw) / 2), Math.round((h - dh) / 2), dw, dh);
+  const type = s.format === "png" ? "image/png" : "image/jpeg";
+  const blob = await new Promise((resolve) => c.toBlob(resolve, type, 0.92));
+  return {
+    url: URL.createObjectURL(blob),
+    w, h,
+    bytes: blob.size,
+    ext: s.format === "png" ? ".png" : ".jpg",
+    upscaled: scale > 1.001,
+    padded: dw < w - 1 || dh < h - 1,
+  };
+}
+
 // ---------------------------------------------------------------- 运行
 
 let running = false;
 let jobs = []; // 每张图一条结果
 let batch = null; // 这一批的设置
+
+function picHtml(label, o, extraTags, downloadName) {
+  return `<div class="pic">
+    <img src="${esc(o.url)}" alt="">
+    <div class="cap">
+      <span>${label} ${o.w ? o.w + "×" + o.h : ""}</span>${extraTags || ""}
+      <span>${fmtBytes(o.bytes)}</span>
+      ${downloadName ? `<a href="${esc(o.url)}" download="${esc(downloadName)}">下载</a>` : ""}
+    </div>
+  </div>`;
+}
 
 function renderJob(j) {
   let el = document.getElementById("job" + j.id);
@@ -499,52 +626,62 @@ function renderJob(j) {
   const elapsed = j.startedAt ? ((j.endedAt || Date.now()) - j.startedAt) / 1000 : 0;
   const statusTag = {
     waiting: `<span class="tag">排队中</span>`,
-    running: `<span class="tag warn"><span class="spin"></span> 生成中 ${elapsed.toFixed(0)} 秒</span>`,
-    ok: `<span class="tag ok">完成 ${j.result?.wallSeconds ?? elapsed.toFixed(1)} 秒</span>`,
-    fail: `<span class="tag bad">失败${j.result?.wallSeconds ? " " + j.result.wallSeconds + " 秒" : ""}</span>`,
+    running: `<span class="tag warn"><span class="spin"></span> 生成中 ${elapsed.toFixed(0)} 秒${j.attempts.length > 1 ? "（第 2 次）" : ""}</span>`,
+    ok: `<span class="tag ok">完成 ${elapsed.toFixed(1)} 秒</span>`,
+    fail: `<span class="tag bad">失败 ${elapsed.toFixed(1)} 秒</span>`,
     cancel: `<span class="tag">已取消</span>`,
   }[j.status];
+  const last = j.attempts[j.attempts.length - 1];
+  const r = last?.result;
+  const base = j.file.name.replace(/\.[^.]+$/, "");
 
-  const outputs = (j.outputs || []).map((o) => {
-    const ratioOk = o.w && Math.abs(o.w / o.h - j.target.a / j.target.b) / (j.target.a / j.target.b) < 0.03;
-    const longOk = o.w && Math.abs(Math.max(o.w, o.h) - Math.max(j.target.w, j.target.h)) / Math.max(j.target.w, j.target.h) < 0.1;
-    return `<div class="pic">
-      <img src="${esc(o.url)}" alt="">
-      <div class="cap">
-        <span>精修图 ${o.w ? o.w + "×" + o.h : ""}</span>
-        ${o.w ? `<span class="tag ${ratioOk ? "ok" : "bad"}">比例${ratioOk ? "✔" : "✘ " + simpleRatio(o.w, o.h)}</span>
-        <span class="tag ${longOk ? "ok" : "bad"}">清晰度${longOk ? "✔" : "✘"}</span>` : ""}
-        <span>${fmtBytes(o.bytes)}</span>
-        <a href="${esc(o.url)}" download="${esc(j.file.name.replace(/\.[^.]+$/, ""))}-精修${esc((o.url.match(/\.[a-z]+$/i) || [".png"])[0])}">下载</a>
-      </div>
-    </div>`;
-  }).join("");
-  const placeholder = !j.outputs?.length
-    ? `<div class="pic"><div class="waiting">${j.status === "running" ? '<span><span class="spin"></span> 等待 agy 生成…</span>' : j.status === "waiting" ? "排队中" : "没有生成图片"}</div></div>`
-    : "";
+  let pics = "";
+  for (const o of j.outputs) {
+    const ai = o.ai;
+    const aiOk = ai.w && Math.abs(Math.log(ai.w / ai.h) - Math.log(ratioValue(j.plan.aiRatio))) < 0.03;
+    pics += picHtml("AI 原图", ai, ` <span class="tag ${aiOk ? "ok" : "bad"}">比例 ${esc(j.plan.aiRatio)}${aiOk ? "✔" : "✘"}</span>`, `${base}-AI原图${(ai.url.match(/\.[a-z]+$/i) || [".png"])[0]}`);
+    if (o.final && !o.final.same) {
+      const tags = (o.final.padded ? ` <span class="tag">补边</span>` : "") + (o.final.upscaled ? ` <span class="tag warn">放大</span>` : "");
+      pics += picHtml("最终输出", o.final, tags, `${base}-精修-${o.final.w}x${o.final.h}${o.final.ext}`);
+    }
+  }
+  if (!j.outputs.length) {
+    pics = `<div class="pic"><div class="waiting">${j.status === "running" ? '<span><span class="spin"></span> 等待 agy 生成…</span>' : j.status === "waiting" ? "排队中" : "没有生成图片"}</div></div>`;
+  }
 
-  const steps = (j.steps || []).map((s) => `<div>${esc(s)}</div>`).join("");
+  const steps = j.attempts.map((a, idx) =>
+    (j.attempts.length > 1 ? `<div class="sep">第 ${idx + 1} 次：${MODE_LABEL[a.mode]}</div>` : "") +
+    a.steps.map((s) => `<div>${esc(s)}</div>`).join("")).join("");
+  const ph = r?.phases;
+  const phaseText = ph && ph.prepSec != null
+    ? `<span class="tag">准备 ${ph.prepSec}s · 生图 ${ph.genSec ?? "-"}s · 收尾 ${ph.tailSec ?? "-"}s</span>` : "";
+  const warns = j.attempts.flatMap((a) => a.result?.warnings || []);
+
   el.innerHTML = `
     <div class="item-head">
       <span class="item-name">${esc(j.file.name)}</span>
       ${statusTag}
-      <span class="tag">目标 ${j.target.w}×${j.target.h}</span>
+      <span class="tag">AI 比例 ${esc(j.plan.aiRatio)} → ${esc(j.finalLabel)}</span>
+      ${phaseText}
     </div>
     <div class="pair">
-      <div class="pic"><img src="${j.file.dataUrl}" alt=""><div class="cap"><span>原图 ${j.file.w}×${j.file.h}</span><span>${fmtBytes(j.file.size)}</span></div></div>
-      ${outputs}${placeholder}
+      ${picHtml("原图", { url: j.file.dataUrl, w: j.file.w, h: j.file.h, bytes: j.file.size })}
+      ${pics}
     </div>
     ${steps ? `<div class="steps">${steps}</div>` : ""}
     ${j.text ? `<div class="reply">${esc(j.text)}</div>` : ""}
+    ${warns.length ? `<div class="err" style="color:var(--warn)">警告：${esc(warns.join("；"))}</div>` : ""}
     ${j.error ? `<div class="err">${esc(j.error)}</div>` : ""}`;
 }
 
 function renderSummary() {
   const c = { ok: 0, fail: 0, running: 0, waiting: 0, cancel: 0 };
   jobs.forEach((j) => c[j.status]++);
-  const done = jobs.filter((j) => j.result?.ok);
-  const avg = done.length ? (done.reduce((s, j) => s + j.result.wallSeconds, 0) / done.length).toFixed(1) : "-";
-  $("summary").textContent = `共 ${jobs.length} 张：完成 ${c.ok}，失败 ${c.fail}，进行中 ${c.running}，排队 ${c.waiting}${c.cancel ? "，取消 " + c.cancel : ""} · 成功的平均 ${avg} 秒/张`;
+  const done = jobs.filter((j) => j.status === "ok");
+  const avg = done.length ? (done.reduce((s, j) => s + (j.endedAt - j.startedAt) / 1000, 0) / done.length).toFixed(1) : "-";
+  const gens = done.map((j) => j.attempts[j.attempts.length - 1].result?.phases?.genSec).filter((x) => x != null);
+  const avgGen = gens.length ? (gens.reduce((a, b) => a + b, 0) / gens.length).toFixed(1) : "-";
+  $("summary").textContent = `共 ${jobs.length} 张：完成 ${c.ok}，失败 ${c.fail}，进行中 ${c.running}，排队 ${c.waiting}${c.cancel ? "，取消 " + c.cancel : ""} · 成功的平均 ${avg} 秒/张（其中生图 ${avgGen} 秒）`;
   $("toolbar").hidden = jobs.length === 0;
   $("empty").style.display = jobs.length ? "none" : "";
   $("stopBtn").disabled = !running;
@@ -561,90 +698,111 @@ function shortParams(p) {
   return s.length > 300 ? s.slice(0, 300) + "…" : s;
 }
 
+/** 跑一次 agy（一次尝试）。返回 done 事件；取消时抛 AbortError。 */
+async function runAttempt(j, a) {
+  const r = await fetch("/api/refine", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileName: j.file.name, imageBase64: j.file.base64, prompt: a.prompt, model: batch.model, guard: batch.guard }),
+    signal: j.controller.signal,
+  });
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${r.status}`);
+  }
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (line.trim()) handleEvent(j, a, JSON.parse(line));
+    }
+  }
+  if (!a.result) throw new Error("连接断开，没有收到结果");
+  return a.result;
+}
+
+function handleEvent(j, a, ev) {
+  if (ev.type === "start") {
+    a.steps.push(`0s 启动 agy（结果目录 runs/${ev.runId}）`);
+  } else if (ev.type === "init") {
+    a.steps.push(`agy 会话 ${ev.conversationId}`);
+  } else if (ev.type === "tool") {
+    const what = ev.name === "invoke_subagent" ? "委派子智能体" : "调用";
+    if (ev.state === "ACTIVE") a.steps.push(`${ev.at}s ${what} ${ev.name} ${shortParams(ev.parameters)}`);
+    else a.steps.push(`${ev.at}s ${ev.name} 完成${ev.seconds ? `（${Number(ev.seconds).toFixed(1)} 秒）` : ""}`);
+  } else if (ev.type === "violation") {
+    a.steps.push(`${ev.at}s ⚠ 越权，已结束：${ev.detail}`);
+  } else if (ev.type === "text") {
+    j.text += ev.text;
+  } else if (ev.type === "done") {
+    a.result = ev;
+    if (ev.response) j.text = ev.response;
+  }
+  renderJob(j);
+}
+
 async function runJob(j) {
   j.status = "running";
   j.startedAt = Date.now();
-  j.steps = [];
-  j.text = "";
-  j.events = [];
   j.controller = new AbortController();
-  renderJob(j);
-  try {
-    const r = await fetch("/api/refine", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileName: j.file.name, imageBase64: j.file.base64, prompt: j.prompt, model: batch.model }),
-      signal: j.controller.signal,
-    });
-    if (!r.ok) {
-      const data = await r.json().catch(() => ({}));
-      throw new Error(data.error || `HTTP ${r.status}`);
-    }
-    const reader = r.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let nl;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        if (line.trim()) handleEvent(j, JSON.parse(line));
+  const modes = [batch.callMode, "delegate"]; // 没出图就用委派模式再试一次
+  for (let k = 0; k < modes.length && running; k++) {
+    const a = { mode: modes[k], prompt: buildPrompt(batch, j.file, modes[k]).prompt, steps: [], result: null };
+    j.attempts.push(a);
+    j.text = "";
+    j.error = "";
+    try {
+      const res = await runAttempt(j, a);
+      if (res.ok) {
+        for (const img of res.images) {
+          const el = await loadImage(img.url);
+          const ai = { ...img, w: el?.naturalWidth, h: el?.naturalHeight };
+          j.outputs.push({ ai, final: await makeOutput(j, ai) });
+        }
+        j.status = "ok";
+        break;
       }
-    }
-    if (!j.result) throw new Error("连接断开，没有收到结果");
-  } catch (e) {
-    if (j.status === "running") {
-      j.status = e.name === "AbortError" ? "cancel" : "fail";
-      j.error = e.name === "AbortError" ? "" : (j.error || e.message);
+      j.error = res.error + (res.stderrTail ? "\nagy 错误输出：" + res.stderrTail : "");
+    } catch (e) {
+      if (e.name === "AbortError") { j.status = "cancel"; break; }
+      j.error = e.message;
     }
   }
+  if (j.status === "running") j.status = running ? "fail" : "cancel";
   j.endedAt = Date.now();
   renderJob(j);
   renderSummary();
 }
 
-async function handleEvent(j, ev) {
-  if (ev.type === "start") {
-    j.steps.push(`${(0).toFixed(1)}s 启动 agy（结果目录 runs/${ev.runId}）`);
-  } else if (ev.type === "init") {
-    j.steps.push(`agy 会话 ${ev.conversationId}，可用工具 ${ev.tools.length} 个${ev.tools.includes("generate_image") ? "（含 generate_image）" : "（⚠ 没有 generate_image）"}`);
-  } else if (ev.type === "tool") {
-    if (ev.state === "ACTIVE") j.steps.push(`${ev.at}s 调用 ${ev.name} ${shortParams(ev.parameters)}`);
-    else j.steps.push(`${ev.at}s ${ev.name} 完成${ev.seconds ? `（${ev.seconds} 秒）` : ""}`);
-  } else if (ev.type === "text") {
-    j.text += ev.text;
-  } else if (ev.type === "done") {
-    j.result = ev;
-    j.status = ev.ok ? "ok" : "fail";
-    j.error = ev.error + (ev.stderrTail && !ev.ok ? "\nagy 错误输出：" + ev.stderrTail : "");
-    if (ev.response) j.text = ev.response;
-    j.outputs = [];
-    for (const img of ev.images) {
-      const size = await loadImageSize(img.url);
-      j.outputs.push({ ...img, w: size?.w, h: size?.h });
-    }
-  }
-  renderJob(j);
-}
-
 $("startBtn").addEventListener("click", async () => {
   if (running || !files.length) return;
   const s = settings();
-  if (!s.template.includes("{{图片路径}}")) {
-    toast("提示词模板里必须有 {{图片路径}}");
+  if (!s.template.includes("{{图片路径}}") || !s.template.includes("{{调用说明}}")) {
+    toast("提示词模板里必须有 {{图片路径}} 和 {{调用说明}}");
     return;
   }
   batch = { ...s, startedAt: Date.now() };
   running = true;
   updateStartBtn();
+  jobs.forEach((j) => j.outputs.forEach((o) => o.final && !o.final.same && URL.revokeObjectURL(o.final.url)));
   $("list").innerHTML = "";
   let id = 0;
   jobs = files.map((f) => {
-    const { prompt, target } = buildPrompt(s, f);
-    return { id: ++id, file: f, prompt, target, status: "waiting" };
+    const p = plan(s, f);
+    let finalLabel = "不缩放";
+    if (s.outSize !== "original") {
+      const L = Number(s.outSize);
+      if (p.finalRatio) { const t = sizeFor(p.finalRatio, L); finalLabel = `输出 ${t.w}×${t.h}`; }
+      else finalLabel = `输出长边 ${L}`;
+    }
+    return { id: ++id, file: f, plan: p, finalLabel, status: "waiting", attempts: [], outputs: [], text: "", error: "" };
   });
   jobs.forEach(renderJob);
   renderSummary();
@@ -674,43 +832,59 @@ $("clearBtn").addEventListener("click", () => {
 
 // ---------------------------------------------------------------- 结果日志
 
+function cut(s, n) { s = String(s ?? ""); return s.length > n ? s.slice(0, n) + "…" : s; }
+
 $("copyLog").addEventListener("click", async () => {
   if (!jobs.length) return;
   const b = batch;
   const lines = [];
-  lines.push("# agy 产品精修测试结果");
+  lines.push("# agy 产品精修测试结果（v2）");
   lines.push(`时间（北京）：${beijingTime(b.startedAt)}${b.endedAt ? " ~ " + beijingTime(b.endedAt) : "（进行中）"}`);
   lines.push(`浏览器：${navigator.userAgent}`);
-  lines.push(`设置：模型 ${b.modelName}（${b.model || "默认"}）；背景 ${b.background === "white" ? "白底图" : "原图背景"}；比例 ${b.ratioLabel}；清晰度 ${RES_LABEL[b.resolution]}；同时处理 ${b.concurrency} 张`);
+  lines.push(`设置：模型 ${b.modelName}（${b.model || "默认"}）；背景 ${b.background === "white" ? "白底图" : "原图背景"}；比例 ${b.ratioLabel}；输出尺寸 ${SIZE_LABEL[b.outSize]}；格式 ${b.format === "png" ? "PNG" : "JPG"}`);
+  lines.push(`测试设置：生成方式 ${GEN_LABEL[b.genMode]}；调用模式 ${MODE_LABEL[b.callMode]}；越权即结束 ${b.guard ? "开" : "关"}；同时处理 ${b.concurrency} 张；模板${b.template === DEFAULT_TEMPLATE ? "默认" : "改过"}`);
   lines.push(`精修要求：${b.requirement || "（无）"}`);
-  lines.push(`提示词模板是否改过：${b.template === DEFAULT_TEMPLATE ? "没改（默认）" : "改过"}`);
   lines.push($("summary").textContent);
   lines.push("");
   for (const j of jobs) {
-    const r = j.result || {};
     lines.push(`## 第 ${j.id} 张：${j.file.name}`);
-    lines.push(`状态：${{ ok: "成功", fail: "失败", cancel: "已取消", waiting: "未开始", running: "进行中" }[j.status]}`);
-    lines.push(`原图：${j.file.w}×${j.file.h}，${fmtBytes(j.file.size)}；目标：${j.target.w}×${j.target.h}`);
-    if (r.runId) lines.push(`结果目录：${r.runDir}；agy 会话：${r.conversationId}；退出码：${r.exitCode}`);
-    if (r.wallSeconds != null) lines.push(`耗时：总 ${r.wallSeconds} 秒；开始调用 generate_image 在第 ${r.firstImageToolAfterSec ?? "-"} 秒；agy 自报 ${r.agySeconds ?? "-"} 秒`);
-    if (r.usage) lines.push(`用量：${JSON.stringify(r.usage)}`);
-    for (const o of j.outputs || []) {
-      lines.push(`输出图：${o.fileName}，${o.w}×${o.h}（约 ${o.w ? simpleRatio(o.w, o.h) : "?"}），${fmtBytes(o.bytes)}，开始后 ${o.readyAfterSec} 秒写入`);
+    lines.push(`状态：${{ ok: "成功", fail: "失败", cancel: "已取消", waiting: "未开始", running: "进行中" }[j.status]}${j.endedAt ? `，总 ${((j.endedAt - j.startedAt) / 1000).toFixed(1)} 秒` : ""}`);
+    lines.push(`原图：${j.file.w}×${j.file.h}，${fmtBytes(j.file.size)}；AI 比例 ${j.plan.aiRatio}；${j.finalLabel}`);
+    j.attempts.forEach((a, idx) => {
+      const r = a.result || {};
+      lines.push(`### 第 ${idx + 1} 次：${MODE_LABEL[a.mode]} → ${r.ok ? "出图" : "没出图"}`);
+      if (r.runId) lines.push(`结果目录：${r.runDir}；agy 会话：${r.conversationId}；退出码：${r.exitCode}；agy 状态：${r.agyStatus ?? "-"}`);
+      if (r.wallSeconds != null) {
+        const p = r.phases || {};
+        lines.push(`耗时：总 ${r.wallSeconds} 秒 = 准备 ${p.prepSec ?? "-"} + 生图 ${p.genSec ?? "-"} + 收尾 ${p.tailSec ?? "-"}；agy 自报 ${r.agySeconds ?? "-"} 秒`);
+      }
+      if (r.usage) lines.push(`用量：${JSON.stringify(r.usage)}`);
+      if (r.violation) lines.push(`越权：第 ${r.violation.at} 秒 ${r.violation.detail}`);
+      (r.warnings || []).forEach((w) => lines.push(`警告：${w}`));
+      if (r.error) lines.push(`错误：${r.error}`);
+      for (const g of r.genCalls || []) {
+        const { Prompt, ...rest } = g.args;
+        lines.push(`生图参数（会话 ${g.conversationId}）：${JSON.stringify(rest)}`);
+        if (Prompt) lines.push(`生图 Prompt：${cut(Prompt, 800)}`);
+      }
+      if (r.toolCalls?.length) {
+        lines.push("工具调用：");
+        for (const t of r.toolCalls) lines.push(`- ${t.at}s ${t.name}${t.seconds ? `（${Number(t.seconds).toFixed(1)} 秒）` : ""} ${cut(JSON.stringify(t.parameters ?? {}), 400)}`);
+      } else if (a.steps.length) {
+        a.steps.forEach((s) => lines.push("- " + s));
+      }
+      if (r.stderrTail && !r.ok) lines.push(`agy 错误输出：${cut(r.stderrTail, 600)}`);
+    });
+    for (const o of j.outputs) {
+      lines.push(`AI 原图：${o.ai.fileName}，${o.ai.w}×${o.ai.h}（约 ${o.ai.w ? simpleRatio(o.ai.w, o.ai.h) : "?"}），${fmtBytes(o.ai.bytes)}，开始后 ${o.ai.readyAfterSec} 秒写入`);
+      if (o.final && !o.final.same) lines.push(`最终输出：${o.final.w}×${o.final.h}，${fmtBytes(o.final.bytes)}${o.final.padded ? "，补边" : ""}${o.final.upscaled ? "，放大" : ""}`);
     }
-    if (r.toolCalls?.length) {
-      lines.push("工具调用：");
-      for (const t of r.toolCalls) lines.push(`- ${t.at}s ${t.name}${t.seconds ? `（${t.seconds} 秒）` : ""} 参数：${JSON.stringify(t.parameters ?? {})}`);
-    } else if (j.steps?.length) {
-      lines.push("过程：");
-      j.steps.forEach((s) => lines.push("- " + s));
-    }
-    if (j.text) lines.push(`agy 回复：${j.text.trim()}`);
-    if (j.error) lines.push(`错误：${j.error}`);
-    if (r.resultError) lines.push(`agy result.error：${JSON.stringify(r.resultError)}`);
+    if (j.text) lines.push(`agy 回复：${cut(j.text.trim(), 600)}`);
     lines.push("");
   }
-  lines.push("## 第 1 张实际发出的提示词");
-  lines.push(jobs[0].result?.prompt || jobs[0].prompt);
+  const first = jobs[0].attempts[0];
+  lines.push("## 第 1 张第 1 次实际发出的提示词");
+  lines.push(first?.result?.prompt || first?.prompt || "");
   const text = lines.join("\n");
   try {
     await navigator.clipboard.writeText(text);
@@ -737,6 +911,7 @@ $("lightbox").addEventListener("click", () => $("lightbox").classList.remove("sh
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("lightbox").classList.remove("show"); });
 
 loadModels(false);
+updateSizeNote();
 renderSummary();
 </script>
 </body>
