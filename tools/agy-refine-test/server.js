@@ -18,7 +18,8 @@
  *
  * 环境变量（都可以不设）：
  *   PORT=5260              端口
- *   HOST=127.0.0.1         只允许本机访问；设成 0.0.0.0 才能从局域网其他电脑打开
+ *   HOST=127.0.0.1         只允许本机访问；设成 0.0.0.0（或者加参数 --lan）才能
+ *                          从别的电脑打开，比如 VMware 外面的物理机
  *                          （注意：能打开页面的人就能让 agy 在这台电脑上执行操作）
  *   AGY_PATH=/path/to/agy  指定 agy 路径（默认自动查找）
  *   AGY_TIMEOUT_SEC=600    每张图最长等多少秒，超时就结束 agy 进程
@@ -35,7 +36,7 @@ const { spawn, execFile } = require("node:child_process");
 const readline = require("node:readline");
 
 const PORT = Number(process.env.PORT) || 5260;
-const HOST = process.env.HOST || "127.0.0.1";
+const HOST = process.argv.includes("--lan") ? "0.0.0.0" : process.env.HOST || "127.0.0.1";
 const TIMEOUT_MS = (Number(process.env.AGY_TIMEOUT_SEC) || 600) * 1000;
 const MAX_BODY_BYTES = 40 * 1024 * 1024; // 单张图 base64 后的上限
 const ROOT = __dirname;
@@ -463,10 +464,41 @@ const server = http.createServer(async (req, res) => {
 server.requestTimeout = 0; // 一张图可能要好几分钟
 server.headersTimeout = 60 * 1000;
 
+/** 这台电脑（虚拟机）自己的 IPv4 地址，比如 VMware NAT 网卡的 192.168.x.x。 */
+function lanAddresses() {
+  const out = [];
+  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+    for (const a of list || []) {
+      if (a.family === "IPv4" && !a.internal && !/^(docker|br-|veth|virbr)/.test(name)) {
+        out.push({ name, address: a.address });
+      }
+    }
+  }
+  return out;
+}
+
+server.on("error", (e) => {
+  if (e.code === "EADDRINUSE") {
+    console.error(`端口 ${PORT} 已被占用：可能已经开着一个了，或者换个端口：PORT=5261 node server.js`);
+  } else {
+    console.error("启动失败：" + e.message);
+  }
+  process.exit(1);
+});
+
 server.listen(PORT, HOST, () => {
-  console.log(`[${beijingTime()}] agy 产品精修测试已启动：http://${HOST === "0.0.0.0" ? "127.0.0.1" : HOST}:${PORT}`);
+  console.log(`[${beijingTime()}] agy 产品精修测试已启动`);
+  console.log(`本机打开：http://127.0.0.1:${PORT}`);
+  if (HOST === "0.0.0.0") {
+    const addrs = lanAddresses();
+    if (addrs.length) {
+      console.log("其他电脑（比如 VMware 外面的物理机）打开：");
+      for (const a of addrs) console.log(`  http://${a.address}:${PORT}    （网卡 ${a.name}）`);
+    }
+    console.log("打不开的话，先在这台机器上放行端口：sudo ufw allow " + PORT + "/tcp");
+  }
   console.log(`结果保存在：${RUNS_DIR}`);
   if (HOST !== "127.0.0.1" && HOST !== "localhost") {
-    console.log("注意：现在局域网里的其他电脑也能打开这个页面，并让 agy 在这台电脑上执行操作。");
+    console.log("注意：能打开这个页面的人，都能让 agy 在这台电脑上执行操作，测完请不带 --lan 重新启动。");
   }
 });
