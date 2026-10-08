@@ -229,8 +229,10 @@ const ALLOWED_TOOLS = new Set([
   "manage_subagents",
   "manage_task",
 ]);
+// 生图开始后只拦这些真正会动电脑的操作。schedule / 上网搜索等只记警告：
+// 实测 agy 会用 schedule {"DurationSeconds":120} 来"等子智能体"。
 const DANGEROUS_TOOL =
-  /^(run_command|send_command_input|write_to_file|replace_file_content|multi_replace_file_content|sed_file|notebook_edit|notebook_execution|call_mcp_tool|schedule|define_subagent|delete_knowledge|search_web|read_url_content|open_browser_url)$|browser/;
+  /^(run_command|send_command_input|write_to_file|replace_file_content|multi_replace_file_content|sed_file|notebook_edit|notebook_execution|call_mcp_tool|define_subagent|delete_knowledge|open_browser_url)$|browser/;
 
 /** 在会话记录里找 generate_image 的实际参数（委派模式下它在子智能体的会话里）。 */
 async function findGenerateImageCalls(startedAt, inputPath) {
@@ -294,6 +296,8 @@ async function handleRefine(req, res) {
     return;
   }
   const { fileName = "image.png", imageBase64, prompt, model, guard = true } = body || {};
+  // 附图（标注图、配件特写），提示词里用 {{附图1}}、{{附图2}}… 引用
+  const extraImages = Array.isArray(body && body.extraImages) ? body.extraImages.slice(0, 6) : [];
   if (!imageBase64 || !prompt) {
     sendJson(res, 400, { error: "缺少图片或提示词" });
     return;
@@ -321,7 +325,14 @@ async function handleRefine(req, res) {
   const inputPath = path.join(workDir, "product" + ext);
   await fsp.writeFile(inputPath, imageBytes);
 
-  const message = String(prompt).split("{{图片路径}}").join(inputPath);
+  const inputPaths = [inputPath];
+  let message = String(prompt).split("{{图片路径}}").join(inputPath);
+  for (let k = 0; k < extraImages.length; k++) {
+    const extPath = path.join(workDir, `ref-${k + 1}.jpg`);
+    await fsp.writeFile(extPath, Buffer.from(String(extraImages[k].base64 || ""), "base64"));
+    inputPaths.push(extPath);
+    message = message.split(`{{附图${k + 1}}}`).join(extPath);
+  }
   await fsp.writeFile(path.join(runDir, "prompt.txt"), message);
 
   const args = [
@@ -411,7 +422,7 @@ async function handleRefine(req, res) {
     if (name === "view_file") {
       const p = String((parameters && parameters.AbsolutePath) || "");
       const ownBrain = conversationId ? path.join(BRAIN_ROOT, conversationId) + path.sep : "\0";
-      if (p !== inputPath && !p.startsWith(ownBrain)) return `查看了原图以外的文件 ${p}`;
+      if (!inputPaths.includes(p) && !p.startsWith(ownBrain)) return `查看了原图以外的文件 ${p}`;
     }
     if (name === "invoke_subagent" && subagents) {
       const bad = subagents.map((s) => s.type_name).filter((t) => t !== "image-generator");
@@ -462,6 +473,10 @@ async function handleRefine(req, res) {
         }
         if (s.state === "ACTIVE" && (name === "invoke_subagent" || name === "generate_image") && !violation) {
           delegated = true;
+          // 实测有时委派时没写类型（{"Subagents":[{"Model":"inherit",…}]}），走通用子智能体，生图明显变慢
+          if (name === "invoke_subagent" && !JSON.stringify(parameters || {}).includes("image-generator")) {
+            softViolations.push(`第 ${item.at} 秒 委派时没有指定 image-generator 类型`);
+          }
         }
       }
     } else if (ev.event === "result") {
@@ -534,7 +549,7 @@ async function handleRefine(req, res) {
   const firstImgAt = images.length ? Math.min(...images.map((x) => x.mtimeMs)) : 0;
   const phases = {
     prepSec: genStartAt ? sec(genStartAt - startedAt) : null,
-    genSec: genStartAt && firstImgAt ? sec(firstImgAt - genStartAt) : null,
+    genSec: genStartAt && firstImgAt ? sec(Math.max(0, firstImgAt - genStartAt)) : null,
     tailSec: firstImgAt ? sec(Math.max(0, endedAt - firstImgAt)) : null,
   };
 
