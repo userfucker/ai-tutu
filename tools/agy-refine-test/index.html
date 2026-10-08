@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一键智能产品精修（agy 测试）</title>
+<style>
+  :root {
+    --bg: #f4f4f5;
+    --card: #ffffff;
+    --border: #e7e7ea;
+    --text: #18181b;
+    --muted: #71717a;
+    --soft: #f4f4f5;
+    --field: #f4f4f5;
+    --accent: #18181b;
+    --accent-text: #ffffff;
+    --ok: #15803d;
+    --ok-bg: #dcfce7;
+    --bad: #b91c1c;
+    --bad-bg: #fee2e2;
+    --warn: #a16207;
+    --warn-bg: #fef9c3;
+    --radius: 18px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  }
+  .page { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { text-align: center; margin-bottom: 28px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 999px; padding: 6px 16px; font-size: 13px;
+  }
+  h1 { font-size: 34px; margin: 16px 0 6px; letter-spacing: 1px; }
+  .sub { color: var(--muted); font-size: 16px; margin: 0; }
+  .agy-status { margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .agy-status.bad { color: var(--bad); }
+
+  .layout { display: grid; grid-template-columns: 380px 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .icon-circle {
+    width: 40px; height: 40px; border-radius: 50%; background: var(--soft);
+    display: grid; place-items: center; flex: none;
+  }
+  .icon-circle svg { width: 20px; height: 20px; }
+  .card-title { font-weight: 600; }
+  .card-desc { color: var(--muted); font-size: 13px; }
+  .card-head .count { margin-left: auto; color: var(--muted); }
+
+  .drop {
+    border: 2px dashed #d4d4d8; border-radius: 16px; padding: 28px 12px;
+    text-align: center; cursor: pointer; transition: background .15s, border-color .15s;
+  }
+  .drop:hover, .drop.over { background: var(--soft); border-color: #a1a1aa; }
+  .drop .up { width: 40px; height: 40px; border-radius: 50%; background: var(--soft); display: grid; place-items: center; margin: 0 auto 12px; }
+  .drop small { color: var(--muted); display: block; margin-top: 4px; }
+  .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 8px; margin-top: 12px; }
+  .thumb { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--soft); border: 1px solid var(--border); }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb button {
+    position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%;
+    border: 0; background: rgba(0,0,0,.6); color: #fff; cursor: pointer; font-size: 12px; line-height: 20px; padding: 0;
+  }
+  .thumb .dim { position: absolute; left: 0; right: 0; bottom: 0; font-size: 10px; color: #fff; background: rgba(0,0,0,.5); text-align: center; }
+
+  textarea {
+    width: 100%; min-height: 110px; resize: vertical; border: 1px solid var(--border);
+    border-radius: 12px; background: var(--field); padding: 10px 12px; font: inherit; color: inherit;
+  }
+  textarea.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; min-height: 260px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 12px; margin-top: 16px; }
+  label.f { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); min-width: 0; }
+  select {
+    appearance: none; -webkit-appearance: none; width: 100%;
+    border: 1px solid var(--border); background: var(--field) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
+    border-radius: 12px; padding: 10px 32px 10px 12px; font: inherit; color: var(--text);
+    text-overflow: ellipsis; cursor: pointer;
+  }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+
+  details summary { cursor: pointer; font-weight: 600; }
+  details .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
+  .btn {
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    border-radius: 12px; padding: 8px 14px; font: inherit; cursor: pointer;
+  }
+  .btn:hover { background: var(--soft); }
+  .btn.primary {
+    width: 100%; padding: 14px; font-size: 16px; font-weight: 600;
+    background: var(--accent); color: var(--accent-text); border-color: var(--accent);
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .btn.primary:disabled { background: #a1a1aa; border-color: #a1a1aa; cursor: not-allowed; }
+  .btn.small { padding: 5px 10px; font-size: 13px; }
+
+  .results { min-height: 600px; display: flex; flex-direction: column; }
+  .empty { flex: 1; display: grid; place-items: center; text-align: center; color: var(--muted); }
+  .empty .icon-circle { width: 64px; height: 64px; margin: 0 auto 14px; }
+  .empty .icon-circle svg { width: 30px; height: 30px; }
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .toolbar .summary { margin-right: auto; color: var(--muted); font-size: 13px; }
+
+  .item { border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .item-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .item-name { font-weight: 600; overflow-wrap: anywhere; }
+  .tag { font-size: 12px; border-radius: 999px; padding: 1px 8px; background: var(--soft); color: var(--muted); white-space: nowrap; }
+  .tag.ok { background: var(--ok-bg); color: var(--ok); }
+  .tag.bad { background: var(--bad-bg); color: var(--bad); }
+  .tag.warn { background: var(--warn-bg); color: var(--warn); }
+  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+  .pic { background: repeating-conic-gradient(#f4f4f5 0% 25%, #fff 0% 50%) 50% / 16px 16px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .pic img { width: 100%; height: 240px; object-fit: contain; display: block; cursor: zoom-in; }
+  .pic .cap { font-size: 12px; padding: 6px 8px; background: var(--card); border-top: 1px solid var(--border); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .pic .cap a { margin-left: auto; color: inherit; }
+  .waiting { height: 240px; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+  .steps { margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .steps div { overflow-wrap: anywhere; }
+  .reply { margin-top: 8px; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .err { margin-top: 8px; color: var(--bad); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid #d4d4d8; border-top-color: var(--text); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; place-items: center; z-index: 10; cursor: zoom-out; padding: 16px; }
+  .lightbox.show { display: grid; }
+  .lightbox img { max-width: 100%; max-height: 100%; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--accent); color: var(--accent-text); padding: 8px 16px; border-radius: 999px; display: none; z-index: 11; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <span class="pill">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/></svg>
+      AI 产品精修 · agy 测试版
+    </span>
+    <h1>一键智能产品精修</h1>
+    <p class="sub">上传产品图片，AI 自动分析并优化画质、去除瑕疵、增强细节</p>
+    <div class="agy-status" id="agyStatus">正在检查 agy…</div>
+  </header>
+
+  <div class="layout">
+    <div class="col">
+      <!-- 产品图 -->
+      <section class="card">
+        <div class="card-head">
+          <div class="icon-circle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg></div>
+          <div><div class="card-title">产品图</div><div class="card-desc">上传需要精修的产品图片</div></div>
+          <span class="count" id="count">0/50</span>
+        </div>
+        <div class="drop" id="drop" tabindex="0">
+          <div class="up"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg></div>
+          点击上传或拖拽图片到此区域
+          <small>支持 JPG、PNG、WebP 格式，最多 50 张</small>
+        </div>
+        <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" multiple hidden>
+        <div class="thumbs" id="thumbs"></div>
+      </section>
+
+      <!-- 精修要求 + 参数 -->
+      <section class="card">
+        <div class="card-head">
+          <div class="icon-circle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 13H8"/><path d="M16 17H8"/><path d="M16 13h-2"/></svg></div>
+          <div><div class="card-title">精修要求</div><div class="card-desc">描述您对图片精修的特殊需求（可选）</div></div>
+        </div>
+        <textarea id="requirement" placeholder="例如：去除背景杂物、增强产品光泽、修复划痕、提升整体清晰度…"></textarea>
+        <div class="grid2">
+          <label class="f">模型
+            <select id="model"><option value="">（读取中…）</option></select>
+          </label>
+          <label class="f">背景设置
+            <select id="background">
+              <option value="white">白底图</option>
+              <option value="original">原图背景</option>
+            </select>
+          </label>
+          <label class="f">尺寸比例
+            <select id="ratio">
+              <option value="auto">自动</option>
+              <option value="1:1">1:1 正方形</option>
+              <option value="2:3">2:3 竖版</option>
+              <option value="3:2">3:2 横版</option>
+              <option value="3:4">3:4 竖版</option>
+              <option value="4:3">4:3 横版</option>
+              <option value="4:5">4:5 竖版</option>
+              <option value="5:4">5:4 横版</option>
+              <option value="9:16">9:16 手机竖屏</option>
+              <option value="16:9">16:9 宽屏</option>
+              <option value="21:9">21:9 超宽屏</option>
+              <option value="4:1">4:1 超宽横版</option>
+              <option value="1:4">1:4 超长竖版</option>
+            </select>
+          </label>
+          <label class="f">清晰度
+            <select id="resolution">
+              <option value="512">0.5K 快速</option>
+              <option value="1024">1K 标准</option>
+              <option value="2048">2K 高清</option>
+              <option value="4096">4K 超清</option>
+            </select>
+          </label>
+        </div>
+        <div class="hint">这里的“模型”是 agy 里负责看图、写提示词的智能体模型；真正画图的是 agy 自带的 generate_image 工具。比例和清晰度没有专门的参数，只能写进提示词，实际尺寸以结果里量出来的为准。</div>
+      </section>
+
+      <!-- 测试设置 -->
+      <section class="card">
+        <details id="advanced">
+          <summary>测试设置（高级）</summary>
+          <label class="f" style="margin-top:12px">同时处理几张
+            <select id="concurrency">
+              <option value="1">1 张（测速度时用这个）</option>
+              <option value="2">2 张</option>
+              <option value="3">3 张</option>
+            </select>
+          </label>
+          <label class="f" style="margin-top:12px">发给 agy 的提示词模板
+            <textarea id="template" class="mono" spellcheck="false"></textarea>
+          </label>
+          <div class="hint">可用占位符：{{图片路径}}（程序自动填原图路径）、{{背景要求}}、{{比例要求}}、{{额外要求}}。改动会自动保存在这个浏览器里。</div>
+          <div class="row">
+            <button class="btn small" id="resetTemplate" type="button">恢复默认模板</button>
+            <button class="btn small" id="previewPrompt" type="button">预览第 1 张图的提示词</button>
+          </div>
+        </details>
+      </section>
+
+      <button class="btn primary" id="startBtn" disabled>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.94 14.06 4 20"/><path d="m15 3 1.5 4.5L21 9l-4.5 1.5L15 15l-1.5-4.5L9 9l4.5-1.5z"/></svg>
+        开始一键精修
+      </button>
+    </div>
+
+    <!-- 精修结果 -->
+    <section class="card results">
+      <div class="card-head">
+        <div class="icon-circle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg></div>
+        <div><div class="card-title">精修结果</div><div class="card-desc">上传产品图片后查看精修效果</div></div>
+      </div>
+      <div class="toolbar" id="toolbar" hidden>
+        <span class="summary" id="summary"></span>
+        <button class="btn small" id="stopBtn" type="button">停止</button>
+        <button class="btn small" id="copyLog" type="button">复制结果日志</button>
+        <button class="btn small" id="clearBtn" type="button">清空结果</button>
+      </div>
+      <div id="list"></div>
+      <div class="empty" id="empty">
+        <div>
+          <div class="icon-circle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg></div>
+          上传产品图片后查看精修效果<br>点击左侧“开始一键精修”按钮
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="lightbox" id="lightbox"><img alt=""></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const MAX_FILES = 50;
+
+const DEFAULT_TEMPLATE = `你是一名专业的电商产品图精修师。需要精修的产品原图在：{{图片路径}}
+
+请直接按下面的步骤完成，不要向我提问，也不要做与精修无关的事情：
+1. 先用 view_file 打开这张原图，仔细看清产品的外形、颜色、材质、图案、文字和 Logo。
+2. 调用 generate_image 工具生成 1 张精修后的产品图，ImageName 用 refined。
+   如果 generate_image 有传入参考图或原图的参数（例如 ImagePaths），一定要把上面这张原图的完整路径传进去，在原图的基础上精修，而不是重新画一个新产品。
+   给 generate_image 的 Prompt 用英文写，把下面的要求全部写进去。
+3. 精修要求：
+   - 必须是原图里的同一个产品：外形、比例、颜色、材质、图案、文字和 Logo 都不能改，不能增加或减少部件。
+   - 去除灰尘、划痕、瑕疵和噪点，提升清晰度和细节，光线均匀柔和，质感真实，达到电商平台主图的水准。
+   - 背景：{{背景要求}}
+   - {{比例要求}}
+   - 用户的额外要求：{{额外要求}}
+4. 只生成 1 张图。完成后用一两句中文说明你做了哪些处理。`;
+
+const BACKGROUND_TEXT = {
+  white: "换成纯白色（RGB 255,255,255）的干净背景，去掉原背景里的所有杂物；产品居中，四周留出适当空白；可以保留产品下方自然、轻微的投影。",
+  original: "保留原图的背景、场景和构图，只清理背景里明显的杂物和污点，不要换背景。",
+};
+const RES_LABEL = { 512: "0.5K 快速", 1024: "1K 标准", 2048: "2K 高清", 4096: "4K 超清" };
+
+// ---------------------------------------------------------------- 小工具
+
+function beijingTime(ms = Date.now()) {
+  const d = new Date(ms + 8 * 3600 * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+}
+function store(key, value) {
+  try {
+    if (value === undefined) return localStorage.getItem("refine:" + key);
+    localStorage.setItem("refine:" + key, value);
+  } catch { return null; }
+}
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => (t.style.display = "none"), 2000);
+}
+function gcd(a, b) { return b ? gcd(b, a % b) : a; }
+function simpleRatio(w, h) {
+  const g = gcd(w, h) || 1;
+  const a = w / g, b = h / g;
+  return a <= 50 && b <= 50 ? `${a}:${b}` : (w / h).toFixed(3);
+}
+function fmtBytes(n) {
+  if (!n && n !== 0) return "";
+  return n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " KB";
+}
+function loadImageSize(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+/** 目标尺寸：长边 = 清晰度（512/1024/2048/4096），短边按比例算，取 8 的倍数。 */
+function targetSize(ratio, res, src) {
+  let a, b;
+  if (ratio === "auto") { a = src.w; b = src.h; }
+  else [a, b] = ratio.split(":").map(Number);
+  const long = Number(res);
+  const round8 = (x) => Math.max(8, Math.round(x / 8) * 8);
+  return a >= b
+    ? { w: long, h: round8((long * b) / a), a, b }
+    : { w: round8((long * a) / b), h: long, a, b };
+}
+
+// ---------------------------------------------------------------- 上传
+
+let files = []; // {id, name, size, dataUrl, base64, w, h}
+let nextId = 1;
+
+function renderThumbs() {
+  $("count").textContent = `${files.length}/${MAX_FILES}`;
+  $("thumbs").innerHTML = files.map((f) => `
+    <div class="thumb" title="${esc(f.name)}">
+      <img src="${f.dataUrl}" alt="">
+      <span class="dim">${f.w}×${f.h}</span>
+      <button type="button" data-remove="${f.id}" aria-label="移除">×</button>
+    </div>`).join("");
+  updateStartBtn();
+}
+
+async function addFiles(list) {
+  const room = MAX_FILES - files.length;
+  const picked = [...list].filter((f) => /^image\/(png|jpeg|webp)$/.test(f.type));
+  if (picked.length < list.length) toast("只支持 JPG、PNG、WebP 图片");
+  if (picked.length > room) toast(`最多 ${MAX_FILES} 张，多出来的没有加进来`);
+  for (const file of picked.slice(0, room)) {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+    const size = (await loadImageSize(dataUrl)) || { w: 0, h: 0 };
+    files.push({ id: nextId++, name: file.name, size: file.size, dataUrl, base64: dataUrl.split(",")[1], w: size.w, h: size.h });
+  }
+  renderThumbs();
+}
+
+$("drop").addEventListener("click", () => $("fileInput").click());
+$("drop").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") $("fileInput").click(); });
+$("fileInput").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
+$("drop").addEventListener("dragover", (e) => { e.preventDefault(); $("drop").classList.add("over"); });
+$("drop").addEventListener("dragleave", () => $("drop").classList.remove("over"));
+$("drop").addEventListener("drop", (e) => { e.preventDefault(); $("drop").classList.remove("over"); addFiles(e.dataTransfer.files); });
+$("thumbs").addEventListener("click", (e) => {
+  const id = Number(e.target.dataset.remove);
+  if (!id) return;
+  files = files.filter((f) => f.id !== id);
+  renderThumbs();
+});
+
+// ---------------------------------------------------------------- 设置
+
+const settingIds = ["requirement", "background", "ratio", "resolution", "concurrency"];
+for (const id of settingIds) {
+  const saved = store(id);
+  if (saved !== null) $(id).value = saved;
+  $(id).addEventListener("change", () => store(id, $(id).value));
+}
+if (!store("resolution")) $("resolution").value = "2048";
+if (!store("ratio")) $("ratio").value = "1:1";
+$("template").value = store("template") || DEFAULT_TEMPLATE;
+$("template").addEventListener("input", () => store("template", $("template").value));
+$("resetTemplate").addEventListener("click", () => {
+  $("template").value = DEFAULT_TEMPLATE;
+  store("template", DEFAULT_TEMPLATE);
+  toast("已恢复默认模板");
+});
+$("model").addEventListener("change", () => store("model", $("model").value));
+
+let agyReady = false;
+async function loadModels(refresh) {
+  const st = $("agyStatus");
+  try {
+    const r = await fetch("/api/models" + (refresh ? "?refresh=1" : ""));
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    const saved = store("model");
+    const ids = data.models.map((m) => m.id);
+    const def = (saved && ids.includes(saved) && saved)
+      || ids.find((id) => /gemini/i.test(id) && /flash/i.test(id))
+      || ids.find((id) => /gemini/i.test(id))
+      || ids[0];
+    $("model").innerHTML = data.models.map((m) =>
+      `<option value="${esc(m.id)}"${m.id === def ? " selected" : ""}>${esc(m.name)}</option>`).join("");
+    st.className = "agy-status";
+    st.innerHTML = `agy：${esc(data.agyPath)} · ${data.models.length} 个模型 · 检查于 ${esc(data.checkedAt)}（北京时间） <a href="#" id="refreshModels">刷新</a>`;
+    agyReady = true;
+  } catch (e) {
+    st.className = "agy-status bad";
+    st.innerHTML = `agy 不可用：${esc(e.message)} <a href="#" id="refreshModels">重试</a>`;
+    $("model").innerHTML = `<option value="">（不指定，用 agy 默认模型）</option>`;
+    agyReady = false;
+  }
+  updateStartBtn();
+}
+document.addEventListener("click", (e) => {
+  if (e.target.id === "refreshModels") { e.preventDefault(); loadModels(true); }
+});
+
+function settings() {
+  return {
+    requirement: $("requirement").value.trim(),
+    model: $("model").value,
+    modelName: $("model").selectedOptions[0]?.textContent || "",
+    background: $("background").value,
+    ratio: $("ratio").value,
+    ratioLabel: $("ratio").selectedOptions[0].textContent,
+    resolution: $("resolution").value,
+    concurrency: Number($("concurrency").value) || 1,
+    template: $("template").value,
+  };
+}
+
+function buildPrompt(s, f) {
+  const t = targetSize(s.ratio, s.resolution, f);
+  const resText = RES_LABEL[s.resolution];
+  const ratioText = s.ratio === "auto"
+    ? `画面比例：和原图保持一致（原图 ${f.w}×${f.h}，约 ${simpleRatio(f.w, f.h)}）。目标尺寸约 ${t.w}×${t.h} 像素（${resText}）。`
+    : `画面比例：${s.ratioLabel}。目标尺寸约 ${t.w}×${t.h} 像素（${resText}）。如果原图比例不同，请重新构图（扩展背景或调整留白），不要拉伸、压扁或裁掉产品。`;
+  return {
+    target: t,
+    prompt: s.template
+      .split("{{背景要求}}").join(BACKGROUND_TEXT[s.background])
+      .split("{{比例要求}}").join(ratioText)
+      .split("{{额外要求}}").join(s.requirement || "无"),
+  };
+}
+
+$("previewPrompt").addEventListener("click", () => {
+  if (!files.length) { toast("先上传一张图"); return; }
+  const { prompt } = buildPrompt(settings(), files[0]);
+  alert(prompt.split("{{图片路径}}").join("<运行时自动填入原图路径>"));
+});
+
+function updateStartBtn() {
+  $("startBtn").disabled = running || files.length === 0;
+}
+
+// ---------------------------------------------------------------- 运行
+
+let running = false;
+let jobs = []; // 每张图一条结果
+let batch = null; // 这一批的设置
+
+function renderJob(j) {
+  let el = document.getElementById("job" + j.id);
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "item";
+    el.id = "job" + j.id;
+    $("list").appendChild(el);
+  }
+  const elapsed = j.startedAt ? ((j.endedAt || Date.now()) - j.startedAt) / 1000 : 0;
+  const statusTag = {
+    waiting: `<span class="tag">排队中</span>`,
+    running: `<span class="tag warn"><span class="spin"></span> 生成中 ${elapsed.toFixed(0)} 秒</span>`,
+    ok: `<span class="tag ok">完成 ${j.result?.wallSeconds ?? elapsed.toFixed(1)} 秒</span>`,
+    fail: `<span class="tag bad">失败${j.result?.wallSeconds ? " " + j.result.wallSeconds + " 秒" : ""}</span>`,
+    cancel: `<span class="tag">已取消</span>`,
+  }[j.status];
+
+  const outputs = (j.outputs || []).map((o) => {
+    const ratioOk = o.w && Math.abs(o.w / o.h - j.target.a / j.target.b) / (j.target.a / j.target.b) < 0.03;
+    const longOk = o.w && Math.abs(Math.max(o.w, o.h) - Math.max(j.target.w, j.target.h)) / Math.max(j.target.w, j.target.h) < 0.1;
+    return `<div class="pic">
+      <img src="${esc(o.url)}" alt="">
+      <div class="cap">
+        <span>精修图 ${o.w ? o.w + "×" + o.h : ""}</span>
+        ${o.w ? `<span class="tag ${ratioOk ? "ok" : "bad"}">比例${ratioOk ? "✔" : "✘ " + simpleRatio(o.w, o.h)}</span>
+        <span class="tag ${longOk ? "ok" : "bad"}">清晰度${longOk ? "✔" : "✘"}</span>` : ""}
+        <span>${fmtBytes(o.bytes)}</span>
+        <a href="${esc(o.url)}" download="${esc(j.file.name.replace(/\.[^.]+$/, ""))}-精修${esc((o.url.match(/\.[a-z]+$/i) || [".png"])[0])}">下载</a>
+      </div>
+    </div>`;
+  }).join("");
+  const placeholder = !j.outputs?.length
+    ? `<div class="pic"><div class="waiting">${j.status === "running" ? '<span><span class="spin"></span> 等待 agy 生成…</span>' : j.status === "waiting" ? "排队中" : "没有生成图片"}</div></div>`
+    : "";
+
+  const steps = (j.steps || []).map((s) => `<div>${esc(s)}</div>`).join("");
+  el.innerHTML = `
+    <div class="item-head">
+      <span class="item-name">${esc(j.file.name)}</span>
+      ${statusTag}
+      <span class="tag">目标 ${j.target.w}×${j.target.h}</span>
+    </div>
+    <div class="pair">
+      <div class="pic"><img src="${j.file.dataUrl}" alt=""><div class="cap"><span>原图 ${j.file.w}×${j.file.h}</span><span>${fmtBytes(j.file.size)}</span></div></div>
+      ${outputs}${placeholder}
+    </div>
+    ${steps ? `<div class="steps">${steps}</div>` : ""}
+    ${j.text ? `<div class="reply">${esc(j.text)}</div>` : ""}
+    ${j.error ? `<div class="err">${esc(j.error)}</div>` : ""}`;
+}
+
+function renderSummary() {
+  const c = { ok: 0, fail: 0, running: 0, waiting: 0, cancel: 0 };
+  jobs.forEach((j) => c[j.status]++);
+  const done = jobs.filter((j) => j.result?.ok);
+  const avg = done.length ? (done.reduce((s, j) => s + j.result.wallSeconds, 0) / done.length).toFixed(1) : "-";
+  $("summary").textContent = `共 ${jobs.length} 张：完成 ${c.ok}，失败 ${c.fail}，进行中 ${c.running}，排队 ${c.waiting}${c.cancel ? "，取消 " + c.cancel : ""} · 成功的平均 ${avg} 秒/张`;
+  $("toolbar").hidden = jobs.length === 0;
+  $("empty").style.display = jobs.length ? "none" : "";
+  $("stopBtn").disabled = !running;
+}
+
+setInterval(() => {
+  jobs.filter((j) => j.status === "running").forEach(renderJob);
+  if (running) renderSummary();
+}, 1000);
+
+function shortParams(p) {
+  if (!p) return "";
+  const s = JSON.stringify(p);
+  return s.length > 300 ? s.slice(0, 300) + "…" : s;
+}
+
+async function runJob(j) {
+  j.status = "running";
+  j.startedAt = Date.now();
+  j.steps = [];
+  j.text = "";
+  j.events = [];
+  j.controller = new AbortController();
+  renderJob(j);
+  try {
+    const r = await fetch("/api/refine", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileName: j.file.name, imageBase64: j.file.base64, prompt: j.prompt, model: batch.model }),
+      signal: j.controller.signal,
+    });
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${r.status}`);
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (line.trim()) handleEvent(j, JSON.parse(line));
+      }
+    }
+    if (!j.result) throw new Error("连接断开，没有收到结果");
+  } catch (e) {
+    if (j.status === "running") {
+      j.status = e.name === "AbortError" ? "cancel" : "fail";
+      j.error = e.name === "AbortError" ? "" : (j.error || e.message);
+    }
+  }
+  j.endedAt = Date.now();
+  renderJob(j);
+  renderSummary();
+}
+
+async function handleEvent(j, ev) {
+  if (ev.type === "start") {
+    j.steps.push(`${(0).toFixed(1)}s 启动 agy（结果目录 runs/${ev.runId}）`);
+  } else if (ev.type === "init") {
+    j.steps.push(`agy 会话 ${ev.conversationId}，可用工具 ${ev.tools.length} 个${ev.tools.includes("generate_image") ? "（含 generate_image）" : "（⚠ 没有 generate_image）"}`);
+  } else if (ev.type === "tool") {
+    if (ev.state === "ACTIVE") j.steps.push(`${ev.at}s 调用 ${ev.name} ${shortParams(ev.parameters)}`);
+    else j.steps.push(`${ev.at}s ${ev.name} 完成${ev.seconds ? `（${ev.seconds} 秒）` : ""}`);
+  } else if (ev.type === "text") {
+    j.text += ev.text;
+  } else if (ev.type === "done") {
+    j.result = ev;
+    j.status = ev.ok ? "ok" : "fail";
+    j.error = ev.error + (ev.stderrTail && !ev.ok ? "\nagy 错误输出：" + ev.stderrTail : "");
+    if (ev.response) j.text = ev.response;
+    j.outputs = [];
+    for (const img of ev.images) {
+      const size = await loadImageSize(img.url);
+      j.outputs.push({ ...img, w: size?.w, h: size?.h });
+    }
+  }
+  renderJob(j);
+}
+
+$("startBtn").addEventListener("click", async () => {
+  if (running || !files.length) return;
+  const s = settings();
+  if (!s.template.includes("{{图片路径}}")) {
+    toast("提示词模板里必须有 {{图片路径}}");
+    return;
+  }
+  batch = { ...s, startedAt: Date.now() };
+  running = true;
+  updateStartBtn();
+  $("list").innerHTML = "";
+  let id = 0;
+  jobs = files.map((f) => {
+    const { prompt, target } = buildPrompt(s, f);
+    return { id: ++id, file: f, prompt, target, status: "waiting" };
+  });
+  jobs.forEach(renderJob);
+  renderSummary();
+
+  const queue = [...jobs];
+  const worker = async () => {
+    while (running && queue.length) await runJob(queue.shift());
+  };
+  await Promise.all(Array.from({ length: s.concurrency }, worker));
+  jobs.filter((j) => j.status === "waiting").forEach((j) => { j.status = "cancel"; renderJob(j); });
+  running = false;
+  batch.endedAt = Date.now();
+  updateStartBtn();
+  renderSummary();
+});
+
+$("stopBtn").addEventListener("click", () => {
+  running = false;
+  jobs.forEach((j) => j.status === "running" && j.controller?.abort());
+});
+$("clearBtn").addEventListener("click", () => {
+  if (running) { toast("先点“停止”"); return; }
+  jobs = [];
+  $("list").innerHTML = "";
+  renderSummary();
+});
+
+// ---------------------------------------------------------------- 结果日志
+
+$("copyLog").addEventListener("click", async () => {
+  if (!jobs.length) return;
+  const b = batch;
+  const lines = [];
+  lines.push("# agy 产品精修测试结果");
+  lines.push(`时间（北京）：${beijingTime(b.startedAt)}${b.endedAt ? " ~ " + beijingTime(b.endedAt) : "（进行中）"}`);
+  lines.push(`浏览器：${navigator.userAgent}`);
+  lines.push(`设置：模型 ${b.modelName}（${b.model || "默认"}）；背景 ${b.background === "white" ? "白底图" : "原图背景"}；比例 ${b.ratioLabel}；清晰度 ${RES_LABEL[b.resolution]}；同时处理 ${b.concurrency} 张`);
+  lines.push(`精修要求：${b.requirement || "（无）"}`);
+  lines.push(`提示词模板是否改过：${b.template === DEFAULT_TEMPLATE ? "没改（默认）" : "改过"}`);
+  lines.push($("summary").textContent);
+  lines.push("");
+  for (const j of jobs) {
+    const r = j.result || {};
+    lines.push(`## 第 ${j.id} 张：${j.file.name}`);
+    lines.push(`状态：${{ ok: "成功", fail: "失败", cancel: "已取消", waiting: "未开始", running: "进行中" }[j.status]}`);
+    lines.push(`原图：${j.file.w}×${j.file.h}，${fmtBytes(j.file.size)}；目标：${j.target.w}×${j.target.h}`);
+    if (r.runId) lines.push(`结果目录：${r.runDir}；agy 会话：${r.conversationId}；退出码：${r.exitCode}`);
+    if (r.wallSeconds != null) lines.push(`耗时：总 ${r.wallSeconds} 秒；开始调用 generate_image 在第 ${r.firstImageToolAfterSec ?? "-"} 秒；agy 自报 ${r.agySeconds ?? "-"} 秒`);
+    if (r.usage) lines.push(`用量：${JSON.stringify(r.usage)}`);
+    for (const o of j.outputs || []) {
+      lines.push(`输出图：${o.fileName}，${o.w}×${o.h}（约 ${o.w ? simpleRatio(o.w, o.h) : "?"}），${fmtBytes(o.bytes)}，开始后 ${o.readyAfterSec} 秒写入`);
+    }
+    if (r.toolCalls?.length) {
+      lines.push("工具调用：");
+      for (const t of r.toolCalls) lines.push(`- ${t.at}s ${t.name}${t.seconds ? `（${t.seconds} 秒）` : ""} 参数：${JSON.stringify(t.parameters ?? {})}`);
+    } else if (j.steps?.length) {
+      lines.push("过程：");
+      j.steps.forEach((s) => lines.push("- " + s));
+    }
+    if (j.text) lines.push(`agy 回复：${j.text.trim()}`);
+    if (j.error) lines.push(`错误：${j.error}`);
+    if (r.resultError) lines.push(`agy result.error：${JSON.stringify(r.resultError)}`);
+    lines.push("");
+  }
+  lines.push("## 第 1 张实际发出的提示词");
+  lines.push(jobs[0].result?.prompt || jobs[0].prompt);
+  const text = lines.join("\n");
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+  toast("结果日志已复制，可以直接粘贴发给 AI");
+});
+
+// ---------------------------------------------------------------- 看大图
+
+$("list").addEventListener("click", (e) => {
+  if (e.target.tagName === "IMG") {
+    $("lightbox").querySelector("img").src = e.target.src;
+    $("lightbox").classList.add("show");
+  }
+});
+$("lightbox").addEventListener("click", () => $("lightbox").classList.remove("show"));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("lightbox").classList.remove("show"); });
+
+loadModels(false);
+renderSummary();
+</script>
+</body>
+</html>
