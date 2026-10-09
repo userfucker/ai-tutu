@@ -144,6 +144,71 @@ function parseAgyModels(text) {
 }
 
 let modelsCache = null; // { at, agyPath, models }
+/** 额度类错误的特征（agy / 谷歌接口的报错文字）。 */
+const QUOTA_RE = /RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|exhausted|usage limit|limit reached|额度|配额|频繁/i;
+
+/**
+ * 账号额度（照搬 Claude Code WebUI 的 backend/gemini/usage.ts）：
+ * `agy -p /usage --output-format stream-json` 不调模型、不耗额度，返回每组模型
+ * 5 小时窗口和每周窗口的剩余比例（remaining_fraction）和重置时间。
+ */
+function parseAgyUsage(stdout) {
+  let data;
+  for (const line of String(stdout).split(/\r?\n/)) {
+    if (!line.trim().startsWith("{")) continue;
+    try {
+      const ev = JSON.parse(line);
+      const command = (ev && ev.command) || (ev && ev.result && ev.result.command);
+      if (command && command.name === "usage" && command.data && Array.isArray(command.data.groups)) data = command.data;
+    } catch {}
+  }
+  if (!data) return [];
+  const win = (b) => {
+    if (!b || typeof b.remaining_fraction !== "number") return null;
+    const t = b.reset_time ? Date.parse(b.reset_time) : NaN;
+    return { remaining: Math.round(b.remaining_fraction * 10000) / 100, resetsAt: Number.isFinite(t) ? t : null };
+  };
+  return data.groups.map((g) => {
+    const buckets = g.buckets || [];
+    const name = g.name || "";
+    const prefix = buckets.map((b) => (/^(.+)-[^-]+$/.exec(b.id || "") || [])[1]).find(Boolean) || "";
+    const key = prefix === "gemini" || /^gemini/i.test(name) ? "gemini" : prefix === "3p" || /claude|gpt/i.test(name) ? "thirdParty" : prefix || name;
+    return {
+      key,
+      name,
+      fiveHour: win(buckets.find((b) => b.window === "5h")),
+      weekly: win(buckets.find((b) => b.window === "weekly")),
+    };
+  });
+}
+
+let usageInFlight = null;
+function readUsage() {
+  if (usageInFlight) return usageInFlight;
+  usageInFlight = (async () => {
+    const agyPath = await resolveAgyPath();
+    if (!agyPath) throw new Error("找不到 agy");
+    const startedAt = Date.now();
+    const out = await new Promise((resolve, reject) => {
+      execFile(
+        agyPath,
+        ["-p", "/usage", "--output-format", "stream-json", "--dangerously-skip-permissions"],
+        { cwd: os.tmpdir(), timeout: 60000, maxBuffer: 1024 * 1024 },
+        (err, stdout, stderr) => {
+          if (err) reject(new Error(`执行 agy /usage 失败：${err.message}${stderr ? `（${String(stderr).trim().slice(-300)}）` : ""}`));
+          else resolve(stdout);
+        },
+      );
+    });
+    const groups = parseAgyUsage(out);
+    if (!groups.length) throw new Error("agy /usage 没有返回可识别的用量数据");
+    return { groups, at: Date.now(), checkedAt: beijingTime(), tookSec: Math.round((Date.now() - startedAt) / 100) / 10 };
+  })().finally(() => {
+    usageInFlight = null;
+  });
+  return usageInFlight;
+}
+
 async function listModels(refresh) {
   if (!refresh && modelsCache && Date.now() - modelsCache.at < 5 * 60 * 1000) {
     return modelsCache;
@@ -544,6 +609,10 @@ async function handleRefine(req, res) {
   if (images.length === 0) {
     error = violation ? "越权，已结束 agy：" + violation.detail : warnings.shift() || "agy 跑完了，但没有找到生成的图片";
   }
+  // 额度用完 / 请求太频繁：页面上不重试，直接暂停队列等额度恢复
+  const quotaText = [stderrTail, result && JSON.stringify(result.error || ""), images.length ? "" : (result && result.response) || ""].join(" ");
+  const quotaError = images.length === 0 && QUOTA_RE.test(quotaText);
+  if (quotaError) error = "额度不足或请求太频繁：" + error;
 
   // 三段耗时：准备（开始 → 调用生图）、生图（→ 图片写入）、收尾（→ 结束）
   const firstImgAt = images.length ? Math.min(...images.map((x) => x.mtimeMs)) : 0;
@@ -557,6 +626,7 @@ async function handleRefine(req, res) {
     type: "done",
     ok: images.length > 0,
     error,
+    quotaError,
     warnings,
     violation,
     earlyStop,
@@ -612,6 +682,12 @@ const server = http.createServer(async (req, res) => {
     const p = decodeURIComponent(url.pathname);
     if (req.method === "GET" && (p === "/" || p === "/index.html")) {
       await serveFile(res, path.join(ROOT, "index.html"));
+    } else if (req.method === "GET" && p === "/api/usage") {
+      try {
+        sendJson(res, 200, await readUsage());
+      } catch (e) {
+        sendJson(res, 500, { error: e.message });
+      }
     } else if (req.method === "GET" && p === "/api/models") {
       try {
         const r = await listModels(url.searchParams.get("refresh") === "1");

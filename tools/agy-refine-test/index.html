@@ -24,6 +24,7 @@
     --radius: 18px;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; } /* 防止 display:flex 之类的样式盖掉 hidden 属性 */
   html, body { margin: 0; }
   body {
     background: var(--bg);
@@ -111,6 +112,15 @@
   .empty .icon-circle svg { width: 30px; height: 30px; }
   .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
   .toolbar .summary { margin-right: auto; color: var(--muted); font-size: 13px; }
+  /* 额度条 */
+  .usage { display: inline-flex; gap: 14px; align-items: center; flex-wrap: wrap; justify-content: center; margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .usage .u { display: inline-flex; gap: 6px; align-items: center; }
+  .usage .bar { width: 90px; height: 6px; border-radius: 3px; background: #e4e4e7; overflow: hidden; }
+  .usage .bar i { display: block; height: 100%; background: #16a34a; }
+  .usage .bar i.mid { background: #ca8a04; }
+  .usage .bar i.low { background: #dc2626; }
+  .pausebar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; padding: 10px 12px; border-radius: 12px; background: var(--warn-bg); color: var(--warn); font-size: 13px; }
+  .pausebar span { margin-right: auto; }
 
   .item { border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
   .item-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
@@ -208,11 +218,12 @@
   <header>
     <span class="pill">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/></svg>
-      AI 产品精修 · agy 测试版 v6
+      AI 产品精修 · agy 测试版 v7
     </span>
     <h1>一键智能产品精修</h1>
     <p class="sub">上传产品图片，AI 自动分析并优化画质、去除瑕疵、增强细节</p>
     <div class="agy-status" id="agyStatus">正在检查 agy…</div>
+    <div class="usage" id="usage"><span>Gemini 额度：读取中…</span></div>
   </header>
 
   <div class="layout">
@@ -344,6 +355,21 @@
                 <option value="zh">中文</option>
               </select>
             </label>
+            <label class="f">每张之间间隔
+              <select id="interval">
+                <option value="0">不间隔</option>
+                <option value="30">30 秒</option>
+                <option value="60">1 分钟</option>
+                <option value="180">3 分钟</option>
+              </select>
+            </label>
+            <label class="f">额度低于多少自动暂停
+              <select id="pauseBelow">
+                <option value="0">不暂停</option>
+                <option value="10">剩余 10%</option>
+                <option value="20">剩余 20%</option>
+              </select>
+            </label>
             <label class="f">同时处理几张
               <select id="concurrency">
                 <option value="1">1 张（测速度用）</option>
@@ -354,6 +380,8 @@
           </div>
           <div class="hint">固定让 agy 委派内部的生图子智能体 image-generator 出图；图片一出来就结束 agy。没出图时自动再试 1 次。</div>
           <label class="check"><input type="checkbox" id="guard" checked> 发现越权操作（运行命令、看别的文件等）立即结束这一张</label>
+          <label class="check"><input type="checkbox" id="trackUsage" checked> 每张做完查一次额度，统计每张用了多少（每张多等几秒；同时处理多张时按整批统计）</label>
+          <label class="check"><input type="checkbox" id="fastMode"> 快速模式：负责写描述的 AI 不看原图，直接把我们写好的英文要求交给生图子智能体（更省额度、更快，但描述没那么具体）</label>
           <label class="f" style="margin-top:12px">发给 agy 的提示词模板
             <textarea id="template" class="mono" spellcheck="false"></textarea>
           </label>
@@ -383,6 +411,8 @@
         <button class="btn small" id="copyLog" type="button">复制结果日志</button>
         <button class="btn small" id="clearBtn" type="button">清空结果</button>
       </div>
+      <div class="pausebar" id="pausebar" hidden><span id="pauseText"></span>
+        <button class="btn small" id="resumeNow" type="button">立即继续</button></div>
       <div id="list"></div>
       <div class="empty" id="empty">
         <div>
@@ -1157,10 +1187,15 @@ async function prepareInput(f) {
 
 // ---------------------------------------------------------------- 设置
 
-for (const id of ["requirement", "concurrency"]) {
+for (const id of ["requirement", "concurrency", "interval", "pauseBelow"]) {
   const saved = store(id);
-  if (saved !== null && (id !== "concurrency" || [...$(id).options].some((o) => o.value === saved))) $(id).value = saved;
+  if (saved !== null && ($(id).tagName !== "SELECT" || [...$(id).options].some((o) => o.value === saved))) $(id).value = saved;
   $(id).addEventListener("change", () => store(id, $(id).value));
+}
+for (const id of ["trackUsage", "fastMode"]) {
+  const saved = store(id);
+  if (saved !== null) $(id).checked = saved === "1";
+  $(id).addEventListener("change", () => store(id, $(id).checked ? "1" : "0"));
 }
 
 let mode = MODES[store("mode")] ? store("mode") : "white";
@@ -1267,6 +1302,10 @@ function settings() {
     format: $("format").value,
     concurrency: Number($("concurrency").value) || 1,
     guard: $("guard").checked,
+    trackUsage: $("trackUsage").checked,
+    fastMode: $("fastMode").checked,
+    interval: Number($("interval").value) || 0,
+    pauseBelow: Number($("pauseBelow").value) || 0,
     template: $("template").value,
     lang: tplLang(),
     retouch: $("retouch").value,
@@ -1320,7 +1359,58 @@ function colorsInInput(f) {
   return out;
 }
 
+/**
+ * 快速模式：负责写描述的 AI 不看图，直接把我们拼好的英文要求原样交给生图子智能体
+ * （子智能体通过 ImagePaths 自己看参考图）。不用提示词模板。
+ */
+function buildFastPrompt(s, f) {
+  const L = T.en;
+  const aiRatio = aiRatioFor(s, f);
+  const nParts = partsInInput(f).length;
+  const nDetails = Math.min(nParts, MAX_DETAILS);
+  const paths = ["{{图片路径}}"];
+  if (nParts) for (let i = 1; i <= 1 + nDetails; i++) paths.push(`{{附图${i}}}`);
+  const note = (f.partsNote || "").trim();
+  const parts = nParts ? L.parts(nParts, nDetails, note) : note ? L.partsNoteOnly(note) : L.partsDefault;
+  const colors = colorsInInput(f);
+  let compose = L.compose(aiRatio, s.fill);
+  let background = L.background[s.background];
+  if (s.mode === "refine") {
+    compose = L.composeRefine(aiRatio);
+    background = L.background.refine;
+  } else if (s.format === "png-alpha") {
+    background = L.background.alpha;
+  }
+  const angle = s.angle === "keep" ? L.angle.keep : L.angle[s.angle] + L.angle.extra;
+  const imagePrompt = [
+    `Using reference image 1 as the exact product, create a refined e-commerce product photo.${nParts ? " Image 2 is an accessory annotation image" + (nDetails ? " and the following image(s) are accessory close-ups" : "") + "; they are references only." : ""}`,
+    "- Same product: it must be exactly the same product as in the reference image. Shape, proportions, structure, colors, materials, patterns, text, logos and the number of parts must not change; do not add or remove any part.",
+    `- Colors: every color must match the reference image exactly. Color names in the user's note are only hints; if they conflict with the image, follow the image.${colors.length ? L.colors(colors) : ""}`,
+    `- Accessories: ${parts}`,
+    `- Angle: ${angle} Whatever the angle, the product's shape, proportions and colors must stay identical to the reference.`,
+    `- Retouching: ${L.retouch[s.retouch] || L.retouch.on}`,
+    `- Sharpness: ${L.sharp[s.sharp] || L.sharp.keep}`,
+    `- Background: ${background}`,
+    `- Composition: ${compose}`,
+    `- User note (in Chinese): ${s.requirement || "none"}`,
+  ].join("\n");
+  return {
+    aiRatio,
+    prompt: `You are a dispatcher. Do NOT open or view any image file, and do not do anything except the steps below.
+1. Immediately call invoke_subagent with subagent type image-generator (state this type explicitly in the parameters) and have it call generate_image exactly once to produce exactly one image, with parameters: ImageName: "refined"; AspectRatio: "${aiRatio}"; ImagePaths: [${paths.map((x) => `"${x}"`).join(", ")}]; Prompt: the text between <<<PROMPT and PROMPT>>> below, verbatim.
+2. After delegating, just wait for it to finish: you may use manage_task to check progress; do nothing else.
+3. Reply with one sentence in Chinese.
+
+Forbidden: running any command, viewing or searching any files or folders, web search, asking me questions, calling generate_image yourself.
+
+<<<PROMPT
+${imagePrompt}
+PROMPT>>>`,
+  };
+}
+
 function buildPrompt(s, f) {
+  if (s.fastMode) return buildFastPrompt(s, f);
   const L = T[s.lang] || T.en;
   const aiRatio = aiRatioFor(s, f);
   const nParts = partsInInput(f).length;
@@ -1572,6 +1662,85 @@ async function makeOutput(job, ai) {
 
 // ---------------------------------------------------------------- 运行
 
+// ---------------------------------------------------------------- 额度
+
+let usage = null; // 最近一次 /api/usage 结果里的 Gemini 组：{fiveHour, weekly, at, checkedAt}
+const fmtReset = (ms) => (ms ? beijingTime(ms).slice(5, 16).replace("-", "/") : "-");
+function renderUsage(errText) {
+  const el = $("usage");
+  if (errText) { el.innerHTML = `<span>Gemini 额度：读取失败（${esc(errText)}）</span> <a href="#" id="refreshUsage">重试</a>`; return; }
+  if (!usage) { el.innerHTML = `<span>Gemini 额度：读取中…</span>`; return; }
+  const one = (label, w) => {
+    if (!w) return `<span class="u">${label}：-</span>`;
+    const cls = w.remaining < 15 ? "low" : w.remaining < 40 ? "mid" : "";
+    return `<span class="u">${label}剩 <b>${w.remaining.toFixed(1)}%</b><span class="bar"><i class="${cls}" style="width:${Math.max(0, Math.min(100, w.remaining))}%"></i></span>重置 ${fmtReset(w.resetsAt)}</span>`;
+  };
+  el.innerHTML = `<span>Gemini 额度：</span>${one("5 小时", usage.fiveHour)}${one("本周", usage.weekly)}<span>查于 ${esc(usage.checkedAt.slice(11))}</span> <a href="#" id="refreshUsage">刷新</a>`;
+}
+async function fetchUsage() {
+  try {
+    const r = await fetch("/api/usage");
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    const g = data.groups.find((x) => x.key === "gemini") || data.groups[0];
+    usage = { fiveHour: g.fiveHour, weekly: g.weekly, at: data.at, checkedAt: data.checkedAt };
+    renderUsage();
+    return usage;
+  } catch (e) {
+    renderUsage(e.message);
+    return null;
+  }
+}
+document.addEventListener("click", (e) => {
+  if (e.target.id === "refreshUsage") { e.preventDefault(); renderUsage(); fetchUsage(); }
+});
+/** 两次额度之间用掉了多少（百分点）。 */
+function usageDelta(before, after) {
+  if (!before || !after) return null;
+  const d = (a, b) => (a && b && a.resetsAt === b.resetsAt ? Math.round((a.remaining - b.remaining) * 100) / 100 : null); // 中间重置过就不算
+  return { fiveHour: d(before.fiveHour, after.fiveHour), weekly: d(before.weekly, after.weekly) };
+}
+
+// 暂停（额度不足 / 额度太低 / 间隔等待）：所有 worker 开始下一张前都会等这里
+let pause = null; // {until, reason}
+let resumeFlag = false;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function pauseUntil(until, reason) {
+  pause = { until, reason };
+  resumeFlag = false;
+  renderPause();
+}
+function renderPause() {
+  const bar = $("pausebar");
+  if (!pause || !running) { bar.hidden = true; return; }
+  const left = Math.max(0, Math.round((pause.until - Date.now()) / 1000));
+  const mm = Math.floor(left / 60), ss = left % 60;
+  bar.hidden = false;
+  $("pauseText").textContent = `${pause.reason}，${left > 0 ? `${mm ? mm + " 分 " : ""}${ss} 秒后（${beijingTime(pause.until).slice(11, 16)}）自动继续` : "马上继续"}`;
+}
+async function waitIfPaused() {
+  while (running && pause && Date.now() < pause.until && !resumeFlag) {
+    renderPause();
+    await sleep(1000);
+  }
+  pause = null;
+  renderPause();
+}
+$("resumeNow").addEventListener("click", () => { resumeFlag = true; });
+
+/** 一张做完后：查额度、算消耗、额度太低就暂停。 */
+async function afterJobUsage(j) {
+  if (!batch.trackUsage) return;
+  const before = usage;
+  const after = await fetchUsage();
+  if (batch.concurrency === 1 && j.status === "ok") j.usageDelta = usageDelta(before, after);
+  const th = batch.pauseBelow;
+  if (th && after) {
+    if (after.weekly && after.weekly.remaining < th) pauseUntil(after.weekly.resetsAt || Date.now() + 3600e3, `本周额度只剩 ${after.weekly.remaining.toFixed(1)}%（低于 ${th}%），已暂停`);
+    else if (after.fiveHour && after.fiveHour.remaining < th) pauseUntil((after.fiveHour.resetsAt || Date.now() + 1800e3) + 60e3, `5 小时额度只剩 ${after.fiveHour.remaining.toFixed(1)}%（低于 ${th}%），已暂停`);
+  }
+}
+
 let running = false;
 let jobs = [];
 let batch = null;
@@ -1639,6 +1808,8 @@ function renderJob(j) {
       ${batch.angle !== "keep" ? `<span class="tag warn">改了角度，请核对文字和零件</span>` : ""}
       ${j.input?.partCount ? `<span class="tag warn">标注配件 ${j.input.partCount} 处，请核对是否都在</span>` : ""}
       ${phaseText}
+      ${j.usageDelta ? `<span class="tag">额度 5 小时 -${j.usageDelta.fiveHour ?? "?"}% · 本周 -${j.usageDelta.weekly ?? "?"}%</span>` : ""}
+      ${j.quotaRetries && j.status !== "ok" ? `<span class="tag warn">额度不足，等待重做</span>` : ""}
     </div>
     <div class="pair">
       ${picHtml(j.file.crop ? "原图（框选）" : "原图", { url: inp.dataUrl || inp.url, w: inp.w, h: inp.h, bytes: inp.bytes ?? j.file.size })}
@@ -1658,7 +1829,16 @@ function renderSummary() {
   const avg = done.length ? (done.reduce((s, j) => s + (j.endedAt - j.startedAt) / 1000, 0) / done.length).toFixed(1) : "-";
   const gens = done.map((j) => j.attempts[j.attempts.length - 1].result?.phases?.genSec).filter((x) => x != null);
   const avgGen = gens.length ? (gens.reduce((a, b) => a + b, 0) / gens.length).toFixed(1) : "-";
-  $("summary").textContent = `共 ${jobs.length} 张：完成 ${c.ok}，失败 ${c.fail}，进行中 ${c.running}，排队 ${c.waiting}${c.cancel ? "，取消 " + c.cancel : ""} · 成功的平均 ${avg} 秒/张（其中生图 ${avgGen} 秒）`;
+  const ds = done.map((j) => j.usageDelta).filter((d) => d && d.fiveHour != null);
+  let usageText = "";
+  if (ds.length) {
+    const a5 = ds.reduce((x, d) => x + d.fiveHour, 0) / ds.length;
+    const wk = ds.filter((d) => d.weekly != null);
+    const aw = wk.length ? wk.reduce((x, d) => x + d.weekly, 0) / wk.length : null;
+    usageText = ` · 每张平均用掉 5 小时额度 ${a5.toFixed(2)}%${aw != null ? `、周额度 ${aw.toFixed(2)}%` : ""}` +
+      `（照这样 5 小时约 ${a5 > 0 ? Math.floor(100 / a5) : "∞"} 张${aw ? `，一周约 ${Math.floor(100 / aw)} 张` : ""}）`;
+  }
+  $("summary").textContent = `共 ${jobs.length} 张：完成 ${c.ok}，失败 ${c.fail}，进行中 ${c.running}，排队 ${c.waiting}${c.cancel ? "，取消 " + c.cancel : ""} · 成功的平均 ${avg} 秒/张（其中生图 ${avgGen} 秒）${usageText}`;
   $("toolbar").hidden = jobs.length === 0;
   $("empty").style.display = jobs.length ? "none" : "";
   $("stopBtn").disabled = !running;
@@ -1753,15 +1933,25 @@ async function runJob(j) {
         break;
       }
       j.error = res.error + (res.stderrTail ? "\nagy 错误输出：" + res.stderrTail : "");
+      if (res.quotaError) { j.quotaHit = true; break; } // 额度类错误不重试，交给队列暂停
     } catch (e) {
       if (e.name === "AbortError") { j.status = "cancel"; break; }
       j.error = e.message;
     }
   }
+  if (j.status === "running" && j.quotaHit && running) {
+    // 额度不足：这张放回队首，暂停到额度重置后再做
+    j.status = "waiting";
+    j.quotaRetries = (j.quotaRetries || 0) + 1;
+    renderJob(j);
+    renderSummary();
+    return "quota";
+  }
   if (j.status === "running") j.status = running ? "fail" : "cancel";
   j.endedAt = Date.now();
   renderJob(j);
   renderSummary();
+  return j.status;
 }
 
 $("startBtn").addEventListener("click", async () => {
@@ -1806,13 +1996,34 @@ $("startBtn").addEventListener("click", async () => {
     renderJob(j);
   }
 
+  if (s.trackUsage) await fetchUsage(); // 开始前的额度，算第 1 张的消耗
   const queue = [...jobs];
   const worker = async () => {
-    while (running && queue.length) await runJob(queue.shift());
+    while (running && queue.length) {
+      await waitIfPaused();
+      if (!running || !queue.length) break;
+      const j = queue.shift();
+      j.quotaHit = false;
+      const r = await runJob(j);
+      if (r === "quota") {
+        queue.unshift(j);
+        const u = await fetchUsage();
+        const w = u && [u.fiveHour, u.weekly].filter(Boolean).sort((a, b) => a.remaining - b.remaining)[0];
+        const until = w && w.resetsAt && w.remaining < 5 ? w.resetsAt + 60e3 : Date.now() + 30 * 60e3;
+        pauseUntil(until, `额度不足或请求太频繁（${j.file.name}）`);
+        continue;
+      }
+      await afterJobUsage(j);
+      renderJob(j);
+      renderSummary();
+      if (running && queue.length && batch.interval && !pause) pauseUntil(Date.now() + batch.interval * 1000, `按设置每张间隔 ${batch.interval} 秒`);
+    }
   };
   await Promise.all(Array.from({ length: s.concurrency }, worker));
   jobs.filter((j) => j.status === "waiting").forEach((j) => { j.status = "cancel"; renderJob(j); });
   running = false;
+  pause = null;
+  renderPause();
   batch.endedAt = Date.now();
   updateStartBtn();
   renderSummary();
@@ -1820,6 +2031,8 @@ $("startBtn").addEventListener("click", async () => {
 
 $("stopBtn").addEventListener("click", () => {
   running = false;
+  pause = null;
+  renderPause();
   jobs.forEach((j) => j.status === "running" && j.controller?.abort());
 });
 $("clearBtn").addEventListener("click", () => {
@@ -1837,11 +2050,13 @@ $("copyLog").addEventListener("click", async () => {
   if (!jobs.length) return;
   const b = batch;
   const lines = [];
-  lines.push("# agy 产品精修测试结果（v6）");
+  lines.push("# agy 产品精修测试结果（v7）");
   lines.push(`时间（北京）：${beijingTime(b.startedAt)}${b.endedAt ? " ~ " + beijingTime(b.endedAt) : "（进行中）"}`);
   lines.push(`浏览器：${navigator.userAgent}`);
   lines.push(`处理模式：${b.modeLabel}`);
   lines.push(`设置：模型 ${b.modelName}（${b.model || "默认"}）；背景 ${b.background === "white" ? "白底图" : "原图背景"}；比例 ${b.ratioLabel}；输出尺寸 ${SIZE_LABEL[b.outSize]}；格式 ${FORMAT_LABEL[b.format]}；主体大小 ${FILL_LABEL[b.fill]}；拍摄角度 ${ANGLE_LABEL[b.angle]}`);
+  lines.push(`额度设置：每张查额度 ${b.trackUsage ? "开" : "关"}；每张间隔 ${b.interval} 秒；低于 ${b.pauseBelow || "-"}% 暂停；快速模式 ${b.fastMode ? "开（AI 不看图）" : "关"}`);
+  if (usage) lines.push(`当前额度：5 小时剩 ${usage.fiveHour?.remaining ?? "-"}%（重置 ${fmtReset(usage.fiveHour?.resetsAt)}）；本周剩 ${usage.weekly?.remaining ?? "-"}%（重置 ${fmtReset(usage.weekly?.resetsAt)}）；查于 ${usage.checkedAt}`);
   lines.push(`调整：精修 ${b.retouch === "on" ? "开" : "关"}；清晰度 ${b.sharp === "enhance" ? "提升（AI）" : "原样"}；对比度 ${TONE_LABEL[b.contrast]}；亮度 ${BRIGHT_LABEL[b.bright]}`);
   lines.push(`测试设置：委派 image-generator；越权即结束 ${b.guard ? "开" : "关"}；同时处理 ${b.concurrency} 张；模板 ${b.lang === "zh" ? "中文" : "英文"}${b.template === DEFAULT_TEMPLATES[b.lang] ? "（默认）" : "（改过）"}`);
   lines.push(`精修要求：${b.requirement || "（无）"}`);
@@ -1881,6 +2096,8 @@ $("copyLog").addEventListener("click", async () => {
       lines.push(`AI 原图：${o.ai.fileName}，${o.ai.w}×${o.ai.h}（约 ${o.ai.w ? simpleRatio(o.ai.w, o.ai.h) : "?"}），${fmtBytes(o.ai.bytes)}，开始后 ${o.ai.readyAfterSec} 秒写入${o.final?.subjectPct ? `；商品在 AI 原图里约占 ${o.final.subjectPct}%` : ""}`);
       if (o.final && !o.final.same) lines.push(`最终输出：${o.final.w}×${o.final.h}，${fmtBytes(o.final.bytes)}${o.final.note ? "，" + o.final.note : ""}${o.final.upscaled ? "，放大" : ""}`);
     }
+    if (j.usageDelta) lines.push(`额度消耗：5 小时 ${j.usageDelta.fiveHour ?? "?"}%，本周 ${j.usageDelta.weekly ?? "?"}%`);
+    if (j.quotaRetries) lines.push(`遇到额度不足 ${j.quotaRetries} 次（已暂停等待后重做）`);
     if (j.text) lines.push(`agy 回复：${cut(j.text.trim(), 600)}`);
     lines.push("");
   }
@@ -1987,6 +2204,7 @@ document.addEventListener("keydown", (e) => {
 
 applyMode(mode);
 loadModels(false);
+fetchUsage();
 updateSizeNote();
 renderSummary();
 </script>
