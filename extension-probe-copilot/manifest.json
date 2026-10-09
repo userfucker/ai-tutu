@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "AI图图 · Copilot 页面探测",
+  "version": "0.1.0",
+  "description": "收集 Copilot 网页的输入框、上传、发送、出图等页面结构，用来开发 AI图图 插件。",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://copilot.microsoft.com/*",
+        "https://m365.cloud.microsoft/*",
+        "https://copilot.cloud.microsoft/*",
+        "https://www.bing.com/chat*",
+        "https://www.bing.com/images/create*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": { "service_worker": "background.js" },
+  "host_permissions": [
+    "https://copilot.microsoft.com/*",
+    "https://*.bing.com/*",
+    "https://*.bing.net/*",
+    "https://m365.cloud.microsoft/*",
+    "https://copilot.cloud.microsoft/*",
+    "https://*.microsoft.com/*",
+    "https://*.office.com/*",
+    "https://*.sharepoint.com/*"
+  ]
+}
