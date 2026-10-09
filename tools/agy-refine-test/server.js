@@ -697,6 +697,16 @@ const server = http.createServer(async (req, res) => {
       }
     } else if (req.method === "POST" && p === "/api/refine") {
       await handleRefine(req, res);
+    } else if (req.method === "GET" && p.startsWith("/lib/")) {
+      // 和浏览器插件共用的图片处理代码（extension/lib/imagekit.js）
+      const libDir = path.resolve(ROOT, "..", "..", "extension", "lib");
+      const full = path.resolve(libDir, "." + p.slice("/lib".length));
+      if (!full.startsWith(libDir + path.sep)) {
+        res.writeHead(403);
+        res.end();
+        return;
+      }
+      await serveFile(res, full);
     } else if (req.method === "GET" && p.startsWith("/runs/")) {
       // 只允许读 runs/ 目录里面的文件
       const full = path.resolve(RUNS_DIR, "." + p.slice("/runs".length));
