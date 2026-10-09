@@ -11,7 +11,7 @@
 (() => {
   if (window.__aitutuProbe) return;
   window.__aitutuProbe = true;
-  const VERSION = "probe-0.1.1";
+  const VERSION = "probe-0.2.0";
 
   // ------------------------------------------------------------ 小工具
   const short = (s, n = 50) => {
@@ -133,7 +133,9 @@
       .map((e) => ({ ...desc(e), textLength: (e.innerText || e.value || "").length }));
     r.fileInputs = [...document.querySelectorAll('input[type="file"]')].filter((e) => !isOurs(e)).map(desc);
     const allBtns = [...document.querySelectorAll('button,[role="button"]')].filter((e) => !isOurs(e));
-    r.navButtonsSkipped = allBtns.filter(inNav).length;
+    // 左侧边栏的按钮也收（用户同意收集对话标题），主要为了找“发起新对话”
+    r.navButtons = allBtns.filter(inNav).filter(visible).slice(0, 60).map((e) => ({ aria: short(e.getAttribute("aria-label")), text: btnText(e), testid: e.getAttribute("data-test-id") || undefined, path: cssPath(e) }));
+    r.navLinks = [...document.querySelectorAll("a[href]")].filter((e) => !isOurs(e) && inNav(e) && visible(e)).slice(0, 15).map((e) => ({ aria: short(e.getAttribute("aria-label")), text: btnText(e), href: e.getAttribute("href"), path: cssPath(e) }));
     r.buttons = allBtns
       .filter((e) => !inNav(e) && visible(e))
       .slice(0, 150)
@@ -156,6 +158,10 @@
     r.iframes = [...document.querySelectorAll("iframe")].map((f) => {
       try { return new URL(f.src).origin; } catch { return "(无地址)"; }
     });
+    const send = document.querySelector("gem-icon-button.send-button button, .send-button-container button");
+    r.sendButton = send ? { aria: short(send.getAttribute("aria-label")), disabled: send.disabled || send.getAttribute("aria-disabled") === "true", path: cssPath(send) } : null;
+    r.generatedImages = generatedImages().map((i) => ({ src: redactSrc(i.currentSrc || i.src), natural: `${i.naturalWidth}x${i.naturalHeight}`, classes: cls(i), shimmer: !!i.closest(".gem-shimmer-active") }));
+    r.attachments = { count: attachCount(), loading: attachLoading() };
     r.recording = recLog;
     r.tests = tests;
     return r;
@@ -233,8 +239,17 @@
     const blob = await new Promise((r) => c.toBlob(r, "image/png"));
     return new File([blob], "aitutu-test.png", { type: "image/png" });
   }
-  const attachCount = () =>
-    [...document.querySelectorAll("img")].filter((i) => !isOurs(i) && /^(blob:|data:)/.test(i.currentSrc || i.src)).length;
+  /** 输入区里的附件数量（Gemini：uploader-file-preview）；还在上传的数量（带 loading） */
+  const attachCount = () => document.querySelectorAll("input-container uploader-file-preview, uploader-file-preview").length;
+  const attachLoading = () => document.querySelectorAll("uploader-file-preview .loading, uploader-file-preview [class*='loading']").length;
+  async function waitAttach(before, ms = 8000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      if (attachCount() > before && !attachLoading()) return { added: attachCount() - before, waitedMs: Date.now() - t0 };
+      await sleep(200);
+    }
+    return { added: attachCount() - before, stillLoading: attachLoading(), waitedMs: ms };
+  }
 
   async function testFill() {
     const out = {};
@@ -246,84 +261,87 @@
     const okCmd = document.execCommand("insertText", false, "AI图图测试");
     await sleep(300);
     out.insertText = { execCommandReturned: okCmd, lengthBefore: before, lengthAfter: (input.innerText || input.value || "").length };
+    const file = await makeTestFile();
 
     // 方法 1：在输入框上模拟粘贴图片
-    const file = await makeTestFile();
-    const a0 = attachCount();
+    let a = attachCount();
     const dt = new DataTransfer();
     dt.items.add(file);
     input.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
-    await sleep(2500);
-    out.pasteImage = { blobImgsBefore: a0, blobImgsAfter: attachCount() };
+    out.pasteImage = { before: a, ...(await waitAttach(a)) };
 
-    // 方法 2：模拟把图片拖到输入框上
-    const a1 = attachCount();
+    // 方法 2：模拟把图片拖到 Gemini 的拖放区（手动拖图时出现的那个区域）
+    a = attachCount();
+    const zone = document.querySelector(".xap-uploader-dropzone") || input;
+    out.dropZone = cssPath(zone);
     const dt2 = new DataTransfer();
     dt2.items.add(file);
-    for (const type of ["dragenter", "dragover", "drop"]) {
-      input.dispatchEvent(new DragEvent(type, { dataTransfer: dt2, bubbles: true, cancelable: true }));
-    }
-    await sleep(2500);
-    out.dropImage = { blobImgsBefore: a1, blobImgsAfter: attachCount() };
+    zone.dispatchEvent(new DragEvent("dragenter", { dataTransfer: dt2, bubbles: true, cancelable: true }));
+    zone.dispatchEvent(new DragEvent("dragover", { dataTransfer: dt2, bubbles: true, cancelable: true }));
+    await sleep(400);
+    const overlay = document.querySelector("file-drop-indicator .overlay-container") || zone;
+    out.dropOverlay = cssPath(overlay);
+    overlay.dispatchEvent(new DragEvent("dragover", { dataTransfer: dt2, bubbles: true, cancelable: true }));
+    overlay.dispatchEvent(new DragEvent("drop", { dataTransfer: dt2, bubbles: true, cancelable: true }));
+    out.dropImage = { before: a, ...(await waitAttach(a)) };
 
-    // 方法 3：页面上如果已经有文件选择框，直接给它塞文件
-    const fi = [...document.querySelectorAll('input[type="file"]')].filter((e) => !isOurs(e));
-    out.fileInputsFound = fi.length;
-    if (fi.length) {
-      const a2 = attachCount();
-      const dt3 = new DataTransfer();
-      dt3.items.add(file);
-      try {
-        fi[0].files = dt3.files;
-        fi[0].dispatchEvent(new Event("change", { bubbles: true }));
-        fi[0].dispatchEvent(new Event("input", { bubbles: true }));
-        await sleep(2500);
-        out.fileInput = { el: desc(fi[0]), blobImgsBefore: a2, blobImgsAfter: attachCount() };
-      } catch (e) {
-        out.fileInput = { error: String(e) };
-      }
-    }
+    out.fileInputsFound = [...document.querySelectorAll('input[type="file"]')].filter((e) => !isOurs(e)).length;
+    out.attachmentsNow = attachCount();
     tests.fill = out;
   }
 
+  /** Gemini 生成的图：generated-image 里的 img（可能是 blob: 或 https: 地址） */
+  function generatedImages() {
+    const list = [...document.querySelectorAll("generated-image img, single-image img")].filter((i) => !isOurs(i) && i.naturalWidth >= 200);
+    return list.length ? list : bigImages().filter((i) => !i.closest("user-query, uploader-file-preview"));
+  }
+
   async function testFetch() {
-    const imgs = bigImages().filter((i) => /^https:/.test(i.currentSrc || i.src));
+    const imgs = generatedImages();
     const img = imgs[imgs.length - 1];
     if (!img) { tests.fetch = { error: "页面上没找到生成的图片（先让 Gemini 生成一张图）" }; return; }
     const src = img.currentSrc || img.src;
-    const out = { src: redactSrc(src), shown: `${img.naturalWidth}x${img.naturalHeight}` };
-    // 网页里直接取（带 / 不带 Cookie 各试一次：带 Cookie 时更容易被跨域规则拦）
+    const out = { count: imgs.length, src: redactSrc(src), kind: src.split(":")[0], shown: `${img.naturalWidth}x${img.naturalHeight}`, classes: cls(img) };
+    const sizeOf = async (blob) => {
+      try { const bm = await createImageBitmap(blob); const d = `${bm.width}x${bm.height}`; bm.close(); return d; } catch { return null; }
+    };
+    // 网页里直接取（blob: 地址只能在网页里取）
     for (const [key, cred] of [["pageFetch", "include"], ["pageFetchNoCookie", "omit"]]) {
       try {
         const r = await fetch(src, { credentials: cred });
         const b = await r.blob();
-        out[key] = { ok: r.ok, status: r.status, type: b.type, size: b.size };
+        out[key] = { ok: r.ok, status: r.status, type: b.type, size: b.size, dims: await sizeOf(b) };
       } catch (e) {
         out[key] = { ok: false, error: String(e.message || e) };
       }
     }
-    // 画到画布上能不能读出像素（能读 = 插件可以直接拿网页上显示的那张图做后期）
+    // 画到画布上能不能读出像素
     try {
       const c = document.createElement("canvas");
       c.width = img.naturalWidth; c.height = img.naturalHeight;
-      c.getContext("2d").drawImage(img, 0, 0);
-      c.getContext("2d").getImageData(0, 0, 1, 1);
-      out.canvasRead = { ok: true };
+      const g = c.getContext("2d");
+      g.drawImage(img, 0, 0);
+      const px = g.getImageData(Math.floor(c.width / 2), Math.floor(c.height / 2), 1, 1).data;
+      const blob = await new Promise((r) => c.toBlob(r, "image/png"));
+      out.canvasRead = { ok: true, centerPixel: Array.from(px).join(","), pngSize: blob && blob.size };
     } catch (e) {
-      out.canvasRead = { ok: false, error: String(e.message || e).slice(0, 80) };
+      out.canvasRead = { ok: false, error: String(e.message || e).slice(0, 100) };
     }
-    // 插件后台取
-    const viaBg = (url) => new Promise((resolve) => {
-      try { chrome.runtime.sendMessage({ type: "aitutu-fetch", url }, (res) => resolve(res || { ok: false, error: String(chrome.runtime.lastError?.message || "无回复") })); }
-      catch (e) { resolve({ ok: false, error: String(e) }); }
-    });
-    out.bgFetch = await viaBg(src);
-    // 试着要原尺寸：googleusercontent 的地址结尾常带 =s1024 之类的尺寸参数，换成 =s0 / =d 试试
-    const m = /^(.*?)(=[^/=]*)?$/.exec(src);
-    if (/googleusercontent\.com/.test(src) && m) {
-      out.bgFetchS0 = await viaBg(m[1] + "=s0");
-      out.bgFetchD = await viaBg(m[1] + "=d");
+    if (/^https:/.test(src)) {
+      const viaBg = (url) => new Promise((resolve) => {
+        try { chrome.runtime.sendMessage({ type: "aitutu-fetch", url }, (res) => resolve(res || { ok: false, error: String(chrome.runtime.lastError?.message || "无回复") })); }
+        catch (e) { resolve({ ok: false, error: String(e) }); }
+      });
+      out.bgFetch = await viaBg(src);
+      const m = /^(.*?)(=[^/=]*)?$/.exec(src);
+      if (/googleusercontent\.com/.test(src) && m) {
+        out.bgFetchS0 = await viaBg(m[1] + "=s0");
+        out.bgFetchD = await viaBg(m[1] + "=d");
+      }
     }
+    // 下载按钮的信息（不点它，只看在哪）
+    const dl = img.closest("generated-image, single-image")?.querySelector("download-generated-image-button button");
+    out.downloadButton = dl ? { aria: short(dl.getAttribute("aria-label")), path: cssPath(dl) } : null;
     tests.fetch = out;
   }
 
