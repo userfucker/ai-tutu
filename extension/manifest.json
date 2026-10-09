@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AI图图 · Gemini 电商作图助手",
-  "version": "0.1.3",
-  "description": "在 Gemini 网页版里批量做抠白底图 / 产品精修：右侧面板加图、自动贴图发提示词、取回原图后处理，单张或打包下载。",
+  "name": "AI图图 · 电商作图助手（Gemini / Copilot）",
+  "version": "0.2.0",
+  "description": "在 Gemini / Copilot 网页版里批量做抠白底图 / 产品精修：右侧面板加图、自动贴图发提示词、取回原图后处理，单张或打包下载。Copilot 请用谷歌浏览器（Edge 不允许插件进 Copilot）。",
   "permissions": [
     "storage"
   ],
@@ -13,7 +13,22 @@
       ],
       "js": [
         "lib/imagekit.js",
+        "content/common.js",
         "content/gemini.js",
+        "content/panel.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://copilot.com/*",
+        "https://*.copilot.com/*",
+        "https://copilot.microsoft.com/*"
+      ],
+      "js": [
+        "lib/imagekit.js",
+        "content/common.js",
+        "content/copilot.js",
         "content/panel.js"
       ],
       "run_at": "document_idle"
@@ -26,6 +41,11 @@
     "https://gemini.google.com/*",
     "https://*.googleusercontent.com/*",
     "https://*.google.com/*",
-    "https://*.gstatic.com/*"
+    "https://*.gstatic.com/*",
+    "https://copilot.com/*",
+    "https://*.copilot.com/*",
+    "https://copilot.microsoft.com/*",
+    "https://*.bing.com/*",
+    "https://*.microsoft.com/*"
   ]
 }

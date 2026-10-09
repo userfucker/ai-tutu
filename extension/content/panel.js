@@ -1,5 +1,5 @@
 /**
- * AI图图 · Gemini 电商作图助手：右侧面板（2026-10-09）
+ * AI图图 · 电商作图助手：右侧面板（2026-10-09；Gemini / Copilot 共用，网页操作走 AITUTU_SITE）
  *
  * 在 Gemini 页面右侧放一个可以左右收起的面板：上传 / 粘贴多张产品图，框选、标注配件、取色，
  * 选处理模式和参数，然后一批一批交给 Gemini 网页版生成（A：插件填好你按回车；B：插件自动发送），
@@ -9,7 +9,10 @@
 (() => {
   if (window.__aitutuPanel) return;
   window.__aitutuPanel = true;
-  const VERSION = "0.1.3";
+  const VERSION = "0.2.0";
+  const SITE = AITUTU_SITE; // gemini.js 或 copilot.js 提供
+  const AI = SITE.name;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // ------------------------------------------------------------ 设置
   const MODES = {
@@ -20,7 +23,7 @@
   const DEFAULTS = {
     mode: "white", ratio: "1:1", background: "white", outSize: "800", format: "jpeg", fill: "85", angle: "keep",
     retouch: "on", sharp: "keep", contrast: "0", bright: "0", requirement: "",
-    batchSize: 10, session: "new", everyN: 5, send: "B", model: "Flash", extended: "any",
+    batchSize: 10, session: "new", everyN: 5, send: "B", model: "Flash", extended: "any", holes: "off",
   };
   const LABELS = {
     outSize: { 800: "800×800", 1024: "1K（1024）", original: "AI 原尺寸" },
@@ -133,7 +136,7 @@
   <div class="panel">
     <div class="card">
       <div class="row"><h2>AI图图 · 电商作图</h2><span class="muted" style="margin-left:auto">v${VERSION}</span></div>
-      <div class="muted">在 Gemini 网页版里批量精修产品图。每张都由 Gemini 生成，插件负责填图、填提示词、收图和后期处理。</div>
+      <div class="muted">在 ${AI} 网页版里批量精修产品图。每张都由 ${AI} 生成，插件负责填图、填提示词、收图和后期处理。</div>
     </div>
 
     <div class="card">
@@ -161,6 +164,7 @@
           <option value="9:16">9:16 竖屏</option><option value="16:9">16:9 宽屏</option></select></label>
         <label class="f">输出尺寸<select id="outSize"></select></label>
         <label class="f">输出格式<select id="format"></select></label>
+        <label class="f" id="holesWrap" hidden title="戒指、环形零件这类中间有洞的产品才选“也抠透明”；金属件选“保留”，否则大块白色高光会被抠透明">镂空处<select id="holes"><option value="off">保留（金属件选这个）</option><option value="on">也抠透明（戒指等）</option></select></label>
         <label class="f">主体大小<select id="fill"><option value="keep">保持原图</option><option value="70">适中 70%</option><option value="85">饱满 85%</option></select></label>
         <label class="f">拍摄角度<select id="angle"><option value="keep">保持原图</option><option value="auto">自动摆正</option><option value="front">正面平视</option><option value="45">45° 俯视</option><option value="top">正上方俯拍</option></select></label>
         <label class="f">精修<select id="retouch"><option value="on">精修（去瑕疵）</option><option value="off">不精修</option></select></label>
@@ -173,8 +177,8 @@
     <div class="card">
       <b>批量</b>
       <div class="grid" style="margin-top:6px">
-        <label class="f">Gemini 模型<select id="model"><option value="Flash">Flash（推荐）</option><option value="Pro">Pro</option><option value="Flash-Lite">Flash-Lite</option><option value="">不切换（用网页上选的）</option></select></label>
-        <label class="f">扩展思考<select id="extended"><option value="any">不管</option><option value="off">关</option><option value="on">开</option></select></label>
+        <label class="f" id="modelWrap">${AI} 模型<select id="model"><option value="Flash">Flash（推荐）</option><option value="Pro">Pro</option><option value="Flash-Lite">Flash-Lite</option><option value="">不切换（用网页上选的）</option></select></label>
+        <label class="f" id="extendedWrap">扩展思考<select id="extended"><option value="any">不管</option><option value="off">关</option><option value="on">开</option></select></label>
         <label class="f">每批张数<input type="number" id="batchSize" min="1" max="50"></label>
         <label class="f">发送方式<select id="send"><option value="B">B：插件自动发送</option><option value="A">A：插件填好，我按回车</option></select></label>
         <label class="f">会话方式<select id="session"><option value="new">每张新会话</option><option value="current">当前会话连续做</option><option value="everyN">每 N 张换新会话</option></select></label>
@@ -257,11 +261,13 @@
         el.value = [...el.options].some((o) => o.value === S[id]) ? S[id] : el.options[0].value;
       }
     }
+    $("modelWrap").hidden = $("extendedWrap").hidden = !SITE.ensureMode;
     const alphaOpt = [...$("format").options].find((o) => o.value === "png-alpha");
     if (alphaOpt) {
       alphaOpt.disabled = $("background").value !== "white";
       if (alphaOpt.disabled && $("format").value === "png-alpha") $("format").value = "jpeg";
     }
+    $("holesWrap").hidden = $("format").value !== "png-alpha";
   }
   function readSettings() {
     for (const id of FIELDS) S[id] = $(id).value;
@@ -271,6 +277,7 @@
     S.everyN = Math.max(1, Math.min(50, Number($("everyN").value) || 5));
     S.send = $("send").value;
     S.model = $("model").value;
+    S.holes = $("holes").value;
     S.extended = $("extended").value;
   }
   function renderBatchHints() {
@@ -286,6 +293,7 @@
     $("everyN").value = S.everyN;
     $("send").value = S.send;
     $("model").value = S.model ?? "Flash";
+    $("holes").value = S.holes || "off";
     $("extended").value = S.extended || "any";
     applyMode();
     renderBatchHints();
@@ -369,10 +377,10 @@
     files = [];
     renderThumbs();
   });
-  // Ctrl+V：只在最近点过面板时接管（否则让 Gemini 自己处理粘贴）
+  // Ctrl+V：只在最近点过面板时接管（否则让网页自己处理粘贴）
   document.addEventListener("pointerdown", (e) => { panelActive = e.composedPath().includes(host); }, true);
   document.addEventListener("paste", (e) => {
-    // 只接管你真按的 Ctrl+V；插件自己往 Gemini 输入框模拟的粘贴（isTrusted=false）不能拦
+    // 只接管你真按的 Ctrl+V；插件自己往网页输入框模拟的粘贴（isTrusted=false）不能拦
     if (!panelActive || !e.isTrusted) return;
     const items = [...(e.clipboardData?.items || [])].filter((it) => it.kind === "file" && it.type.startsWith("image/"));
     if (!items.length) return;
@@ -391,7 +399,7 @@
   const edFile = () => files[edIndex];
   const TOOL_HINT = {
     crop: "按住拖出一个框，把商品框进去（四周留一点空）。拖框内部移动，拖四个角调大小。",
-    brush: "在容易被当成杂物的小配件上涂抹，连在一起的算一个配件；会把标注图和配件特写一起交给 Gemini。",
+    brush: `在容易被当成杂物的小配件上涂抹，连在一起的算一个配件；会把标注图和配件特写一起交给 ${AI}。`,
     eraser: "擦掉涂错的地方。",
     picker: "在产品上点一下取色号，要求这个部位保持这个颜色（最多 8 个）。",
   };
@@ -440,7 +448,7 @@
   function drawSel() {
     const f = edFile();
     const extra = (f.parts?.length ? ` · 配件 ${f.parts.length} 处` : "") + (f.colors?.length ? ` · 颜色 ${f.colors.length} 个` : "");
-    if (!edRect) { $("sel").hidden = true; $("mInfo").textContent = "未框选：整张图交给 Gemini" + extra; return; }
+    if (!edRect) { $("sel").hidden = true; $("mInfo").textContent = `未框选：整张图交给 ${AI}` + extra; return; }
     const sel = $("sel");
     sel.hidden = false;
     Object.assign(sel.style, { left: edRect.x * 100 + "%", top: edRect.y * 100 + "%", width: edRect.w * 100 + "%", height: edRect.h * 100 + "%" });
@@ -615,14 +623,14 @@
       const [label, cls] = STATUS[j.status];
       const sec = j.endedAt ? ` ${((j.endedAt - j.startedAt) / 1000).toFixed(0)} 秒` : "";
       return `<div class="job">
-        <img src="${j.inputUrl || j.file.dataUrl}" data-view="${j.inputUrl || j.file.dataUrl}" title="交给 Gemini 的图">
+        <img src="${j.inputUrl || j.file.dataUrl}" data-view="${j.inputUrl || j.file.dataUrl}" title="交给 ${AI} 的图">
         ${j.outUrl ? `<img src="${j.outUrl}" data-view="${j.outUrl}" title="最终输出">` : `<div class="ph">${j.status === "running" ? "生成中…" : "—"}</div>`}
         <div><div><b>${esc(j.file.name)}</b></div>
           <span class="tag ${cls}">${label}${sec}</span>${j.w ? `<span class="tag">${j.w}×${j.h}${j.ext === ".png" ? " PNG" : ""}</span>` : ""}${j.note ? `<span class="tag">${esc(j.note)}</span>` : ""}${j.model ? `<span class="tag${j.modeWarn ? " warn" : ""}" title="${esc(j.modeWarn || "")}">${esc(j.model)}${j.modeWarn ? " ⚠" : ""}</span>` : ""}
           ${j.partCount ? `<span class="tag warn">标注配件 ${j.partCount} 处，请核对</span>` : ""}
           <div class="txt">${esc(j.steps[j.steps.length - 1] || "")}</div>
           ${j.error ? `<div class="txt" style="color:#b91c1c">${esc(j.error)}</div>` : ""}
-          ${j.text && j.status !== "ok" ? `<div class="txt">Gemini：${esc(j.text.slice(0, 160))}</div>` : ""}
+          ${j.text && j.status !== "ok" ? `<div class="txt">${AI}：${esc(j.text.slice(0, 160))}</div>` : ""}
           <div class="row" style="margin-top:3px">
             ${j.outUrl ? `<button data-dl="${j.id}">下载</button>` : ""}${j.aiUrl ? `<button data-view="${j.aiUrl}">看 AI 原图</button>` : ""}
             ${["refused", "fail", "cancel"].includes(j.status) && !running ? `<button data-retry="${j.id}">重做这张</button>` : ""}
@@ -673,11 +681,11 @@
     for (const j of jobs) {
       lines.push(`## ${j.file.name}：${STATUS[j.status][0]}${j.endedAt ? `，${((j.endedAt - j.startedAt) / 1000).toFixed(1)} 秒` : ""}`);
       lines.push(`原图 ${j.file.w}×${j.file.h}${j.file.crop ? `，框选 ${j.inputW}×${j.inputH}` : ""}；AI 比例 ${j.aiRatio}；模型 ${j.model || "?"}；新会话 ${j.newChat ? "是" : "否"}；配件 ${j.partCount || 0}；颜色 ${j.file.colors?.length || 0}`);
-      if (j.aiW) lines.push(`Gemini 出图：${j.aiW}×${j.aiH}，${Math.round(j.aiBytes / 1024)} KB；最终输出：${j.w}×${j.h}${j.ext}${j.note ? "，" + j.note : ""}`);
+      if (j.aiW) lines.push(`${AI} 出图：${j.aiW}×${j.aiH}，${Math.round(j.aiBytes / 1024)} KB；最终输出：${j.w}×${j.h}${j.ext}${j.note ? "，" + j.note : ""}`);
       j.steps.forEach((s) => lines.push("- " + s));
       if (j.modeWarn) lines.push("提示：" + j.modeWarn);
       if (j.error) lines.push("错误：" + j.error);
-      if (j.text) lines.push("Gemini 回复：" + j.text.slice(0, 500));
+      if (j.text) lines.push(`${AI} 回复：` + j.text.slice(0, 500));
       lines.push("");
     }
     if (jobs[0]?.prompt) lines.push("## 第 1 张的提示词", jobs[0].prompt);
@@ -694,15 +702,15 @@
   async function waitVisible(signal) {
     while (document.visibilityState !== "visible") {
       if (signal.aborted) throw new Error("已停止");
-      setStatus("Gemini 页面在后台，已暂停。切回这个标签页后自动继续。", "warn");
-      await gemSleep(1000);
+      setStatus(`${AI} 页面在后台，已暂停。切回这个标签页后自动继续。`, "warn");
+      await sleep(1000);
     }
   }
   async function countdown(sec, signal, what) {
     for (let t = sec; t > 0; t--) {
       if (signal.aborted) throw new Error("已停止");
       setStatus(`${what}：${t} 秒后发送下一张…`, "");
-      await gemSleep(1000);
+      await sleep(1000);
     }
   }
   function aiRatioOf(f) {
@@ -730,16 +738,16 @@
     j.newChat = needNew;
     if (needNew) {
       step(j, "发起新对话");
-      await gemNewChat(signal);
+      await SITE.newChat(signal);
       sessionCount = 0;
     }
     // 模型：每张发之前看一眼，不对就切（新对话有时会变回默认模型）
     const wantExt = S.extended === "on" ? true : S.extended === "off" ? false : null;
-    if (S.model || wantExt !== null) {
+    if (SITE.ensureMode && (S.model || wantExt !== null)) {
       // 切换失败不停下：按网页上当前的模型继续做，结果上标黄色提示
       try {
-        const before = gemCurrentMode();
-        const after = await gemEnsureMode(S.model, wantExt, signal);
+        const before = SITE.currentMode();
+        const after = await SITE.ensureMode(S.model, wantExt, signal);
         if (before && after && before.label !== after.label) step(j, `切换模型：${before.label} → ${after.label}`);
       } catch (e) {
         if (signal.aborted) throw e;
@@ -747,39 +755,39 @@
         step(j, "⚠ " + j.modeWarn);
       }
     }
-    j.model = gemCurrentMode()?.label || "（没找到模型按钮）";
-    j.prompt = buildWebPrompt(S, j.file, j.aiRatio, { fresh: !needNew && (sessionCount > 0 || !isFirst || GEM.responses().length > 0) });
+    j.model = SITE.currentMode ? SITE.currentMode()?.label || "（没找到模型按钮）" : "";
+    j.prompt = buildWebPrompt(S, j.file, j.aiRatio, { fresh: !needNew && (sessionCount > 0 || !isFirst || SITE.hasMessages()) });
     // 3. 填图和提示词
-    await gemClearInput(signal);
+    await SITE.clearInput(signal);
     step(j, `贴图 ${upload.length} 张`);
-    await gemPasteFiles(upload, signal);
+    await SITE.pasteFiles(upload, signal);
     step(j, "填提示词");
-    await gemInsertText(j.prompt, signal);
+    await SITE.insertText(j.prompt, signal);
     step(j, "等图片上传完");
-    await gemWaitReady(upload.length, signal);
-    const base = GEM.responses().length;
+    await SITE.waitReady(upload.length, signal);
+    const base = SITE.mark();
     // 4. 发送
     if (S.send === "B") {
       step(j, "自动发送");
-      gemClickSend();
+      SITE.clickSend();
     } else {
-      setStatus(`第 ${j.idx}/${j.total} 张已经填好：请检查 Gemini 输入框，按回车发送。`, "warn");
+      setStatus(`第 ${j.idx}/${j.total} 张已经填好：请检查 ${AI} 输入框，按回车发送。`, "warn");
       step(j, "等你按回车发送");
-      await gemWaitUserSend(base, signal);
+      await SITE.waitUserSend(base, signal);
     }
     sessionCount++;
-    setStatus(`第 ${j.idx}/${j.total} 张：等 Gemini 出图…`);
-    step(j, "等 Gemini 出图");
-    const r = await gemWaitResult(base, signal);
+    setStatus(`第 ${j.idx}/${j.total} 张：等 ${AI} 出图…`);
+    step(j, `等 ${AI} 出图`);
+    const r = await SITE.waitResult(base, signal);
     if (r.alert) { j.status = "fail"; j.error = r.alert; return "alert"; }
     j.text = r.text || "";
     if (r.refused) {
       j.status = "refused";
-      step(j, "Gemini 没有出图");
-      return GEM_LIMIT_RE.test(j.text) ? "limit" : "refused";
+      step(j, `${AI} 没有出图`);
+      return SITE.limitRe.test(j.text) ? "limit" : "refused";
     }
     // 5. 收图 + 后期
-    const blob = await gemGrabImage(r.img);
+    const blob = await SITE.grabImage(r.img);
     j.aiUrl = URL.createObjectURL(blob);
     const img = await loadImage(j.aiUrl);
     j.aiW = img.naturalWidth; j.aiH = img.naturalHeight; j.aiBytes = blob.size;
@@ -789,6 +797,7 @@
       ratio: S.mode === "white" ? 1 : S.mode === "free" && S.ratio !== "auto" ? ratioValue(S.ratio) : null,
       inputRatio: inSize.w / inSize.h, inputSize: inSize,
       outSize: S.outSize, fill: S.fill, background: S.background, format: S.format, contrast: S.contrast, bright: S.bright,
+      holes: S.holes === "on",
     });
     if (out.same) { j.outBlob = blob; j.w = j.aiW; j.h = j.aiH; j.ext = blob.type === "image/png" ? ".png" : ".jpg"; }
     else { j.outBlob = out.blob; j.w = out.w; j.h = out.h; j.ext = out.ext; j.note = out.note; }
@@ -803,7 +812,7 @@
     if (running) return;
     readSettings();
     saveSettings();
-    if (!GEM.input()) { setStatus("没找到 Gemini 输入框：请先打开 gemini.google.com 的对话页面。", "bad"); return; }
+    if (!SITE.input()) { setStatus(`没找到 ${AI} 输入框：请先打开 ${SITE.home} 的对话页面。`, "bad"); return; }
     if (!list && files.length && files.every((f) => f.done)) {
       // 面板里的图都做过了（打了 ✓）：比如换了模型想再做一遍
       if (!confirm(`面板里的 ${files.length} 张图都已经做过（打了 ✓）。\n要把它们全部再做一遍吗？（之前的结果会保留）`)) return;
@@ -838,7 +847,7 @@
       renderJobs();
       renderThumbs();
       if (S.send === "B" && r !== "ok") {
-        stopReason = { alert: j.error, limit: "Gemini 提示额度 / 频率限制", refused: "Gemini 拒绝出图", fail: "出错：" + j.error }[r];
+        stopReason = { alert: j.error, limit: `${AI} 提示额度 / 频率限制`, refused: `${AI} 拒绝出图`, fail: "出错：" + j.error }[r];
         break;
       }
       if (S.send === "B" && i < batchJobs.length - 1) {

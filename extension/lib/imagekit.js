@@ -26,7 +26,7 @@ const T = {
       extra: " Parts not visible in the reference must follow the product's real structure; do not invent text, logos or parts.",
     },
     retouch: {
-      on: "Remove dust, scratches, blemishes, specks and noise; even, soft lighting; realistic material texture; e-commerce main-image quality.",
+      on: "Remove dust, scratches, blemishes, specks and noise, and also dirt, stains, smudges, oil marks, fingerprints, water spots, rust spots and discoloration: these are defects, not part of the product's patterns or colors, so remove them completely and do not add any new marks, stains or discoloration anywhere; even, soft lighting; realistic material texture; e-commerce main-image quality.",
       off: "Do not retouch the product: keep its surface, texture, wear marks, lighting and colors exactly as in the reference; only change what the background and composition requirements ask for.",
     },
     sharp: {
@@ -64,7 +64,7 @@ const T = {
       extra: "原图里看不到的部分要符合产品的真实结构，不要编造文字、Logo 或零件。",
     },
     retouch: {
-      on: "去除灰尘、划痕、瑕疵、杂点和噪点，光线均匀柔和，质感真实，达到电商平台主图的水准。",
+      on: "去除灰尘、划痕、瑕疵、杂点和噪点，还有污渍、油渍、指纹、水印、锈点和变色：这些都是瑕疵，不是产品的花纹或颜色，要彻底去掉，也不要在任何地方新加污渍、痕迹或变色；光线均匀柔和，质感真实，达到电商平台主图的水准。",
       off: "不要精修产品：表面、质感、磨损痕迹、光线和颜色都保持原图的样子，只按背景和构图的要求修改。",
     },
     sharp: {
@@ -275,7 +275,7 @@ function colorsInInput(f) {
 
 /** 白底图上商品的范围（比白色暗的像素），找不到返回 null。坐标是原图像素。 */
 function findSubject(img) {
-  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
   const k = Math.min(1, 600 / Math.max(iw, ih));
   const w = Math.max(1, Math.round(iw * k)), h = Math.max(1, Math.round(ih * k));
   const c = document.createElement("canvas");
@@ -297,6 +297,44 @@ function findSubject(img) {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
+/**
+ * 白底提纯（只用于白底图）：AI 出的“白底”有时是乳白 / 偏黄 / 偏灰（3.1 Pro 实测乳白）。
+ * 取图片四周一圈的颜色当背景色，按它把整张图每个通道等比提亮（背景 → 纯白），产品一起校正，
+ * 所以不会出现“背景一块白一块乳白”的分界；最后把几乎纯白的像素（三个通道都 ≥ 250）定成纯白。
+ * 背景不够白（任何通道 < 200）或已经是纯白时不处理。返回 { canvas, bg, gain } 或 null。
+ */
+function whitenBackground(img) {
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  const c = document.createElement("canvas");
+  c.width = iw; c.height = ih;
+  const g = c.getContext("2d", { willReadFrequently: true });
+  g.drawImage(img, 0, 0);
+  const im = g.getImageData(0, 0, iw, ih);
+  const d = im.data;
+  // 四周 2% 宽的一圈，按亮度取最亮的一半求平均（避开产品碰到边的部分和阴影）
+  const band = Math.max(2, Math.round(Math.min(iw, ih) * 0.02));
+  const px = [];
+  const step = Math.max(1, Math.round(Math.max(iw, ih) / 400));
+  for (let y = 0; y < ih; y += step) for (let x = 0; x < iw; x += step) {
+    if (x >= band && x < iw - band && y >= band && y < ih - band) continue;
+    const i = (y * iw + x) * 4;
+    px.push([d[i], d[i + 1], d[i + 2]]);
+  }
+  px.sort((a, b) => b[0] + b[1] + b[2] - (a[0] + a[1] + a[2]));
+  const top = px.slice(0, Math.max(1, Math.floor(px.length / 2)));
+  const bg = [0, 1, 2].map((k) => top.reduce((t, p) => t + p[k], 0) / top.length);
+  if (bg.some((v) => v < 200) || bg.every((v) => v >= 252)) return null;
+  const gain = bg.map((v) => 255 / Math.max(v, 1));
+  const lut = gain.map((k) => { const t = new Uint8ClampedArray(256); for (let v = 0; v < 256; v++) t[v] = Math.round(v * k); return t; });
+  for (let i = 0; i < d.length; i += 4) {
+    const r = lut[0][d[i]], gg = lut[1][d[i + 1]], b = lut[2][d[i + 2]];
+    if (r >= 250 && gg >= 250 && b >= 250) { d[i] = d[i + 1] = d[i + 2] = 255; }
+    else { d[i] = r; d[i + 1] = gg; d[i + 2] = b; }
+  }
+  g.putImageData(im, 0, 0);
+  return { canvas: c, bg: bg.map((v) => Math.round(v)), gain };
+}
+
 function edgeColor(img) {
   const c = document.createElement("canvas");
   c.width = 64; c.height = 64;
@@ -315,22 +353,36 @@ function edgeColor(img) {
 
 /**
  * 抠透明底（只用于白底图）：
- *  1. 从图片四周往里找“和外边相连的白色”，这部分是背景；产品内部的白色高光不和外边相连，保留。
- *  2. 被产品围起来的大块纯白（比如环形零件中间的孔）也算背景；小块的白算高光，保留。
+ *  1. 从图片四周往里找“和外边相连的纯白”，这部分是背景。只认几乎纯白（容差 T）而且平整的像素：
+ *     碰到明显的明暗变化（轮廓线、金属高光的边）就停，免得顺着贴边的高光抠进产品里（Lee 2026-10-09 反馈金属高光被抠透明）。
+ *  2. opts.holes = true 时，被产品围起来的大块纯白（比如环形零件中间的孔）也算背景；默认不算（金属高光常是大块纯白）。
  *  3. 背景里零星的小杂点去掉。
  *  4. 边缘 1 像素做柔和过渡（去锯齿），并把边缘残留的白色去掉（去白边）。
  */
-function cutoutWhite(g, W, H) {
+function cutoutWhite(g, W, H, opts = {}) {
   const im = g.getImageData(0, 0, W, H);
   const d = im.data;
   const N = W * H;
   const dist = new Uint8Array(N); // 离纯白有多远：0 = 纯白
   for (let i = 0; i < N; i++) dist[i] = 255 - Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
-  const T = 24; // 算“白”的容差
+  const T = 12; // 算“白”的容差（白底提纯后背景基本是 255）
+  // 平整度：和上下左右邻居相差最多多少；背景是平的，轮廓和高光边缘变化大
+  const grad = new Uint8Array(N);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, v = dist[i];
+    let m = 0;
+    if (x > 0) m = Math.max(m, Math.abs(v - dist[i - 1]));
+    if (x < W - 1) m = Math.max(m, Math.abs(v - dist[i + 1]));
+    if (y > 0) m = Math.max(m, Math.abs(v - dist[i - W]));
+    if (y < H - 1) m = Math.max(m, Math.abs(v - dist[i + W]));
+    grad[i] = m;
+  }
+  const G = 6;
+  const isBg = (i) => dist[i] <= T && grad[i] <= G;
   const bg = new Uint8Array(N);
   const q = new Int32Array(N);
   let qh = 0, qt = 0;
-  const seed = (i) => { if (!bg[i] && dist[i] <= T) { bg[i] = 1; q[qt++] = i; } };
+  const seed = (i) => { if (!bg[i] && isBg(i)) { bg[i] = 1; q[qt++] = i; } };
   for (let x = 0; x < W; x++) { seed(x); seed((H - 1) * W + x); }
   for (let y = 0; y < H; y++) { seed(y * W); seed(y * W + W - 1); }
   while (qh < qt) {
@@ -340,21 +392,31 @@ function cutoutWhite(g, W, H) {
     if (i >= W) seed(i - W);
     if (i < N - W) seed(i + W);
   }
-  // 连通块：flag=1 找“被围住的白色”（大块算孔），flag=0 找“前景”（小块算杂点）
+  // 背景旁边还没算进来的白色像素（平整度刚好超一点的过渡像素）：挨着背景、而且很白的也算背景
+  for (let pass = 0; pass < 2; pass++) {
+    const add = [];
+    for (let i = 0; i < N; i++) {
+      if (bg[i] || dist[i] > T) continue;
+      const x = i % W;
+      if ((x > 0 && bg[i - 1]) || (x < W - 1 && bg[i + 1]) || (i >= W && bg[i - W]) || (i < N - W && bg[i + W])) add.push(i);
+    }
+    add.forEach((i) => (bg[i] = 1));
+  }
+  // 连通块：flag=1 找“被围住的白色”（opts.holes 时大块算孔），flag=0 找“前景”（小块算杂点）
   const seen = new Uint8Array(N);
   const holeMin = Math.max(200, N * 0.002);
   const speckMax = Math.max(20, N * 0.00015);
-  for (const white of [1, 0]) {
+  for (const white of opts.holes ? [1, 0] : [0]) {
     seen.fill(0);
     for (let start = 0; start < N; start++) {
-      if (bg[start] || seen[start] || (dist[start] <= T) !== Boolean(white)) continue;
+      if (bg[start] || seen[start] || (white ? !isBg(start) : isBg(start) || dist[start] <= T)) continue;
       qh = 0; qt = 0;
       q[qt++] = start; seen[start] = 1;
       while (qh < qt) {
         const i = q[qh++], x = i % W;
         const nb = [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W];
         for (const j of nb) {
-          if (j < 0 || j >= N || seen[j] || bg[j] || (dist[j] <= T) !== Boolean(white)) continue;
+          if (j < 0 || j >= N || seen[j] || bg[j] || (white ? !isBg(j) : isBg(j) || dist[j] <= T)) continue;
           seen[j] = 1;
           q[qt++] = j;
         }
@@ -381,7 +443,7 @@ function cutoutWhite(g, W, H) {
     if (!edge) continue;
     // cover：这个像素里产品占多少（越接近白色越少）。白边像素按 cover 把混进去的白色减掉（去白边）；
     // 透明度再和周围平均一下（去锯齿）。深色边缘 cover = 1，颜色不动，只做柔和过渡。
-    const cover = Math.max(0.08, Math.min(1, dist[i] / (T * 3)));
+    const cover = Math.max(0.08, Math.min(1, dist[i] / 72)); // 和容差无关：离纯白 72 以上算完全不透明
     if (cover < 1) {
       for (let c = 0; c < 3; c++) out[i * 4 + c] = Math.round((d[i * 4 + c] - 255 * (1 - cover)) / cover);
     }
@@ -414,18 +476,23 @@ function adjustTone(g, W, H, bright, contrast) {
  *   outSize: "800" | "1024" | "2048" | "original"（AI 原尺寸）| "source"（和原图一样大）
  *   fill: "keep" | "70" | "85"，background: "white" | "original"，format: "jpeg" | "png" | "png-alpha"
  *   contrast, bright: "0" | "1" | "2"
+ *   holes: true = PNG 透明底时，被产品围住的大块白色（镂空）也抠掉；默认不抠
+ *   whiten: false = 不做白底提纯（默认白底图都做）
  * }
  * 返回 { blob, w, h, ext, upscaled, note, subjectPct } ；不需要处理时返回 { same: true }。
  */
 async function composeOutput(img, o) {
-  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  // 白底提纯：先把乳白 / 偏色的背景校正成纯白，后面的主体校准、抠图都用校正后的图
+  const whitened = o.background === "white" && o.whiten !== false ? whitenBackground(img) : null;
+  if (whitened) img = whitened.canvas;
   const calibrate = o.fill !== "keep" && o.background === "white";
   const subject = calibrate ? findSubject(img) : null;
   const alpha = o.format === "png-alpha";
   const tone = o.contrast !== "0" || o.bright !== "0";
   const r = o.ratio || o.inputRatio || iw / ih;
   const closeToAi = Math.abs(Math.log(iw / ih / r)) < 0.03;
-  if (o.outSize === "original" && !subject && !alpha && !tone && o.format === "jpeg" && closeToAi) return { same: true };
+  if (o.outSize === "original" && !subject && !alpha && !tone && !whitened && o.format === "jpeg" && closeToAi) return { same: true };
 
   let W, H;
   if (o.outSize === "original") ({ w: W, h: H } = sizeFor(r, Math.max(iw, ih)));
@@ -439,6 +506,7 @@ async function composeOutput(img, o) {
   g.imageSmoothingQuality = "high";
   let scale, dx, dy;
   const notes = [];
+  if (whitened) notes.push(`白底提纯（原背景 RGB ${whitened.bg.join(",")}）`);
   if (subject) {
     // 主体校准：商品的长边（相对画布）正好占 fill%，居中
     const f = Number(o.fill) / 100;
@@ -465,8 +533,8 @@ async function composeOutput(img, o) {
     if (o.contrast !== "0") notes.push(`对比度${{ 1: "稍微提高", 2: "明显提高" }[o.contrast]}`);
   }
   if (alpha) {
-    cutoutWhite(g, W, H);
-    notes.push("透明底");
+    cutoutWhite(g, W, H, { holes: !!o.holes });
+    notes.push(o.holes ? "透明底（含镂空）" : "透明底");
   }
   const png = o.format !== "jpeg";
   const blob = await canvasToBlob(c, png ? "image/png" : "image/jpeg", 0.92);

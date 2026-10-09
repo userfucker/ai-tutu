@@ -297,6 +297,9 @@
           <label class="f">输出格式
             <select id="format"></select>
           </label>
+          <label class="f" id="holesWrap" hidden title="戒指、环形零件这类中间有洞的产品才勾；金属件不要勾，否则大块白色高光会被抠透明">镂空处
+            <span style="display:flex;align-items:center;gap:6px;min-height:34px"><input type="checkbox" id="holes"> 中间的白色也抠透明</span>
+          </label>
           <label class="f">主体大小
             <select id="fill">
               <option value="keep">保持原图</option>
@@ -1079,6 +1082,7 @@ function settings() {
     sharp: $("sharp").value,
     contrast: $("contrast").value,
     bright: $("bright").value,
+    holes: $("holes").checked,
   };
 }
 
@@ -1103,7 +1107,11 @@ function updateSizeNote() {
     parts.push(s.ratio === "auto" ? `输出：长边 ${L} 像素，比例跟原图一致，${fmt}。` : (() => { const t = sizeFor(ratioValue(s.ratio), L); return `输出：${t.w}×${t.h}，${fmt}。`; })());
     if (L > 1024) parts.push("AI 出图长边约 1024，2K 是放大出来的，细节不会增加。");
   }
-  if (s.format === "png-alpha") parts.push("透明底由程序抠图：只抠和四周相连的白色，产品内部的白色高光保留；产品边缘如果也是很亮的白色，可能被抠掉一点，请重点看轮廓。");
+  $("holesWrap").hidden = s.format !== "png-alpha";
+  if (s.background === "white") parts.push("白底提纯：AI 出的背景偏乳白 / 偏色时，程序自动校正成纯白（产品一起校正）。");
+  if (s.format === "png-alpha") parts.push(s.holes
+    ? "透明底由程序抠图，并且会把被产品围住的大块白色也抠掉（镂空）。金属件的白色高光可能被误抠，请重点看。"
+    : "透明底由程序抠图：只抠和四周相连的纯白，碰到轮廓就停；产品内部的白色高光保留。产品边缘如果是和背景连成一片的纯白，可能被抠掉一点，请看轮廓。");
   if (s.fill !== "keep") parts.push(s.background === "white" ? `白底图会自动校准到商品约占 ${s.fill}%。` : `原图背景无法自动校准主体大小，只靠 AI 按要求构图。`);
   if (s.angle !== "keep") parts.push("改了角度：AI 要补画原图看不到的部分，请逐张核对文字和零件。");
   if (s.contrast !== "0" || s.bright !== "0") parts.push("对比度 / 亮度由程序在 AI 出图后调整（纯白背景保持纯白）。");
@@ -1230,6 +1238,7 @@ async function makeOutput(job, ai) {
     format: s.format,
     contrast: s.contrast,
     bright: s.bright,
+    holes: s.holes,
   });
   if (r.same) return { ...ai, same: true };
   return { url: URL.createObjectURL(r.blob), w: r.w, h: r.h, bytes: r.blob.size, ext: r.ext, upscaled: r.upscaled, note: r.note, subjectPct: r.subjectPct };
@@ -1780,6 +1789,8 @@ document.addEventListener("keydown", (e) => {
 applyMode(mode);
 loadModels(false);
 fetchUsage();
+$("holes").checked = store("holes") === "1";
+$("holes").addEventListener("change", () => { store("holes", $("holes").checked ? "1" : "0"); updateSizeNote(); });
 updateSizeNote();
 renderSummary();
 </script>

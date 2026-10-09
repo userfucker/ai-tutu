@@ -1,5 +1,6 @@
 /**
  * AI图图 · Gemini 页面自动操作（2026-10-09）
+ * 文件最后的 AITUTU_SITE 是给面板（panel.js）用的统一接口；Copilot 的同名接口在 copilot.js。
  *
  * 页面结构来自探测插件（extension-probe）在 Lee 的 Edge 上实测的两份报告：
  *  - 输入框：rich-textarea 里的 div.ql-editor[contenteditable]（“为 Gemini 输入提示”）
@@ -36,19 +37,8 @@ const GEM = {
   modeItems: () => [...document.querySelectorAll('gem-menu-item[role="menuitem"], .cdk-overlay-container [role="menuitem"]')].filter((e) => e.getBoundingClientRect().width > 0),
 };
 
-const gemSleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/** 等 fn() 返回真值；超时抛错。signal.aborted 时抛 "已停止"。 */
-async function gemWait(fn, { timeout = 30000, interval = 250, signal, what = "条件" } = {}) {
-  const t0 = Date.now();
-  for (;;) {
-    if (signal && signal.aborted) throw new Error("已停止");
-    const v = fn();
-    if (v) return v;
-    if (timeout && Date.now() - t0 > timeout) throw new Error(`等待超时：${what}`);
-    await gemSleep(interval);
-  }
-}
+const gemSleep = siteSleep; // 在 common.js
+const gemWait = siteWait;
 
 function gemIsStop(btn = GEM.sendBtn()) {
   return /停止|stop/i.test((btn && btn.getAttribute("aria-label")) || "");
@@ -250,13 +240,7 @@ async function gemWaitResult(base, signal) {
   }
 }
 
-/**
- * 取回生成的原图。
- *  - blob: / data: 地址（3.8 Flash 实测是 blob:）：网页里直接 fetch。
- *  - https: 地址（3.1 Pro 实测出的图是网络地址，在 googleusercontent 上）：网页里 fetch 会被跨域挡住，
- *    画到画布上也导不出来（“Tainted canvases”），所以交给插件后台去取（后台有这些网站的权限）。
- *    googleusercontent 的地址结尾带尺寸参数（如 =s1024-rj），先试 =s0（原始尺寸），不行再用页面上的地址。
- */
+/** googleusercontent 的图地址结尾带尺寸参数（如 =s1024-rj），先试 =s0（原始尺寸），不行再用页面上的地址 */
 function gemFullSizeUrls(src) {
   const list = [];
   try {
@@ -269,52 +253,26 @@ function gemFullSizeUrls(src) {
   list.push(src);
   return [...new Set(list)];
 }
-function gemBgFetch(url) {
-  return new Promise((resolve) => {
-    try {
-      chrome.runtime.sendMessage({ type: "aitutu-fetch-image", url }, (res) => {
-        if (chrome.runtime.lastError || !res || !res.ok) return resolve({ error: (res && res.error) || chrome.runtime.lastError?.message || "后台没有回复" });
-        const bin = atob(res.b64);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        resolve({ blob: new Blob([bytes], { type: res.type || "image/png" }) });
-      });
-    } catch (e) {
-      resolve({ error: String(e.message || e) });
-    }
-  });
-}
-async function gemIsImage(blob) {
-  if (!blob || blob.size < 1000) return false;
-  try { const bm = await createImageBitmap(blob); bm.close(); return true; } catch { return false; }
-}
-async function gemGrabImage(img) {
-  const src = img.currentSrc || img.src;
-  const errors = [];
-  if (/^https?:/.test(src)) {
-    for (const url of gemFullSizeUrls(src)) {
-      const r = await gemBgFetch(url);
-      if (r.blob && (await gemIsImage(r.blob))) return r.blob;
-      errors.push(`后台取图：${r.error || "拿到的不是图片"}`);
-    }
-  }
-  try {
-    const r = await fetch(src, { credentials: "include" });
-    const b = await r.blob();
-    if (await gemIsImage(b)) return b;
-    errors.push(`网页取图：HTTP ${r.status}，${b.size} 字节`);
-  } catch (e) {
-    errors.push(`网页取图：${e.message || e}`);
-  }
-  try {
-    const c = document.createElement("canvas");
-    c.width = img.naturalWidth;
-    c.height = img.naturalHeight;
-    c.getContext("2d").drawImage(img, 0, 0);
-    return await new Promise((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error("画布导出为空"))), "image/png"));
-  } catch (e) {
-    errors.push(`画布取图：${e.message || e}`);
-  }
-  const kind = src.startsWith("blob:") ? "blob" : src.split("/")[2] || src.slice(0, 20);
-  throw new Error(`取不到 Gemini 生成的图（图片地址类型：${kind}）。${errors.join("；")}`);
-}
+const gemGrabImage = (img) => siteGrabImage(img, gemFullSizeUrls, "Gemini");
+
+/** 面板（panel.js）用的统一接口；copilot.js 里有同样的一套 */
+const AITUTU_SITE = {
+  id: "gemini",
+  name: "Gemini",
+  home: "gemini.google.com",
+  input: () => GEM.input(),
+  mark: () => GEM.responses().length, // 发送前记一下，等回复时和它比
+  hasMessages: () => GEM.responses().length > 0,
+  newChat: gemNewChat,
+  clearInput: gemClearInput,
+  pasteFiles: gemPasteFiles,
+  insertText: gemInsertText,
+  waitReady: gemWaitReady,
+  clickSend: gemClickSend,
+  waitUserSend: gemWaitUserSend,
+  waitResult: gemWaitResult,
+  grabImage: gemGrabImage,
+  limitRe: GEM_LIMIT_RE,
+  currentMode: gemCurrentMode,
+  ensureMode: gemEnsureMode,
+};
