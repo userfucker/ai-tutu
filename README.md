@@ -11,3 +11,5 @@
 | --- | --- |
 | `docs/` | 项目记忆、设计文档 |
 | `tools/agy-refine-test/` | 测试程序：一键智能产品精修（agy 生图），见里面的《使用说明.md》 |
+| `extension/` | 浏览器插件：在 Gemini 网页版里批量抠白底图 / 精修（半自动），见里面的《使用说明.md》 |
+| `extension-probe/` | Gemini 页面探测插件（开发插件时收集页面结构用） |
