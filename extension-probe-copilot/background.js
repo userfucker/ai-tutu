@@ -24,3 +24,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   })();
   return true; // 异步回复
 });
+
+// 工具栏图标：页面上没出现面板时点一下，手动把探测脚本放进当前标签页；放不进去时在图标上显示原因
+chrome.action.onClicked.addListener(async (tab) => {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+    chrome.action.setBadgeText({ tabId: tab.id, text: "OK" });
+    chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#16a34a" });
+    chrome.action.setTitle({ tabId: tab.id, title: "探测脚本已放进页面：" + (tab.url || "") });
+  } catch (e) {
+    const msg = String(e && e.message ? e.message : e);
+    console.error("[AI图图] 放不进页面：", msg);
+    chrome.action.setBadgeText({ tabId: tab.id, text: "ERR" });
+    chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#dc2626" });
+    chrome.action.setTitle({ tabId: tab.id, title: "放不进页面：" + msg + "（" + (tab.url || "") + "）" });
+  }
+});

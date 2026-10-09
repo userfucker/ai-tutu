@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI图图 · Copilot 页面探测",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "收集 Copilot 网页的输入框、上传、发送、出图等页面结构，用来开发 AI图图 插件。",
   "content_scripts": [
     {
@@ -12,11 +12,15 @@
         "https://www.bing.com/chat*",
         "https://www.bing.com/images/create*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
-  "background": { "service_worker": "background.js" },
+  "background": {
+    "service_worker": "background.js"
+  },
   "host_permissions": [
     "https://copilot.microsoft.com/*",
     "https://*.bing.com/*",
@@ -26,5 +30,12 @@
     "https://*.microsoft.com/*",
     "https://*.office.com/*",
     "https://*.sharepoint.com/*"
-  ]
+  ],
+  "permissions": [
+    "scripting",
+    "activeTab"
+  ],
+  "action": {
+    "default_title": "AI图图 Copilot 探测：页面上没出现面板时点这里"
+  }
 }

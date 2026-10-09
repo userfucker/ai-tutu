@@ -24,6 +24,11 @@ const GEM = {
   attachLoading: () => document.querySelector("uploader-file-preview .loading"),
   attachCloseButtons: () => document.querySelectorAll("uploader-file-preview .gem-attachment-close-button button, uploader-file-preview button[aria-label]"),
   responses: () => document.querySelectorAll("model-response"),
+  // 模型（模式）选择器：Lee 2026-10-09 探测报告
+  //  按钮 data-testid=bard-mode-menu-button，aria “打开模式选择器，当前模式为“Flash””，文字 Flash / Pro / Flash-Lite / Flash-Lite 扩展
+  //  菜单项 gem-menu-item[role=menuitem]，文字如 “3.1 Pro 高级推理”“3.5 Flash-Lite 极速回答”“扩展思考 擅长解决复杂问题”（开关项）
+  modeBtn: () => document.querySelector('button[data-testid="bard-mode-menu-button"]'),
+  modeItems: () => [...document.querySelectorAll('gem-menu-item[role="menuitem"], .cdk-overlay-container [role="menuitem"]')].filter((e) => e.getBoundingClientRect().width > 0),
 };
 
 const gemSleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -49,6 +54,67 @@ function gemSendSpinning() {
 }
 function gemSendDisabled(btn = GEM.sendBtn()) {
   return !btn || btn.disabled || btn.getAttribute("aria-disabled") === "true";
+}
+
+/** 当前模型，例如 { family: "Flash", extended: false, label: "Flash" }；找不到选择器返回 null */
+function gemCurrentMode() {
+  const b = GEM.modeBtn();
+  if (!b) return null;
+  const m = /“([^”]+)”|"([^"]+)"/.exec(b.getAttribute("aria-label") || "");
+  const label = ((m && (m[1] || m[2])) || b.innerText || "").replace(/\s+/g, " ").trim();
+  const extended = /扩展|extended/i.test(label);
+  const family = /lite/i.test(label) ? "Flash-Lite" : /pro/i.test(label) ? "Pro" : /flash/i.test(label) ? "Flash" : label.replace(/\s*(扩展|extended)\s*/i, "");
+  return { family, extended, label };
+}
+const gemFamilyOf = (text) => (/lite/i.test(text) ? "Flash-Lite" : /\bpro\b/i.test(text) ? "Pro" : /flash/i.test(text) ? "Flash" : "");
+async function gemOpenModeMenu(signal) {
+  const b = GEM.modeBtn();
+  if (!b) throw new Error("没找到 Gemini 的模型选择按钮");
+  b.click();
+  return await gemWait(() => (GEM.modeItems().length ? GEM.modeItems() : null), { timeout: 5000, signal, what: "模型菜单打开" });
+}
+async function gemCloseMenu() {
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+  const bd = document.querySelector(".cdk-overlay-backdrop");
+  if (bd) bd.click();
+  await gemSleep(250);
+  if (GEM.modeItems().length && GEM.modeBtn()) GEM.modeBtn().click(); // 还开着就再点一下按钮收起
+  await gemSleep(150);
+}
+/**
+ * 切换模型。family = "Flash" | "Pro" | "Flash-Lite" | ""（不管）；extended = true / false / null（不管）。
+ * 返回切换后的 gemCurrentMode()，菜单里找不到对应项时抛错。
+ */
+async function gemEnsureMode(family, extended, signal) {
+  let cur = gemCurrentMode();
+  if (!cur) throw new Error("没找到 Gemini 的模型选择按钮（可能改版了）");
+  if (family && cur.family !== family) {
+    const items = await gemOpenModeMenu(signal);
+    const item = items.find((e) => gemFamilyOf(e.innerText || "") === family && !/扩展思考|extended thinking/i.test(e.innerText || ""));
+    if (!item) {
+      const names = items.map((e) => (e.innerText || "").replace(/\s+/g, " ").trim()).join(" / ");
+      await gemCloseMenu();
+      throw new Error(`模型菜单里没找到 ${family}（菜单里有：${names}）`);
+    }
+    item.click();
+    await gemWait(() => gemCurrentMode()?.family === family, { timeout: 5000, signal, what: `切换到 ${family}` });
+    await gemSleep(400);
+    cur = gemCurrentMode();
+  }
+  if (extended !== null && extended !== undefined && cur.extended !== extended) {
+    const items = await gemOpenModeMenu(signal);
+    const item = items.find((e) => /扩展思考|extended thinking/i.test(e.innerText || ""));
+    if (!item) {
+      await gemCloseMenu();
+      throw new Error("模型菜单里没找到“扩展思考”（当前模型可能不支持）");
+    }
+    item.click();
+    await gemWait(() => gemCurrentMode()?.extended === extended, { timeout: 5000, signal, what: extended ? "打开扩展思考" : "关闭扩展思考" });
+    await gemSleep(400);
+    cur = gemCurrentMode();
+  }
+  if (GEM.modeItems().length) await gemCloseMenu();
+  return cur;
 }
 
 /** 页面上有没有验证码 / 异常流量之类的提示（B 模式遇到就停） */

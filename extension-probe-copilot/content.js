@@ -10,9 +10,13 @@
  * Lee 已同意收集对话标题和聊天内容（2026-10-09），回复文字只截前 200 字。
  */
 (() => {
-  if (window.__aitutuCopilotProbe) return;
-  window.__aitutuCopilotProbe = true;
-  const VERSION = "copilot-probe-0.1.0";
+  if (window.__aitutuCopilotProbe) {
+    // 已经加载过（比如又点了工具栏图标）：面板被页面删掉了就放回去
+    window.__aitutuCopilotProbe();
+    return;
+  }
+  const VERSION = "copilot-probe-0.1.1";
+  console.log(`[AI图图] Copilot 探测 ${VERSION} 已加载：${location.href}`);
 
   // ------------------------------------------------------------ 小工具
   const short = (s, n = 50) => {
@@ -499,7 +503,10 @@
   // Copilot 的输入框在页面下方正中，面板放右上方，免得挡住
   host.style.cssText = "position:fixed;right:12px;top:72px;z-index:2147483647;";
   const root = host.attachShadow({ mode: "open" });
-  root.innerHTML = `
+  // 有的网站开了 Trusted Types，直接写 innerHTML 会报错；先建一个放行策略，不行再用原样字符串
+  let ttPolicy = null;
+  try { if (window.trustedTypes) ttPolicy = trustedTypes.createPolicy("aitutu-probe", { createHTML: (x) => x }); } catch (e) { console.warn("[AI图图] 建 Trusted Types 策略失败：", e); }
+  const panelHtml = `
     <style>
       .box { width: 350px; background: #fff; color: #18181b; border: 1px solid #d4d4d8; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.18);
         font: 13px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; padding: 10px; }
@@ -527,7 +534,23 @@
         <textarea id="out" readonly placeholder="报告会显示在这里，复制后发给 AI"></textarea>
       </div>
     </div>`;
+  try {
+    root.innerHTML = ttPolicy ? ttPolicy.createHTML(panelHtml) : panelHtml;
+  } catch (e) {
+    console.error("[AI图图] 面板写入失败，改用 DOMParser：", e);
+    const doc = new DOMParser().parseFromString(`<body>${panelHtml}</body>`, "text/html");
+    [...doc.body.childNodes].forEach((n) => root.appendChild(document.importNode(n, true)));
+  }
+  // 面板挂在 <html> 下；页面重绘把它删掉时，每 2 秒放回去
+  const attach = () => {
+    if (!host.isConnected) {
+      (document.body || document.documentElement).appendChild(host);
+      console.log("[AI图图] 面板已放到页面上");
+    }
+  };
   document.documentElement.appendChild(host);
+  setInterval(attach, 2000);
+  window.__aitutuCopilotProbe = attach;
   const $ = (id) => root.getElementById(id);
   const setStatus = (t) => { $("status").textContent = t; };
   let recTimer = null;
