@@ -14,46 +14,85 @@
  *  - 新建聊天：顶栏 button[aria-label="新建聊天"]，或左侧 a[aria-label="新建聊天"]
  *  - 模式按钮 #gptModeSwitcher（“自动”），插件不切换
  *
+ * 【个人版界面】Lee 第二批报告（www.copilot.com/chats/…，2026-10-09）是另一套页面，两套都要认：
+ *  - 输入框：textarea#userInput[data-testid=composer-input]（普通 textarea，React）
+ *  - 发送：button[data-testid=submit-button]（“提交消息”，输入框空时换成语音按钮）
+ *  - 文件框：input[data-testid=composer-file-input]；拖图到输入框有效
+ *  - 附件：[data-testid=composer-content] 里的缩略图 + 删除按钮（title “移除图像 文件名”）
+ *  - 回复：[data-testid=ai-message]；图：[data-testid=ai-image-message] 里的 img（data:image/png 1024×1024）
+ *  - 新建聊天：button[data-testid=sidebar-new-conversation-nav-item]；主页按钮 sidebar-copilot-brand-button
+ *
  * 选择器集中写在 COP 里，Copilot 改版时只改这里。
  */
+const vis = (e) => !!e && e.getBoundingClientRect().width > 0;
 const COP = {
   input: () =>
+    document.querySelector('textarea[data-testid="composer-input"]') ||
+    document.querySelector("textarea#userInput") ||
     document.querySelector('[data-testid="chat-input-wrapper"] [contenteditable="true"][role="textbox"]') ||
     document.querySelector('[role="textbox"][contenteditable="true"][aria-label*="Copilot"]') ||
     document.querySelector('[data-testid="chat-input-wrapper"] [contenteditable="true"]'),
   sendBtn: () =>
+    document.querySelector('button[data-testid="submit-button"]') ||
     document.querySelector('[data-testid="chat-input-wrapper"] button.fai-SendButton') ||
     document.querySelector("button.fai-SendButton") ||
     document.querySelector('[data-testid="chat-input-wrapper"] button[type="submit"]'),
   newChatBtn: () =>
-    [...document.querySelectorAll('button[aria-label="新建聊天"], a[aria-label="新建聊天"], button[aria-label="New chat"], a[aria-label="New chat"]')].find(
-      (e) => e.getBoundingClientRect().width > 0,
+    [...document.querySelectorAll('button[data-testid="sidebar-new-conversation-nav-item"], button[aria-label="新建聊天"], a[aria-label="新建聊天"], button[aria-label="New chat"], a[aria-label="New chat"]')].find(vis),
+  homeBtn: () => [...document.querySelectorAll('button[data-testid="sidebar-copilot-brand-button"]')].find(vis),
+  sidebarToggle: () => document.querySelector('button[data-testid="sidebar-toggle-button"]'),
+  fileInput: () =>
+    document.querySelector('input[data-testid="composer-file-input"]') ||
+    document.querySelector("input#upload-file-button") ||
+    document.querySelector('[data-testid="chat-input-wrapper"] input[type="file"]'),
+  dropZone: () => document.querySelector('[data-testid="chat-input-drag-drop-wrapper"]') || COP.input(),
+  // 附件：个人版按“删除图片”按钮数，工作版按 .fx-Attachment 数
+  attachCloseButtons: () =>
+    document.querySelectorAll(
+      '[data-testid="composer-content"] button[title^="移除"], [data-testid="composer-content"] button[aria-label^="移除"], [data-testid="composer-content"] button[aria-label^="Remove"], .fx-AttachmentList button[aria-label^="删除附件"], .fx-AttachmentList button[aria-label^="Remove"]',
     ),
-  fileInput: () => document.querySelector("input#upload-file-button") || document.querySelector('[data-testid="chat-input-wrapper"] input[type="file"]'),
-  dropZone: () => document.querySelector('[data-testid="chat-input-drag-drop-wrapper"]'),
-  attachments: () => document.querySelectorAll(".fx-AttachmentList .fx-Attachment"),
+  attachments: () => {
+    const m365 = document.querySelectorAll(".fx-AttachmentList .fx-Attachment");
+    return m365.length ? m365 : document.querySelectorAll('[data-testid="composer-content"] button[title^="移除"], [data-testid="composer-content"] button[aria-label^="移除"], [data-testid="composer-content"] button[aria-label^="Remove"]');
+  },
   attachLoading: () =>
-    document.querySelector('.fx-AttachmentList [role="progressbar"], .fx-AttachmentList .fui-Spinner, .fx-AttachmentList [aria-busy="true"]'),
-  attachCloseButtons: () => document.querySelectorAll('.fx-AttachmentList button[aria-label^="删除附件"], .fx-AttachmentList button[aria-label^="Remove"]'),
-  turns: () => [...document.querySelectorAll('[data-testid="m365-chat-llm-web-ui-chat-message"]')],
-  reply: (turn) => turn.querySelector('[data-testid="copilot-message-div"]') || turn.querySelector(".fai-CopilotMessage"),
-  modeBtn: () => document.querySelector("#gptModeSwitcher"),
+    document.querySelector(
+      '.fx-AttachmentList [role="progressbar"], .fx-AttachmentList .fui-Spinner, .fx-AttachmentList [aria-busy="true"], [data-testid="composer-content"] [role="progressbar"], [data-testid="composer-content"] [aria-busy="true"]',
+    ),
+  // 每一轮：工作版是一整轮的容器（带序号），个人版是 Copilot 的回复
+  turns: () => {
+    const m365 = [...document.querySelectorAll('[data-testid="m365-chat-llm-web-ui-chat-message"]')];
+    return m365.length ? m365 : [...document.querySelectorAll('[data-testid="ai-message"]')];
+  },
+  reply: (turn) => turn.querySelector('[data-testid="copilot-message-div"]') || turn.querySelector(".fai-CopilotMessage") || turn,
+  images: (reply) => [...reply.querySelectorAll('[data-testid="ai-image-message"] picture img, [data-testid="ai-image-message"] img, img[alt="Generated image"], button[aria-label="Generated image"] img, img')],
+  imagePending: (reply) => [...reply.querySelectorAll('[data-testid="ai-image-message"]')].some((m) => ![...m.querySelectorAll("img")].some((i) => i.complete && i.naturalWidth >= 200)),
+  stopBtn: () => [...document.querySelectorAll('button[data-testid="stop-button"], button[aria-label*="停止"], button[aria-label*="Stop"]')].find(vis),
+  modeBtn: () => document.querySelector("#gptModeSwitcher") || document.querySelector('button[data-testid^="composer-chat-mode"]'),
 };
 const copSleep = siteSleep;
 const copWait = siteWait;
 const COP_LIMIT_RE = /上限|限制|额度|配额|稍后再试|太多|频繁|limit|quota|try again later|too many|boost/i;
 
-const copTurnIndex = (t) => Number(t.getAttribute("data-message-index") ?? -1);
-/** 现在最后一轮的序号（发送前记下，等回复时找序号更大的那一轮） */
+const copTurnIndex = (t) => Number(t.getAttribute("data-message-index") ?? NaN);
+/** 发送前记一下现在有哪些轮次，等回复时找新出来的那一轮 */
 function copMark() {
   const list = COP.turns();
-  return list.length ? Math.max(...list.map(copTurnIndex)) : -1;
+  const idx = list.map(copTurnIndex).filter((n) => !isNaN(n));
+  return { els: new Set(list), maxIdx: idx.length ? Math.max(...idx) : -1, count: list.length };
 }
 function copNewTurn(base) {
-  return COP.turns().filter((t) => copTurnIndex(t) > base).pop() || null;
+  const list = COP.turns();
+  const last = list[list.length - 1];
+  if (!last) return null;
+  const i = copTurnIndex(last);
+  if (!isNaN(i)) return i > base.maxIdx ? last : null; // 工作版：按序号
+  return !base.els.has(last) && list.length >= base.count ? last : null; // 个人版：最后一条是新的
 }
 function copBusy(reply) {
   if (reply && (reply.getAttribute("aria-busy") === "true" || reply.querySelector('[aria-busy="true"]'))) return true;
+  if (reply && COP.imagePending(reply)) return true; // 个人版：图片框出来了、图还没画好
+  if (COP.stopBtn()) return true;
   const b = COP.sendBtn();
   return /停止|stop/i.test((b && b.getAttribute("aria-label")) || "");
 }
@@ -71,13 +110,26 @@ function copPageAlert() {
 
 /** 新建聊天：点顶栏或左侧的“新建聊天”，等页面上没有对话、输入框出来 */
 async function copNewChat(signal) {
-  const b = COP.newChatBtn();
-  if (b) b.click();
-  else location.assign("/chat");
+  let b = COP.newChatBtn() || COP.homeBtn();
+  if (!b && COP.sidebarToggle()) {
+    // 侧边栏收起时先展开
+    COP.sidebarToggle().click();
+    await copSleep(600);
+    b = COP.newChatBtn() || COP.homeBtn();
+  }
+  if (!b) throw new Error("没找到 Copilot 的“新建聊天”按钮");
+  b.click();
   await copWait(() => COP.input() && COP.turns().length === 0, { timeout: 15000, signal, what: "新聊天打开" });
   await copSleep(800);
 }
 
+const copInputLen = (el) => ((el.value ?? el.innerText) || "").trim().length;
+/** 普通 textarea（个人版，React）：用原生 value 赋值 + input 事件，React 才认 */
+function copSetTextarea(el, value) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+  setter.call(el, value);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
 async function copClearInput(signal) {
   const closes = [...COP.attachCloseButtons()];
   for (const b of closes) {
@@ -86,10 +138,13 @@ async function copClearInput(signal) {
   }
   if (closes.length) await copWait(() => COP.attachments().length === 0, { timeout: 5000, signal, what: "清空附件" }).catch(() => {});
   const input = COP.input();
-  if (input && (input.innerText || "").trim()) {
-    input.focus();
-    document.execCommand("selectAll");
-    document.execCommand("delete");
+  if (input && copInputLen(input)) {
+    if (input.tagName === "TEXTAREA") copSetTextarea(input, "");
+    else {
+      input.focus();
+      document.execCommand("selectAll");
+      document.execCommand("delete");
+    }
     await copSleep(200);
   }
 }
@@ -136,23 +191,32 @@ async function copPasteFiles(files, signal) {
   throw new Error(`图片没能放进 Copilot 输入框（${lastErr}）`);
 }
 
-/** 填文字：先模拟粘贴纯文本（多行文字更稳），不行再用 insertText */
+/** 填文字：textarea 直接赋值；可编辑区域先模拟粘贴纯文本（多行更稳），不行再用 insertText */
 async function copInsertText(text, signal) {
   const input = await copWait(COP.input, { timeout: 10000, signal, what: "输入框" });
   input.focus();
-  const len = () => (input.innerText || "").trim().length;
-  const before = len();
+  const before = copInputLen(input);
   const need = Math.min(20, text.length / 2);
-  const dt = new DataTransfer();
-  dt.setData("text/plain", text);
-  input.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
-  await copSleep(500);
-  if (len() < before + need) {
-    input.focus();
-    document.execCommand("insertText", false, text);
+  if (input.tagName === "TEXTAREA") {
+    copSetTextarea(input, (input.value ? input.value + "\n" : "") + text);
     await copSleep(400);
+    if (copInputLen(input) < before + need) {
+      input.focus();
+      document.execCommand("insertText", false, text);
+      await copSleep(300);
+    }
+  } else {
+    const dt = new DataTransfer();
+    dt.setData("text/plain", text);
+    input.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+    await copSleep(500);
+    if (copInputLen(input) < before + need) {
+      input.focus();
+      document.execCommand("insertText", false, text);
+      await copSleep(400);
+    }
   }
-  if (len() < before + need) throw new Error("提示词没能填进 Copilot 输入框");
+  if (copInputLen(input) < before + need) throw new Error("提示词没能填进 Copilot 输入框");
 }
 
 async function copWaitReady(expected, signal) {
@@ -189,17 +253,17 @@ async function copWaitResult(base, signal) {
     const t = copNewTurn(base) || turn;
     const reply = COP.reply(t);
     const text = reply ? (reply.innerText || "").trim() : "";
-    const imgs = reply ? [...reply.querySelectorAll('img[alt="Generated image"], button[aria-label="Generated image"] img, img')] : [];
+    const imgs = reply ? COP.images(reply) : [];
     const img = imgs.find((i) => i.complete && i.naturalWidth >= 200);
     const busy = copBusy(reply) || (!img && copDesignerBusy());
     if (img && !busy) {
       await copSleep(800);
       return { img, text };
     }
-    // 回复不再忙、也没有图、文字 8 秒没变：算没出图（Copilot 生图前会先回一句话，所以多等一会）
+    // 回复不再忙、也没有图、文字 10 秒没变：算没出图（Copilot 生图前会先回一句话，所以多等一会）
     if (reply && !busy && !img && text) {
       if (text !== lastText) { lastText = text; quietSince = Date.now(); }
-      if (Date.now() - quietSince > 8000) return { refused: true, text };
+      if (Date.now() - quietSince > 10000) return { refused: true, text };
     } else {
       quietSince = 0;
       lastText = text;
@@ -229,6 +293,8 @@ const AITUTU_SITE = {
   waitResult: copWaitResult,
   grabImage: copGrabImage,
   limitRe: COP_LIMIT_RE,
+  // 回的是生图参数文字（如 {"orientation":"square"}）而不是图：催一次
+  nudge: (text) => (/^\s*[{\[][\s\S]*"(orientation|prompt|size|aspect|image)/i.test(text) ? "请直接生成这张图片（不要回复参数或 JSON）。Please generate the image now." : ""),
   // 只记录当前模式（日志里看），不切换
-  currentMode: () => { const b = COP.modeBtn(); return b ? { label: "Copilot " + (b.innerText || "").trim() } : null; },
+  currentMode: () => { const b = COP.modeBtn(); return b ? { label: "Copilot " + ((b.innerText || "").trim() || b.title || "") } : null; },
 };

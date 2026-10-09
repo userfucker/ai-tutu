@@ -9,7 +9,7 @@
 (() => {
   if (window.__aitutuPanel) return;
   window.__aitutuPanel = true;
-  const VERSION = "0.2.0";
+  const VERSION = "0.2.1";
   const SITE = AITUTU_SITE; // gemini.js 或 copilot.js 提供
   const AI = SITE.name;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -30,7 +30,9 @@
     format: { jpeg: "JPG", png: "PNG", "png-alpha": "PNG 透明底" },
   };
   let S = { ...DEFAULTS };
-  const saveSettings = () => { try { chrome.storage.local.set({ aitutuSettings: S }); } catch {} };
+  // 设置按网站分开存（Gemini 一套、Copilot 一套），关了浏览器也保留，除非手动改
+  const SETTINGS_KEY = `aitutuSettings:${SITE.id}`;
+  const saveSettings = () => { try { chrome.storage.local.set({ [SETTINGS_KEY]: S }); } catch {} };
 
   // ------------------------------------------------------------ 状态
   let files = []; // {id,name,size,type,dataUrl,base64,w,h,crop,mask,parts,partsNote,colors,sampler,done}
@@ -317,8 +319,10 @@
     }),
   );
   try {
-    chrome.storage.local.get(["aitutuSettings", "aitutuClosed"], (r) => {
-      if (r && r.aitutuSettings) S = { ...DEFAULTS, ...r.aitutuSettings };
+    chrome.storage.local.get([SETTINGS_KEY, "aitutuSettings", "aitutuClosed"], (r) => {
+      // 0.2.0 以前只有一套设置（aitutuSettings），Gemini 第一次升级时接着用
+      const saved = (r && r[SETTINGS_KEY]) || (SITE.id === "gemini" && r && r.aitutuSettings);
+      if (saved) S = { ...DEFAULTS, ...saved };
       if (r && r.aitutuClosed) { $("wrap").classList.add("closed"); $("handle").innerHTML = "AI<br>图<br>图<br>◀"; }
       loadSettingsToUi();
     });
@@ -365,6 +369,13 @@
   $("wrap").addEventListener("drop", (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); endDrag(); addFiles(e.dataTransfer.files); });
   document.addEventListener("dragend", endDrag, true);
   document.addEventListener("drop", endDrag, true);
+  // guard.js 在网页之前拦住“拖到面板上”的事件（不让 Copilot 也收一份），交给这里处理
+  window.__aitutuDragHook = (e) => {
+    if (!hasFiles(e)) return;
+    if (e.type === "dragenter" || e.type === "dragover") { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; $("wrap").classList.add("dragging"); }
+    else if (e.type === "drop") { e.preventDefault(); endDrag(); addFiles(e.dataTransfer.files); }
+  };
+  window.__aitutuDragLeave = endDrag;
   $("thumbs").addEventListener("click", (e) => {
     const rm = Number(e.target.dataset.remove);
     if (rm) { files = files.filter((f) => f.id !== rm); renderThumbs(); return; }
@@ -684,6 +695,7 @@
       if (j.aiW) lines.push(`${AI} 出图：${j.aiW}×${j.aiH}，${Math.round(j.aiBytes / 1024)} KB；最终输出：${j.w}×${j.h}${j.ext}${j.note ? "，" + j.note : ""}`);
       j.steps.forEach((s) => lines.push("- " + s));
       if (j.modeWarn) lines.push("提示：" + j.modeWarn);
+      if (j.nudged) lines.push("第一次回复（没出图，已催一次）：" + j.nudged.slice(0, 200));
       if (j.error) lines.push("错误：" + j.error);
       if (j.text) lines.push(`${AI} 回复：` + j.text.slice(0, 500));
       lines.push("");
@@ -778,7 +790,23 @@
     sessionCount++;
     setStatus(`第 ${j.idx}/${j.total} 张：等 ${AI} 出图…`);
     step(j, `等 ${AI} 出图`);
-    const r = await SITE.waitResult(base, signal);
+    let r = await SITE.waitResult(base, signal);
+    // 没出图但回的是“参数文字”（Copilot 实测回了 {"orientation":"square"}）：同一个对话里催一次
+    const nudge = !r.alert && r.refused && SITE.nudge ? SITE.nudge(r.text || "") : "";
+    if (nudge) {
+      step(j, `${AI} 没出图，只回了：${(r.text || "").slice(0, 60)}；再催一次`);
+      j.nudged = r.text;
+      await SITE.clearInput(signal);
+      await SITE.insertText(nudge, signal);
+      await SITE.waitReady(0, signal);
+      const base2 = SITE.mark();
+      if (S.send === "B") SITE.clickSend();
+      else {
+        setStatus(`第 ${j.idx}/${j.total} 张：${AI} 没出图，插件填好了催促的话，请按回车发送。`, "warn");
+        await SITE.waitUserSend(base2, signal);
+      }
+      r = await SITE.waitResult(base2, signal);
+    }
     if (r.alert) { j.status = "fail"; j.error = r.alert; return "alert"; }
     j.text = r.text || "";
     if (r.refused) {
@@ -815,7 +843,6 @@
     if (!SITE.input()) { setStatus(`没找到 ${AI} 输入框：请先打开 ${SITE.home} 的对话页面。`, "bad"); return; }
     if (!list && files.length && files.every((f) => f.done)) {
       // 面板里的图都做过了（打了 ✓）：比如换了模型想再做一遍
-      if (!confirm(`面板里的 ${files.length} 张图都已经做过（打了 ✓）。\n要把它们全部再做一遍吗？（之前的结果会保留）`)) return;
       files.forEach((f) => (f.done = false));
       renderThumbs();
     }

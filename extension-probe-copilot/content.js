@@ -15,7 +15,7 @@
     window.__aitutuCopilotProbe();
     return;
   }
-  const VERSION = "copilot-probe-0.1.2";
+  const VERSION = "copilot-probe-0.1.3";
   console.log(`[AI图图] Copilot 探测 ${VERSION} 已加载：${location.href}`);
 
   // ------------------------------------------------------------ 小工具
@@ -31,7 +31,7 @@
   };
   const isOurs = (el) => {
     for (let e = el; e; e = e.parentElement || (e.getRootNode && e.getRootNode().host)) {
-      if (e.id === "aitutu-probe-host") return true;
+      if (e.id === "aitutu-probe-host" || e.id === "aitutu-panel-host") return true; // 探测面板和 AI图图 插件面板都不算网页
     }
     return false;
   };
@@ -44,7 +44,7 @@
   /** 所有打开的 Shadow DOM 根 */
   function shadowRoots(root = document, out = []) {
     for (const e of root.querySelectorAll("*")) {
-      if (e.shadowRoot && e.id !== "aitutu-probe-host") {
+      if (e.shadowRoot && e.id !== "aitutu-probe-host" && e.id !== "aitutu-panel-host") {
         out.push(e.shadowRoot);
         shadowRoots(e.shadowRoot, out);
       }
@@ -58,7 +58,9 @@
     return out.filter((e) => !isOurs(e));
   }
   const NAV_SEL = 'nav,[role="navigation"],aside,[data-testid*="sidebar" i],[class*="sidebar" i],[class*="side-nav" i]';
-  const inNav = (el) => !!closestDeep(el, NAV_SEL);
+  // 个人版 Copilot 的外层 class 带 “sidebar” 字样，把整页都当成侧边栏了（0.1.2 的报告里输入框 nav=true、mainInput 找到了我们自己的面板）：
+  // 在 <main> 里的一律不算侧边栏
+  const inNav = (el) => !closestDeep(el, "main") && !!closestDeep(el, NAV_SEL);
   function cssPath(el) {
     const parts = [];
     let e = el;
