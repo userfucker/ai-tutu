@@ -160,9 +160,10 @@
   .thumb { cursor: pointer; }
   .thumb .crop-badge { position: absolute; left: 3px; top: 3px; font-size: 10px; background: var(--ok-bg); color: var(--ok); border-radius: 6px; padding: 0 4px; }
   .thumb .crop-box { position: absolute; border: 2px solid #22c55e; pointer-events: none; }
-  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; z-index: 9; align-items: center; justify-content: center; padding: 16px; }
+  /* 靠顶部对齐：下面的颜色列表变长时，图片位置不跳 */
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; z-index: 9; align-items: flex-start; justify-content: center; padding: 16px; overflow-y: auto; }
   .modal.show { display: flex; }
-  .modal-card { background: var(--card); border-radius: var(--radius); padding: 16px; max-width: 100%; max-height: 100%; display: flex; flex-direction: column; gap: 10px; }
+  .modal-card { background: var(--card); border-radius: var(--radius); padding: 16px; max-width: 100%; display: flex; flex-direction: column; gap: 10px; }
   .modal-card .head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .modal-card .head b { margin-right: auto; overflow-wrap: anywhere; }
   .crop-stage { position: relative; overflow: hidden; user-select: none; touch-action: none; cursor: crosshair; align-self: center; line-height: 0; }
@@ -183,6 +184,18 @@
   .mark-layer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; opacity: .5; }
   .crop-stage.painting .sel { pointer-events: none; }
   .parts-note { width: 100%; border: 1px solid var(--border); border-radius: 10px; background: var(--field); padding: 8px 10px; font: inherit; font-size: 13px; color: inherit; }
+  .pick-layer { position: absolute; inset: 0; pointer-events: none; }
+  .pick { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; border: 3px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.6); color: #fff; font: bold 11px/16px sans-serif; text-align: center; text-shadow: 0 0 2px #000; }
+  .color-list { display: flex; flex-direction: column; gap: 6px; }
+  .color-row { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .color-row .sw { width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border); flex: none; }
+  .color-row input { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--field); padding: 4px 8px; font: inherit; color: inherit; }
+  .color-row button { border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 16px; }
+  .drop-overlay { position: fixed; inset: 0; z-index: 20; display: none; place-items: center; background: rgba(24,24,27,.55);
+    color: #fff; font-size: 22px; font-weight: 600; pointer-events: none; }
+  .drop-overlay.show { display: grid; }
+  .drop-overlay div { border: 3px dashed #fff; border-radius: 24px; padding: 40px 60px; }
   .modal-card .foot { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
   .btn.dark { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   .grid3 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 12px; margin-top: 16px; }
@@ -194,7 +207,7 @@
   <header>
     <span class="pill">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/></svg>
-      AI 产品精修 · agy 测试版 v5
+      AI 产品精修 · agy 测试版 v6
     </span>
     <h1>一键智能产品精修</h1>
     <p class="sub">上传产品图片，AI 自动分析并优化画质、去除瑕疵、增强细节</p>
@@ -237,7 +250,7 @@
           <div class="icon-circle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 13H8"/><path d="M16 17H8"/><path d="M16 13h-2"/></svg></div>
           <div><div class="card-title">精修要求</div><div class="card-desc">描述您对图片精修的特殊需求（可选）</div></div>
         </div>
-        <textarea id="requirement" placeholder="例如：去除背景杂物、增强产品光泽、修复划痕、提升整体清晰度…"></textarea>
+        <textarea id="requirement" placeholder="简单描述你的产品：是什么、什么材质、怎么摆放的；哪些是产品和配件，哪些是背景杂物（例如：放在书本上的手机壳，书本是背景）。颜色不用写，需要锁定颜色请在框选窗口里用“吸管取色”。"></textarea>
         <div class="grid3">
           <label class="f">模型
             <select id="model"><option value="">（读取中…）</option></select>
@@ -278,6 +291,32 @@
               <option value="85">饱满（约占 85%）</option>
             </select>
           </label>
+          <label class="f">精修
+            <select id="retouch">
+              <option value="on">精修（去瑕疵、调光线）</option>
+              <option value="off">不精修（只换背景/构图）</option>
+            </select>
+          </label>
+          <label class="f">清晰度
+            <select id="sharp">
+              <option value="keep">原样</option>
+              <option value="enhance">提升清晰度（AI）</option>
+            </select>
+          </label>
+          <label class="f">对比度
+            <select id="contrast">
+              <option value="0">原样</option>
+              <option value="1">稍微提高</option>
+              <option value="2">明显提高</option>
+            </select>
+          </label>
+          <label class="f">亮度
+            <select id="bright">
+              <option value="0">原样</option>
+              <option value="1">稍亮</option>
+              <option value="2">更亮</option>
+            </select>
+          </label>
           <label class="f">拍摄角度
             <select id="angle">
               <option value="keep">保持原图</option>
@@ -289,7 +328,7 @@
           </label>
         </div>
         <div class="note" id="sizeNote"></div>
-        <div class="hint">“模型”是 agy 里负责看图、写画面描述的模型；画图用的是 agy 自带的生图工具，它没有清晰度参数（1:1 出图是 1024×1024），输出尺寸由本程序缩放得到。白底图会按“主体大小”自动校准商品占画面的比例。</div>
+        <div class="hint">“模型”是 agy 里负责看图、写画面描述的模型；画图用的是 agy 自带的生图工具，它没有清晰度参数（1:1 出图是 1024×1024），输出尺寸由本程序缩放得到。白底图会按“主体大小”自动校准商品占画面的比例。“清晰度”交给 AI；“对比度”“亮度”由程序在 AI 出图后精确调整，不会改动产品形状。</div>
       </section>
 
       <!-- 测试设置 -->
@@ -297,6 +336,12 @@
         <details id="advanced">
           <summary>测试设置（高级）</summary>
           <div class="grid2">
+            <label class="f">模板语言
+              <select id="tplLang">
+                <option value="en">英文（推荐）</option>
+                <option value="zh">中文</option>
+              </select>
+            </label>
             <label class="f">同时处理几张
               <select id="concurrency">
                 <option value="1">1 张（测速度用）</option>
@@ -310,7 +355,7 @@
           <label class="f" style="margin-top:12px">发给 agy 的提示词模板
             <textarea id="template" class="mono" spellcheck="false"></textarea>
           </label>
-          <div class="hint">占位符：{{图片路径}}（程序自动填）、{{要看的图}}、{{调用说明}}（含比例和参考图参数）、{{配件要求}}、{{背景要求}}、{{构图要求}}、{{角度要求}}、{{额外要求}}。改动会自动保存在这个浏览器里。</div>
+          <div class="hint">占位符：{{图片路径}}（程序自动填）、{{要看的图}}、{{调用说明}}（含比例和参考图参数）、{{颜色锁定}}、{{配件要求}}、{{角度要求}}、{{精修要求}}、{{清晰度要求}}、{{背景要求}}、{{构图要求}}、{{额外要求}}。中英文模板各自保存在这个浏览器里。</div>
           <div class="row">
             <button class="btn small" id="resetTemplate" type="button">恢复默认模板</button>
             <button class="btn small" id="previewPrompt" type="button">预览第 1 张图的提示词</button>
@@ -360,6 +405,7 @@
         <button type="button" data-tool="crop" class="active">框选商品</button>
         <button type="button" data-tool="brush">画笔标注配件</button>
         <button type="button" data-tool="eraser">橡皮擦</button>
+        <button type="button" data-tool="picker">吸管取色</button>
       </div>
       <label class="brush-size">粗细 <input type="range" id="brushSize" min="4" max="80" value="20"></label>
       <button class="btn small" id="markClear" type="button">清除标注</button>
@@ -368,9 +414,11 @@
     <div class="crop-stage" id="cropStage">
       <img id="cropImg" alt="" draggable="false">
       <canvas class="mark-layer" id="markCanvas"></canvas>
+      <div class="pick-layer" id="pickLayer"></div>
       <div class="sel" id="cropSel" hidden><span class="h nw" data-h="nw"></span><span class="h ne" data-h="ne"></span><span class="h sw" data-h="sw"></span><span class="h se" data-h="se"></span></div>
     </div>
     <input class="parts-note" id="partsNote" placeholder="配件说明（选填）：例如“右边两个白色塑料插头是配件，必须保留”">
+    <div class="color-list" id="colorList"></div>
     <div class="foot">
       <span class="hint" id="cropInfo" style="margin:0 auto 0 0;align-self:center"></span>
       <button class="btn small" id="cropClear" type="button">清除框选</button>
@@ -393,14 +441,35 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
+<div class="drop-overlay" id="dropOverlay"><div>松开鼠标，添加图片</div></div>
 
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
 const MAX_FILES = 50;
-const TEMPLATE_KEY = "template-v4"; // 以前版本的模板不再沿用
+// 模板分中英文，各自保存；以前版本的模板不再沿用
+const TEMPLATE_KEYS = { en: "template-en-v1", zh: "template-zh-v6" };
+const DEFAULT_TEMPLATES = {
+  en: `You are an e-commerce product photo retoucher. Product photo: {{图片路径}}
 
-const DEFAULT_TEMPLATE = `你是电商产品图精修师。产品原图：{{图片路径}}
+Do exactly these 3 things in order, then stop:
+1. Use view_file to look at {{要看的图}} (only these files).
+2. {{调用说明}}
+3. Summarize what was done in one or two sentences in Chinese.
+
+Forbidden: running any command, viewing or searching any other files or folders, web search, asking me questions, calling generate_image yourself. How to generate is fully specified above; do not investigate or double-check it.
+
+The English Prompt you write must include ALL of the following requirements:
+- Same product: it must be exactly the same product as in the reference image. Shape, proportions, structure, colors, materials, patterns, text, logos and the number of parts must not change; do not add or remove any part.
+- Colors: every color must match the reference image exactly. Color names in the user's description are only hints; if they conflict with the image, follow the image.{{颜色锁定}}
+- Accessories: {{配件要求}}
+- Angle: {{角度要求}} Whatever the angle, the product's shape, proportions and colors must stay identical to the reference.
+- Retouching: {{精修要求}}
+- Sharpness: {{清晰度要求}}
+- Background: {{背景要求}}
+- Composition: {{构图要求}}
+- User's extra requirement (written in Chinese; translate it faithfully): {{额外要求}}`,
+  zh: `你是电商产品图精修师。产品原图：{{图片路径}}
 
 只做下面 3 件事，按顺序做完就结束：
 1. 用 view_file 查看{{要看的图}}（只看这些文件）。
@@ -410,26 +479,96 @@ const DEFAULT_TEMPLATE = `你是电商产品图精修师。产品原图：{{图�
 禁止：运行任何命令、查看或搜索其他文件和目录、上网搜索、向我提问、自己调用 generate_image。生图的做法上面已经写清楚，不需要再确认或调查。
 
 英文 Prompt 必须包含以下全部要求：
-- 必须是参考图里的同一个产品：外形、结构、颜色、材质、图案、文字、Logo、零件数量都不能改，不能增加或减少任何部件。
+- 同一个产品：必须是参考图里的同一个产品，外形、比例、结构、颜色、材质、图案、文字、Logo、零件数量都不能改，不能增加或减少任何部件。
+- 颜色：所有颜色必须和参考图完全一致。用户描述里的颜色名称只作参考，和图片不一致时以图片为准。{{颜色锁定}}
 - 配件：{{配件要求}}
-- 角度：{{角度要求}}
-- 去除灰尘、划痕、瑕疵和噪点，提升清晰度和细节，光线均匀柔和，质感真实，达到电商平台主图的水准。
+- 角度：{{角度要求}}无论角度怎么变，产品的形状、比例、颜色都必须和参考图一致。
+- 精修：{{精修要求}}
+- 清晰度：{{清晰度要求}}
 - 背景：{{背景要求}}
 - 构图：{{构图要求}}
-- 用户的额外要求：{{额外要求}}`;
+- 用户的额外要求：{{额外要求}}`,
+};
 
-const BACKGROUND_TEXT = {
-  white: "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物和阴影边缘；可以保留产品下方自然、轻微的接触投影。",
-  original: "保留原图的背景和场景，只清理背景里明显的杂物和污点，不要换背景。",
+/** 填进模板的各段文字（中英文两套）。 */
+const T = {
+  en: {
+    background: {
+      white: "Pure white (RGB 255,255,255) clean seamless background; remove everything from the original background, including shadow edges; a subtle natural contact shadow under the product is allowed.",
+      original: "Keep the original background and scene; only clean obvious clutter and stains in the background; do not replace the background.",
+      refine: "Keep the original background, scene, lighting and color tone; only remove specks, stains and dust from the background; do not replace it or change the style.",
+      alpha: "Pure white (RGB 255,255,255) clean background with everything from the original background removed; absolutely no shadows, reflections or cast shadows (it will be cut out to a transparent PNG afterwards); crisp, clean product edges without fringes or halos.",
+    },
+    angle: {
+      keep: "Keep the camera angle, perspective, product orientation and placement exactly as in the reference; cables, harnesses and accessories keep their routing and positions; do not rotate, flip or rearrange anything.",
+      auto: "Straighten the product: level anything tilted, line up multiple items neatly, and use a standard e-commerce viewing angle that clearly shows the main features.",
+      front: "Change to a straight-on front view at eye level; the product is upright and not tilted.",
+      45: "Change to an approximately 45-degree elevated three-quarter view that shows both the front and the top; the product is upright.",
+      top: "Change to a straight top-down flat-lay view; the product lies flat and square, multiple items neatly aligned.",
+      extra: " Parts not visible in the reference must follow the product's real structure; do not invent text, logos or parts.",
+    },
+    retouch: {
+      on: "Remove dust, scratches, blemishes, specks and noise; even, soft lighting; realistic material texture; e-commerce main-image quality.",
+      off: "Do not retouch the product: keep its surface, texture, wear marks, lighting and colors exactly as in the reference; only change what the background and composition requirements ask for.",
+    },
+    sharp: {
+      keep: "Keep the original level of sharpness; do not add artificial sharpening or invent extra detail.",
+      enhance: "Enhance sharpness and fine detail: remove blur, make edges crisp and textures clearly visible, without changing any shapes.",
+    },
+    compose: (r, fill) => fill === "keep"
+      ? `Aspect ratio ${r}. Product size and position follow the reference; show the whole product and do not crop any part.`
+      : `Aspect ratio ${r}. The whole product is visible and centered, occupying about ${fill}% of the frame${fill === "85" ? " (fill the frame)" : ""}, with ${fill === "85" ? "small" : "moderate"} margins; do not crop any part.`,
+    composeRefine: (r) => `Aspect ratio ${r} (same as the reference). This is a retouch, not a redesign: keep the composition, framing, product position and size exactly unchanged; no cropping or re-composition; do not change the product's colors or lighting style.`,
+    look: (n) => (n ? "the original image and the annotation image {{附图1}}" : "the original image"),
+    pathsNote: (n, d) => (n
+      ? ` (image 1 is the original and the basis for the retouch; image 2 is the accessory annotation image${d ? `; image${d > 1 ? `s 3-${2 + d} are` : " 3 is"} accessory close-up${d > 1 ? "s" : ""}` : ""}; these are references only)`
+      : " (the original as the reference image)"),
+    call: (r, paths) => `Immediately call invoke_subagent with subagent type image-generator (state this type explicitly in the parameters) and have it call generate_image exactly once to produce exactly one image, with parameters: ImageName: "refined"; AspectRatio: "${r}"; ImagePaths: ${paths}; Prompt: the English description you write after viewing the image (put it in your instructions to the subagent and have it use it verbatim). After delegating, just wait for it to finish: you may use manage_task to check progress; do nothing else.`,
+    parts: (n, d, note) => `The ${n} area${n > 1 ? "s" : ""} marked with red numbered boxes in the annotation image ${n > 1 ? "are" : "is"} product accessor${n > 1 ? "ies" : "y"}, not stains or clutter, and must be fully preserved with the same shape, count and relative position.${d ? " The close-up images show their details." : ""} The red boxes and numbers are only markers; never draw them in the output.${note ? ` Accessory note (Chinese; translate faithfully): ${note}` : ""}`,
+    partsNoteOnly: (note) => `Accessory note (Chinese; translate faithfully): ${note}. These accessories must be fully preserved; they are not clutter.`,
+    partsDefault: "All parts, accessories and cables in the reference are part of the product, not clutter; keep them all.",
+    colors: (list) => ` Color lock (sampled from the reference image): ${list.map((c, i) => `${i + 1}) ${c.hex} at about ${c.px}% from the left and ${c.py}% from the top${c.note ? ` (${c.note})` : ""}`).join("; ")}. These areas must keep exactly these colors.`,
+    none: "none",
+  },
+  zh: {
+    background: {
+      white: "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物和阴影边缘；可以保留产品下方自然、轻微的接触投影。",
+      original: "保留原图的背景和场景，只清理背景里明显的杂物和污点，不要换背景。",
+      refine: "保留原图的背景、场景、光线和色调，只去掉背景里的杂点、污渍和灰尘，不要换背景，不要改变画面风格。",
+      alpha: "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物；不要任何投影、倒影和阴影（之后要抠成透明底）；产品边缘清晰锐利、轮廓干净，没有毛边和白边。",
+    },
+    angle: {
+      keep: "保持原图的拍摄角度、透视、产品朝向和摆放方式完全不变；线缆、线束和配件的走向与位置也不变；不要旋转、翻转或重新摆放任何部分。",
+      auto: "把产品摆正：歪斜的扶正，多个产品排列整齐，视角调整为能看清产品主要特征的标准电商展示角度。",
+      front: "改为正面平视角度：相机与产品正面等高、正对，产品端正不歪斜。",
+      45: "改为约 45° 俯视的立体展示角度，能同时看到产品的正面和顶部，产品端正不歪斜。",
+      top: "改为正上方垂直俯拍（平铺展示）：产品平放、端正，多个产品排列整齐。",
+      extra: "原图里看不到的部分要符合产品的真实结构，不要编造文字、Logo 或零件。",
+    },
+    retouch: {
+      on: "去除灰尘、划痕、瑕疵、杂点和噪点，光线均匀柔和，质感真实，达到电商平台主图的水准。",
+      off: "不要精修产品：表面、质感、磨损痕迹、光线和颜色都保持原图的样子，只按背景和构图的要求修改。",
+    },
+    sharp: {
+      keep: "保持原图的清晰度，不要人为锐化，不要编造多余的细节。",
+      enhance: "提升清晰度和细节：去模糊，边缘清晰锐利，纹理清楚可见，但不改变任何形状。",
+    },
+    compose: (r, fill) => fill === "keep"
+      ? `画面比例 ${r}。产品在画面中的大小和位置参考原图，完整显示，不要裁掉产品任何部分。`
+      : `画面比例 ${r}。产品完整显示、居中，主体约占画面的 ${fill}%${fill === "85" ? "（主体饱满）" : ""}，四周留出${fill === "85" ? "少量" : "适当"}空白，不要裁掉产品任何部分。`,
+    composeRefine: (r) => `画面比例 ${r}（和原图一致）。这是精修，不是重新设计：保持原图的构图、取景、产品位置和大小完全不变，不要裁剪、不要重新构图，不改变产品颜色和光影风格。`,
+    look: (n) => (n ? "这张原图和配件标注图 {{附图1}}" : "这张原图"),
+    pathsNote: (n, d) => (n
+      ? `（第 1 张是原图，是精修的依据；第 2 张是配件标注图${d ? `；第 ${d > 1 ? `3～${2 + d}` : "3"} 张是配件特写` : ""}，只用来参考）`
+      : "（原图作为参考图）"),
+    call: (r, paths) => `立即调用 invoke_subagent，子智能体类型必须是 image-generator（在参数里写明这个类型），让它只调用一次 generate_image、只生成这一张图，参数：ImageName: "refined"；AspectRatio: "${r}"；ImagePaths: ${paths}；Prompt: 你看完原图后用英文写的画面描述（写进交给它的说明里，让它原样使用）。委派之后你只需要等它完成：可以用 manage_task 查看进度，不要做任何别的事。`,
+    parts: (n, d, note) => `标注图里用红框和编号标出的 ${n} 处是产品配件，不是污渍或杂物，成品里必须完整保留，形状、数量、相对位置都不变；${d ? "配件特写图用来看清它们的细节；" : ""}红框和编号只是标记，成品里绝对不要画出来。${note ? "配件说明：" + note : ""}`,
+    partsNoteOnly: (note) => `${note}（这些配件必须完整保留，不是杂物）。`,
+    partsDefault: "参考图里的所有零件、配件、线缆都是产品的一部分，不是杂物，要完整保留。",
+    colors: (list) => `颜色锁定（从参考图上取的色号）：${list.map((c, i) => `${i + 1}）${c.hex}，位置约在从左 ${c.px}%、从上 ${c.py}% 处${c.note ? `（${c.note}）` : ""}`).join("；")}。这些部位必须保持这个颜色。`,
+    none: "无",
+  },
 };
-const ANGLE_TEXT = {
-  keep: "保持原图的拍摄角度、透视、产品朝向和摆放方式完全不变；线缆、线束和配件的走向与位置也不变；不要旋转、翻转或重新摆放任何部分。",
-  auto: "把产品摆正：歪斜的扶正，多个产品排列整齐，视角调整为能看清产品主要特征的标准电商展示角度。",
-  front: "改为正面平视角度：相机与产品正面等高、正对，产品端正不歪斜。",
-  45: "改为约 45° 俯视的立体展示角度，能同时看到产品的正面和顶部，产品端正不歪斜。",
-  top: "改为正上方垂直俯拍（平铺展示）：产品平放、端正，多个产品排列整齐。",
-};
-const ANGLE_EXTRA = "原图里看不到的部分要符合产品的真实结构，不要编造文字、Logo 或零件。";
 const FILL_LABEL = { keep: "保持原图", 70: "适中 70%", 85: "饱满 85%" };
 const ANGLE_LABEL = { keep: "保持原图", auto: "自动摆正", front: "正面平视", 45: "45° 俯视", top: "正上方俯拍" };
 const SIZE_LABEL = { 800: "800", 1024: "1K", 2048: "2K", original: "AI 原尺寸", source: "和原图一样大" };
@@ -446,15 +585,15 @@ const MODES = {
     locks: { ratio: "1:1", background: "white" },
     outSizes: ["800", "1024", "2048"],
     formats: ["jpeg", "png-alpha"],
-    defaults: { outSize: "800", format: "jpeg", fill: "85", angle: "keep" },
+    defaults: { outSize: "800", format: "jpeg", fill: "85", angle: "keep", retouch: "on", sharp: "keep", contrast: "0", bright: "0" },
   },
   refine: {
     label: "图片精修",
     hint: "只去掉杂点、灰尘、划痕，提升清晰度；不抠图、不改背景、构图和角度，比例跟原图（或框选区域）一样。",
-    locks: { ratio: "auto", background: "original", fill: "keep", angle: "keep", format: "jpeg" },
+    locks: { ratio: "auto", background: "original", fill: "keep", angle: "keep", format: "jpeg", retouch: "on" },
     outSizes: ["original", "2048", "source"],
     formats: ["jpeg"],
-    defaults: { outSize: "original" },
+    defaults: { outSize: "original", sharp: "keep", contrast: "0", bright: "0" },
   },
   free: {
     label: "自由模式",
@@ -462,10 +601,12 @@ const MODES = {
     locks: {},
     outSizes: ["800", "1024", "2048", "original"],
     formats: ["jpeg", "png", "png-alpha"],
-    defaults: { ratio: "1:1", background: "white", outSize: "800", format: "jpeg", fill: "85", angle: "keep" },
+    defaults: { ratio: "1:1", background: "white", outSize: "800", format: "jpeg", fill: "85", angle: "keep", retouch: "on", sharp: "keep", contrast: "0", bright: "0" },
   },
 };
-const MODE_FIELDS = ["background", "ratio", "outSize", "format", "fill", "angle"];
+const MODE_FIELDS = ["background", "ratio", "outSize", "format", "fill", "angle", "retouch", "sharp", "contrast", "bright"];
+const TONE_LABEL = { 0: "原样", 1: "稍微提高", 2: "明显提高" };
+const BRIGHT_LABEL = { 0: "原样", 1: "稍亮", 2: "更亮" };
 function outSizeLabel(mode, v) {
   if (mode === "refine") return { original: "AI 原尺寸（最清楚）", 2048: "2K（长边 2048）", source: "和原图一样大（放大，会偏软）" }[v];
   if (mode === "white") return { 800: "800×800", 1024: "1K（1024×1024）", 2048: "2K（2048×2048）" }[v];
@@ -554,7 +695,7 @@ function renderThumbs() {
   $("count").textContent = `${files.length}/${MAX_FILES}`;
   $("cropHint").hidden = files.length === 0;
   $("thumbs").innerHTML = files.map((f) => {
-    const badge = [f.crop ? "已框选" : "", f.parts?.length ? `配件×${f.parts.length}` : ""].filter(Boolean).join(" · ");
+    const badge = [f.crop ? "已框选" : "", f.parts?.length ? `配件×${f.parts.length}` : "", f.colors?.length ? `颜色×${f.colors.length}` : ""].filter(Boolean).join(" · ");
     const box = (f.crop
       ? `<span class="crop-box" style="left:${f.crop.x * 100}%;top:${f.crop.y * 100}%;width:${f.crop.w * 100}%;height:${f.crop.h * 100}%"></span>`
       : "") + (badge ? `<span class="crop-badge">${badge}</span>` : "");
@@ -593,7 +734,28 @@ $("drop").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key ==
 $("fileInput").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
 $("drop").addEventListener("dragover", (e) => { e.preventDefault(); $("drop").classList.add("over"); });
 $("drop").addEventListener("dragleave", () => $("drop").classList.remove("over"));
-$("drop").addEventListener("drop", (e) => { e.preventDefault(); $("drop").classList.remove("over"); addFiles(e.dataTransfer.files); });
+// 拖到页面任意位置都能添加（在 document 上统一处理，产品图区域只负责高亮）
+let dragDepth = 0;
+const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+document.addEventListener("dragenter", (e) => {
+  if (!hasFiles(e)) return;
+  dragDepth++;
+  $("dropOverlay").classList.add("show");
+});
+document.addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
+document.addEventListener("dragleave", (e) => {
+  if (!hasFiles(e)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) $("dropOverlay").classList.remove("show");
+});
+document.addEventListener("drop", (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  $("dropOverlay").classList.remove("show");
+  $("drop").classList.remove("over");
+  addFiles(e.dataTransfer.files);
+});
 $("thumbs").addEventListener("click", (e) => {
   const rm = Number(e.target.dataset.remove);
   if (rm) {
@@ -624,6 +786,7 @@ const TOOL_HINT = {
   crop: "按住鼠标拖出一个框，把商品框进去（四周留一点空）。拖框内部可以移动，拖四个角可以调整大小。",
   brush: "在容易被当成杂物的小配件上涂抹（显示成红色）。连在一起的涂抹算一个配件；会把标注图和配件特写（最多 4 张）一起交给 AI。",
   eraser: "在涂错的地方擦一下。",
+  picker: "在产品上点一下，取原图那一点的颜色（色号），交给 AI 时要求这个部位保持这个颜色。可以在下面写备注（例如“无线充”），最多 8 个。",
 };
 function setTool(t) {
   tool = t;
@@ -701,12 +864,57 @@ function paintSeg(a, b) {
   drawMarkLayer();
 }
 
+/** 吸管：取原图上这一点附近（7×7 像素）的平均色。 */
+async function pickColor(p) {
+  const f = cropFile();
+  f.colors = f.colors || [];
+  if (f.colors.length >= 8) { toast("最多 8 个颜色"); return; }
+  if (!f.sampler) {
+    const img = await loadImage(f.dataUrl);
+    const c = document.createElement("canvas");
+    c.width = f.w; c.height = f.h;
+    c.getContext("2d", { willReadFrequently: true }).drawImage(img, 0, 0);
+    f.sampler = c;
+  }
+  const x = Math.round(p.x * f.w), y = Math.round(p.y * f.h);
+  const r = 3;
+  const d = f.sampler.getContext("2d").getImageData(Math.max(0, x - r), Math.max(0, y - r), r * 2 + 1, r * 2 + 1).data;
+  let R = 0, G = 0, B = 0, n = 0;
+  for (let i = 0; i < d.length; i += 4) { R += d[i]; G += d[i + 1]; B += d[i + 2]; n++; }
+  const hex = "#" + [R, G, B].map((v) => Math.round(v / n).toString(16).padStart(2, "0")).join("").toUpperCase();
+  f.colors.push({ x: p.x, y: p.y, hex, note: "" });
+  renderPicks();
+}
+function renderPicks() {
+  const f = cropFile();
+  const list = f.colors || [];
+  $("pickLayer").innerHTML = list.map((c, i) =>
+    `<span class="pick" style="left:${c.x * 100}%;top:${c.y * 100}%;background:${c.hex}">${i + 1}</span>`).join("");
+  $("colorList").innerHTML = list.map((c, i) => `<div class="color-row">
+      <span class="sw" style="background:${c.hex}"></span><b>${i + 1}</b><span>${c.hex}</span>
+      <input data-cnote="${i}" value="${esc(c.note)}" placeholder="备注（选填），例如：无线充">
+      <button type="button" data-cdel="${i}" title="删除">×</button>
+    </div>`).join("");
+  drawSel();
+}
+$("colorList").addEventListener("input", (e) => {
+  const i = e.target.dataset.cnote;
+  if (i !== undefined) cropFile().colors[Number(i)].note = e.target.value.trim();
+});
+$("colorList").addEventListener("click", (e) => {
+  const i = e.target.dataset.cdel;
+  if (i === undefined) return;
+  cropFile().colors.splice(Number(i), 1);
+  renderPicks();
+});
+
 function showCrop() {
   const f = cropFile();
   cropRect = f.crop ? { ...f.crop } : null;
   $("partsNote").value = f.partsNote || "";
   setTool(tool);
   drawMarkLayer();
+  renderPicks();
   $("cropImg").src = f.dataUrl;
   $("cropTitle").textContent = `第 ${cropIndex + 1}/${files.length} 张：${f.name}（${f.w}×${f.h}）`;
   $("cropPrev").disabled = cropIndex === 0;
@@ -716,7 +924,7 @@ function showCrop() {
 function drawSel() {
   const sel = $("cropSel");
   const f = cropFile();
-  const partsText = f.parts?.length ? ` · 标注配件 ${f.parts.length} 处` : "";
+  const partsText = (f.parts?.length ? ` · 标注配件 ${f.parts.length} 处` : "") + (f.colors?.length ? ` · 锁定颜色 ${f.colors.length} 个` : "");
   if (!cropRect) {
     sel.hidden = true;
     $("cropInfo").textContent = "未框选：整张图交给 AI" + partsText;
@@ -752,6 +960,10 @@ function stagePoint(e) {
 $("cropStage").addEventListener("pointerdown", (e) => {
   e.preventDefault();
   const p = stagePoint(e);
+  if (tool === "picker") {
+    pickColor(p);
+    return;
+  }
   if (tool !== "crop") {
     drag = { mode: "paint", last: p };
     $("cropStage").setPointerCapture(e.pointerId);
@@ -970,11 +1182,15 @@ $("modes").addEventListener("click", (e) => {
 });
 $("guard").checked = store("guard") !== "0";
 $("guard").addEventListener("change", () => store("guard", $("guard").checked ? "1" : "0"));
-$("template").value = store(TEMPLATE_KEY) || DEFAULT_TEMPLATE;
-$("template").addEventListener("input", () => store(TEMPLATE_KEY, $("template").value));
+const tplLang = () => $("tplLang").value;
+$("tplLang").value = store("tplLang") === "zh" ? "zh" : "en";
+const loadTemplate = () => { $("template").value = store(TEMPLATE_KEYS[tplLang()]) || DEFAULT_TEMPLATES[tplLang()]; };
+loadTemplate();
+$("tplLang").addEventListener("change", () => { store("tplLang", tplLang()); loadTemplate(); });
+$("template").addEventListener("input", () => store(TEMPLATE_KEYS[tplLang()], $("template").value));
 $("resetTemplate").addEventListener("click", () => {
-  $("template").value = DEFAULT_TEMPLATE;
-  store(TEMPLATE_KEY, DEFAULT_TEMPLATE);
+  $("template").value = DEFAULT_TEMPLATES[tplLang()];
+  store(TEMPLATE_KEYS[tplLang()], $("template").value);
   toast("已恢复默认模板");
 });
 $("model").addEventListener("change", () => store("model", $("model").value));
@@ -1023,6 +1239,11 @@ function settings() {
     concurrency: Number($("concurrency").value) || 1,
     guard: $("guard").checked,
     template: $("template").value,
+    lang: tplLang(),
+    retouch: $("retouch").value,
+    sharp: $("sharp").value,
+    contrast: $("contrast").value,
+    bright: $("bright").value,
   };
 }
 
@@ -1050,49 +1271,59 @@ function updateSizeNote() {
   if (s.format === "png-alpha") parts.push("透明底由程序抠图：只抠和四周相连的白色，产品内部的白色高光保留；产品边缘如果也是很亮的白色，可能被抠掉一点，请重点看轮廓。");
   if (s.fill !== "keep") parts.push(s.background === "white" ? `白底图会自动校准到商品约占 ${s.fill}%。` : `原图背景无法自动校准主体大小，只靠 AI 按要求构图。`);
   if (s.angle !== "keep") parts.push("改了角度：AI 要补画原图看不到的部分，请逐张核对文字和零件。");
+  if (s.contrast !== "0" || s.bright !== "0") parts.push("对比度 / 亮度由程序在 AI 出图后调整（纯白背景保持纯白）。");
   el.className = s.outSize === "source" || Number(s.outSize) > 1024 || s.angle !== "keep" ? "note warn" : "note";
   el.textContent = parts.join(" ");
 }
 
+/** 吸管取的颜色换算到“交给 AI 的图”（框选后）里的位置百分比；框选范围外的不要。 */
+function colorsInInput(f) {
+  const out = [];
+  for (const c of f.colors || []) {
+    let px = c.x, py = c.y;
+    if (f.crop) {
+      px = (c.x - f.crop.x) / f.crop.w;
+      py = (c.y - f.crop.y) / f.crop.h;
+    }
+    if (px < 0 || py < 0 || px > 1 || py > 1) continue;
+    out.push({ hex: c.hex, note: c.note, px: Math.round(px * 100), py: Math.round(py * 100) });
+  }
+  return out;
+}
+
 function buildPrompt(s, f) {
+  const L = T[s.lang] || T.en;
   const aiRatio = aiRatioFor(s, f);
   const nParts = partsInInput(f).length;
   const nDetails = Math.min(nParts, MAX_DETAILS);
   const paths = ["{{图片路径}}"];
   if (nParts) for (let i = 1; i <= 1 + nDetails; i++) paths.push(`{{附图${i}}}`);
-  const pathsText = `[${paths.map((x) => `"${x}"`).join(", ")}]`
-    + (nParts ? `（第 1 张是原图，是精修的依据；第 2 张是配件标注图${nDetails ? `；第 ${nDetails > 1 ? `3～${2 + nDetails}` : "3"} 张是配件特写` : ""}，只用来参考）` : "（原图作为参考图）");
-  const call = `立即调用 invoke_subagent，子智能体类型必须是 image-generator（在参数里写明这个类型），让它只调用一次 generate_image、只生成这一张图，参数：ImageName: "refined"；AspectRatio: "${aiRatio}"；ImagePaths: ${pathsText}；Prompt: 你看完原图后用英文写的画面描述（写进交给它的说明里，让它原样使用）。委派之后你只需要等它完成：可以用 manage_task 查看进度，不要做任何别的事。`;
+  const pathsText = `[${paths.map((x) => `"${x}"`).join(", ")}]` + L.pathsNote(nParts, nDetails);
   const note = (f.partsNote || "").trim();
-  let parts;
-  if (nParts) {
-    parts = `标注图里用红框和编号标出的 ${nParts} 处是产品配件，不是污渍或杂物，成品里必须完整保留，形状、数量、相对位置都不变；${nDetails ? "配件特写图用来看清它们的细节；" : ""}红框和编号只是标记，成品里绝对不要画出来。${note ? "配件说明：" + note : ""}`;
-  } else if (note) {
-    parts = `${note}（这些配件必须完整保留，不是杂物）。`;
-  } else {
-    parts = "参考图里的所有零件、配件、线缆都是产品的一部分，不是杂物，要完整保留。";
-  }
-  let compose = s.fill === "keep"
-    ? `画面比例 ${aiRatio}。产品在画面中的大小和位置参考原图，完整显示，不要裁掉产品任何部分。`
-    : `画面比例 ${aiRatio}。产品完整显示、居中，主体约占画面的 ${s.fill}%${s.fill === "85" ? "（主体饱满）" : ""}，四周留出${s.fill === "85" ? "少量" : "适当"}空白，不要裁掉产品任何部分。`;
-  let background = BACKGROUND_TEXT[s.background];
+  const parts = nParts ? L.parts(nParts, nDetails, note) : note ? L.partsNoteOnly(note) : L.partsDefault;
+  const colors = colorsInInput(f);
+  let compose = L.compose(aiRatio, s.fill);
+  let background = L.background[s.background];
   if (s.mode === "refine") {
-    compose = `画面比例 ${aiRatio}（和原图一致）。这是精修，不是重新设计：保持原图的构图、取景、产品位置和大小完全不变，不要裁剪、不要重新构图；只去除杂点、杂质、灰尘、划痕和噪点，提升清晰度，不改变产品颜色和光影风格。`;
-    background = "保留原图的背景、场景、光线和色调，只去掉背景里的杂点、污渍和灰尘，不要换背景，不要改变画面风格。";
+    compose = L.composeRefine(aiRatio);
+    background = L.background.refine;
   } else if (s.format === "png-alpha") {
-    background = "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物；不要任何投影、倒影和阴影（之后要抠成透明底）；产品边缘清晰锐利、轮廓干净，没有毛边和白边。";
+    background = L.background.alpha;
   }
-  const angle = s.angle === "keep" ? ANGLE_TEXT.keep : ANGLE_TEXT[s.angle] + ANGLE_EXTRA;
+  const angle = s.angle === "keep" ? L.angle.keep : L.angle[s.angle] + L.angle.extra;
   return {
     aiRatio,
     prompt: s.template
-      .split("{{要看的图}}").join(nParts ? "这张原图和配件标注图 {{附图1}}" : "这张原图")
+      .split("{{要看的图}}").join(L.look(nParts))
+      .split("{{调用说明}}").join(L.call(aiRatio, pathsText))
+      .split("{{颜色锁定}}").join(colors.length ? L.colors(colors) : "")
       .split("{{配件要求}}").join(parts)
-      .split("{{调用说明}}").join(call)
       .split("{{角度要求}}").join(angle)
+      .split("{{精修要求}}").join(L.retouch[s.retouch] || L.retouch.on)
+      .split("{{清晰度要求}}").join(L.sharp[s.sharp] || L.sharp.keep)
       .split("{{背景要求}}").join(background)
       .split("{{构图要求}}").join(compose)
-      .split("{{额外要求}}").join(s.requirement || "无"),
+      .split("{{额外要求}}").join(s.requirement || L.none),
   };
 }
 
@@ -1225,6 +1456,21 @@ function cutoutWhite(g, W, H) {
   g.putImageData(new ImageData(out, W, H), 0, 0);
 }
 
+/**
+ * 亮度 / 对比度（程序调，不经过 AI）：亮度用伽马提亮中间调（纯黑纯白不变），
+ * 对比度以中灰为中心拉开。纯白背景始终是纯白。
+ */
+function adjustTone(g, W, H, bright, contrast) {
+  const gamma = [1, 1.12, 1.25][bright] || 1;
+  const k = [1, 1.12, 1.25][contrast] || 1;
+  const lut = new Uint8ClampedArray(256);
+  for (let v = 0; v < 256; v++) lut[v] = Math.round((255 * Math.pow(v / 255, 1 / gamma) - 128) * k + 128);
+  const im = g.getImageData(0, 0, W, H);
+  const d = im.data;
+  for (let i = 0; i < d.length; i += 4) { d[i] = lut[d[i]]; d[i + 1] = lut[d[i + 1]]; d[i + 2] = lut[d[i + 2]]; }
+  g.putImageData(im, 0, 0);
+}
+
 /** AI 出图 → 最终输出。 */
 async function makeOutput(job, ai) {
   const s = batch;
@@ -1238,7 +1484,8 @@ async function makeOutput(job, ai) {
   // 目标比例：选了比例就用它；“自动”跟交给 AI 的图（原图或框选区域）一样
   const r = s.ratio === "auto" ? job.inputRatio : ratioValue(s.ratio);
   const closeToAi = Math.abs(Math.log(iw / ih / r)) < 0.03;
-  if (s.outSize === "original" && !subject && !alpha && s.format === "jpeg" && closeToAi) return { ...ai, same: true };
+  const tone = s.contrast !== "0" || s.bright !== "0";
+  if (s.outSize === "original" && !subject && !alpha && !tone && s.format === "jpeg" && closeToAi) return { ...ai, same: true };
 
   let W, H;
   if (s.outSize === "original") ({ w: W, h: H } = sizeFor(r, Math.max(iw, ih)));
@@ -1272,6 +1519,11 @@ async function makeOutput(job, ai) {
   }
   g.fillRect(0, 0, W, H);
   g.drawImage(img, dx, dy, iw * scale, ih * scale);
+  if (tone) {
+    adjustTone(g, W, H, Number(s.bright), Number(s.contrast));
+    if (s.bright !== "0") notes.push(`亮度${BRIGHT_LABEL[s.bright]}`);
+    if (s.contrast !== "0") notes.push(`对比度${TONE_LABEL[s.contrast]}`);
+  }
   if (alpha) {
     cutoutWhite(g, W, H);
     notes.push("透明底");
@@ -1556,12 +1808,13 @@ $("copyLog").addEventListener("click", async () => {
   if (!jobs.length) return;
   const b = batch;
   const lines = [];
-  lines.push("# agy 产品精修测试结果（v5）");
+  lines.push("# agy 产品精修测试结果（v6）");
   lines.push(`时间（北京）：${beijingTime(b.startedAt)}${b.endedAt ? " ~ " + beijingTime(b.endedAt) : "（进行中）"}`);
   lines.push(`浏览器：${navigator.userAgent}`);
   lines.push(`处理模式：${b.modeLabel}`);
   lines.push(`设置：模型 ${b.modelName}（${b.model || "默认"}）；背景 ${b.background === "white" ? "白底图" : "原图背景"}；比例 ${b.ratioLabel}；输出尺寸 ${SIZE_LABEL[b.outSize]}；格式 ${FORMAT_LABEL[b.format]}；主体大小 ${FILL_LABEL[b.fill]}；拍摄角度 ${ANGLE_LABEL[b.angle]}`);
-  lines.push(`测试设置：委派 image-generator；越权即结束 ${b.guard ? "开" : "关"}；同时处理 ${b.concurrency} 张；模板${b.template === DEFAULT_TEMPLATE ? "默认" : "改过"}`);
+  lines.push(`调整：精修 ${b.retouch === "on" ? "开" : "关"}；清晰度 ${b.sharp === "enhance" ? "提升（AI）" : "原样"}；对比度 ${TONE_LABEL[b.contrast]}；亮度 ${BRIGHT_LABEL[b.bright]}`);
+  lines.push(`测试设置：委派 image-generator；越权即结束 ${b.guard ? "开" : "关"}；同时处理 ${b.concurrency} 张；模板 ${b.lang === "zh" ? "中文" : "英文"}${b.template === DEFAULT_TEMPLATES[b.lang] ? "（默认）" : "（改过）"}`);
   lines.push(`精修要求：${b.requirement || "（无）"}`);
   lines.push($("summary").textContent);
   lines.push("");
@@ -1570,6 +1823,7 @@ $("copyLog").addEventListener("click", async () => {
     lines.push(`状态：${{ ok: "成功", fail: "失败", cancel: "已取消", waiting: "未开始", running: "进行中" }[j.status]}${j.endedAt ? `，总 ${((j.endedAt - j.startedAt) / 1000).toFixed(1)} 秒` : ""}`);
     const cs = inputSize(j.file);
     lines.push(`原图：${j.file.w}×${j.file.h}，${fmtBytes(j.file.size)}${j.file.crop ? `；框选 ${cs.w}×${cs.h}（原图的 ${Math.round(j.file.crop.w * j.file.crop.h * 100)}%）` : "；未框选"}；AI 比例 ${j.aiRatio}；${j.finalLabel}`);
+    if (j.file.colors?.length) lines.push(`颜色锁定：${j.file.colors.map((c, i) => `${i + 1}）${c.hex}${c.note ? "（" + c.note + "）" : ""}`).join("；")}`);
     if (j.input?.partCount || j.file.partsNote) lines.push(`配件标注：${j.input?.partCount || 0} 处（特写 ${j.input?.detailCount || 0} 张）${j.file.partsNote ? "；配件说明：" + j.file.partsNote : ""}`);
     j.attempts.forEach((a, idx) => {
       const r = a.result || {};
