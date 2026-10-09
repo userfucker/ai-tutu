@@ -27,7 +27,12 @@ const GEM = {
   // 模型（模式）选择器：Lee 2026-10-09 探测报告
   //  按钮 data-testid=bard-mode-menu-button，aria “打开模式选择器，当前模式为“Flash””，文字 Flash / Pro / Flash-Lite / Flash-Lite 扩展
   //  菜单项 gem-menu-item[role=menuitem]，文字如 “3.1 Pro 高级推理”“3.5 Flash-Lite 极速回答”“扩展思考 擅长解决复杂问题”（开关项）
-  modeBtn: () => document.querySelector('button[data-testid="bard-mode-menu-button"]'),
+  //  刚“发起新对话”时这个按钮比输入框晚出来，要等（0.1.2 就是没等，报“没找到模型按钮”）
+  modeBtn: () =>
+    document.querySelector('button[data-testid="bard-mode-menu-button"]') ||
+    document.querySelector('bard-mode-switcher button') ||
+    document.querySelector('button.input-area-switch') ||
+    document.querySelector('button[aria-label^="打开模式选择器"], button[aria-label*="mode picker" i], button[aria-label*="model picker" i]'),
   modeItems: () => [...document.querySelectorAll('gem-menu-item[role="menuitem"], .cdk-overlay-container [role="menuitem"]')].filter((e) => e.getBoundingClientRect().width > 0),
 };
 
@@ -86,8 +91,11 @@ async function gemCloseMenu() {
  * 返回切换后的 gemCurrentMode()，菜单里找不到对应项时抛错。
  */
 async function gemEnsureMode(family, extended, signal) {
+  await gemWait(GEM.modeBtn, { timeout: 10000, signal, what: "模型选择按钮出现" }).catch((e) => {
+    if (signal && signal.aborted) throw e;
+  });
   let cur = gemCurrentMode();
-  if (!cur) throw new Error("没找到 Gemini 的模型选择按钮（可能改版了）");
+  if (!cur) throw new Error("等了 10 秒没找到 Gemini 的模型选择按钮");
   if (family && cur.family !== family) {
     const items = await gemOpenModeMenu(signal);
     const item = items.find((e) => gemFamilyOf(e.innerText || "") === family && !/扩展思考|extended thinking/i.test(e.innerText || ""));

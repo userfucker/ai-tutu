@@ -9,7 +9,7 @@
 (() => {
   if (window.__aitutuPanel) return;
   window.__aitutuPanel = true;
-  const VERSION = "0.1.2";
+  const VERSION = "0.1.3";
 
   // ------------------------------------------------------------ 设置
   const MODES = {
@@ -74,6 +74,9 @@
   button.danger { color: #b91c1c; }
   .drop { border: 2px dashed #d4d4d8; border-radius: 12px; padding: 14px; text-align: center; cursor: pointer; color: #52525b; }
   .drop.over { background: #f4f4f5; border-color: #71717a; }
+  .dropmask { position: absolute; inset: 0; z-index: 4; display: none; place-items: center; background: rgba(24,24,27,.55); color: #fff; font-size: 18px; font-weight: 600;
+    border: 3px dashed #fff; border-radius: 12px; pointer-events: none; }
+  .wrap.dragging .dropmask { display: grid; }
   .thumbs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px; }
   .thumb { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid #e4e4e7; cursor: pointer; background: #f4f4f5; }
   .thumb img { width: 100%; height: 100%; object-fit: fill; display: block; }
@@ -126,6 +129,7 @@
 </style>
 <div class="wrap" id="wrap">
   <div class="handle" id="handle" title="展开 / 收起 AI图图">AI<br>图<br>图<br>▶</div>
+  <div class="dropmask">松开鼠标，添加图片</div>
   <div class="panel">
     <div class="card">
       <div class="row"><h2>AI图图 · 电商作图</h2><span class="muted" style="margin-left:auto">v${VERSION}</span></div>
@@ -140,7 +144,7 @@
 
     <div class="card">
       <div class="row"><b>产品图</b><span class="muted" id="count">0 张</span><button id="clearFiles" style="margin-left:auto" hidden>清空</button></div>
-      <div class="drop" id="drop">点击选择、拖进来，或点一下这里后按 Ctrl+V 粘贴<br><span class="muted">JPG / PNG / WebP，可以一次多张</span></div>
+      <div class="drop" id="drop">点击选择，或把图片拖到面板任意位置，或点一下面板后按 Ctrl+V 粘贴<br><span class="muted">JPG / PNG / WebP，可以一次多张</span></div>
       <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" multiple hidden>
       <div class="thumbs" id="thumbs"></div>
       <div class="muted" id="thumbHint" hidden>点缩略图：框选商品、画笔标注配件、吸管取色。</div>
@@ -343,9 +347,16 @@
   }
   $("drop").addEventListener("click", () => $("fileInput").click());
   $("fileInput").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
-  $("drop").addEventListener("dragover", (e) => { e.preventDefault(); e.stopPropagation(); $("drop").classList.add("over"); });
-  $("drop").addEventListener("dragleave", () => $("drop").classList.remove("over"));
-  $("drop").addEventListener("drop", (e) => { e.preventDefault(); e.stopPropagation(); $("drop").classList.remove("over"); addFiles(e.dataTransfer.files); });
+  // 图片拖到面板任意位置都能加（不用对准虚线框）
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+  let dragDepth = 0;
+  const endDrag = () => { dragDepth = 0; $("wrap").classList.remove("dragging"); };
+  $("wrap").addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); dragDepth++; $("wrap").classList.add("dragging"); });
+  $("wrap").addEventListener("dragover", (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "copy"; $("wrap").classList.add("dragging"); });
+  $("wrap").addEventListener("dragleave", (e) => { if (!hasFiles(e)) return; e.stopPropagation(); if (--dragDepth <= 0) endDrag(); });
+  $("wrap").addEventListener("drop", (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); endDrag(); addFiles(e.dataTransfer.files); });
+  document.addEventListener("dragend", endDrag, true);
+  document.addEventListener("drop", endDrag, true);
   $("thumbs").addEventListener("click", (e) => {
     const rm = Number(e.target.dataset.remove);
     if (rm) { files = files.filter((f) => f.id !== rm); renderThumbs(); return; }
@@ -607,7 +618,7 @@
         <img src="${j.inputUrl || j.file.dataUrl}" data-view="${j.inputUrl || j.file.dataUrl}" title="交给 Gemini 的图">
         ${j.outUrl ? `<img src="${j.outUrl}" data-view="${j.outUrl}" title="最终输出">` : `<div class="ph">${j.status === "running" ? "生成中…" : "—"}</div>`}
         <div><div><b>${esc(j.file.name)}</b></div>
-          <span class="tag ${cls}">${label}${sec}</span>${j.w ? `<span class="tag">${j.w}×${j.h}${j.ext === ".png" ? " PNG" : ""}</span>` : ""}${j.note ? `<span class="tag">${esc(j.note)}</span>` : ""}${j.model ? `<span class="tag">${esc(j.model)}</span>` : ""}
+          <span class="tag ${cls}">${label}${sec}</span>${j.w ? `<span class="tag">${j.w}×${j.h}${j.ext === ".png" ? " PNG" : ""}</span>` : ""}${j.note ? `<span class="tag">${esc(j.note)}</span>` : ""}${j.model ? `<span class="tag${j.modeWarn ? " warn" : ""}" title="${esc(j.modeWarn || "")}">${esc(j.model)}${j.modeWarn ? " ⚠" : ""}</span>` : ""}
           ${j.partCount ? `<span class="tag warn">标注配件 ${j.partCount} 处，请核对</span>` : ""}
           <div class="txt">${esc(j.steps[j.steps.length - 1] || "")}</div>
           ${j.error ? `<div class="txt" style="color:#b91c1c">${esc(j.error)}</div>` : ""}
@@ -664,6 +675,7 @@
       lines.push(`原图 ${j.file.w}×${j.file.h}${j.file.crop ? `，框选 ${j.inputW}×${j.inputH}` : ""}；AI 比例 ${j.aiRatio}；模型 ${j.model || "?"}；新会话 ${j.newChat ? "是" : "否"}；配件 ${j.partCount || 0}；颜色 ${j.file.colors?.length || 0}`);
       if (j.aiW) lines.push(`Gemini 出图：${j.aiW}×${j.aiH}，${Math.round(j.aiBytes / 1024)} KB；最终输出：${j.w}×${j.h}${j.ext}${j.note ? "，" + j.note : ""}`);
       j.steps.forEach((s) => lines.push("- " + s));
+      if (j.modeWarn) lines.push("提示：" + j.modeWarn);
       if (j.error) lines.push("错误：" + j.error);
       if (j.text) lines.push("Gemini 回复：" + j.text.slice(0, 500));
       lines.push("");
@@ -724,9 +736,16 @@
     // 模型：每张发之前看一眼，不对就切（新对话有时会变回默认模型）
     const wantExt = S.extended === "on" ? true : S.extended === "off" ? false : null;
     if (S.model || wantExt !== null) {
-      const before = gemCurrentMode();
-      const after = await gemEnsureMode(S.model, wantExt, signal);
-      if (before && after && before.label !== after.label) step(j, `切换模型：${before.label} → ${after.label}`);
+      // 切换失败不停下：按网页上当前的模型继续做，结果上标黄色提示
+      try {
+        const before = gemCurrentMode();
+        const after = await gemEnsureMode(S.model, wantExt, signal);
+        if (before && after && before.label !== after.label) step(j, `切换模型：${before.label} → ${after.label}`);
+      } catch (e) {
+        if (signal.aborted) throw e;
+        j.modeWarn = `模型没切成（${e.message}），用的是网页当前的模型`;
+        step(j, "⚠ " + j.modeWarn);
+      }
     }
     j.model = gemCurrentMode()?.label || "（没找到模型按钮）";
     j.prompt = buildWebPrompt(S, j.file, j.aiRatio, { fresh: !needNew && (sessionCount > 0 || !isFirst || GEM.responses().length > 0) });

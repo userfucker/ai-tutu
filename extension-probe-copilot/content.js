@@ -15,7 +15,7 @@
     window.__aitutuCopilotProbe();
     return;
   }
-  const VERSION = "copilot-probe-0.1.1";
+  const VERSION = "copilot-probe-0.1.2";
   console.log(`[AI图图] Copilot 探测 ${VERSION} 已加载：${location.href}`);
 
   // ------------------------------------------------------------ 小工具
