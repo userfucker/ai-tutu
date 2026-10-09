@@ -56,6 +56,7 @@
   .card-title { font-weight: 600; }
   .card-desc { color: var(--muted); font-size: 13px; }
   .card-head .count { margin-left: auto; color: var(--muted); }
+  .card-head #clearFiles { padding: 3px 10px; }
 
   .drop {
     border: 2px dashed #d4d4d8; border-radius: 16px; padding: 28px 12px;
@@ -233,10 +234,11 @@
           <div class="icon-circle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg></div>
           <div><div class="card-title">产品图</div><div class="card-desc">上传需要精修的产品图片</div></div>
           <span class="count" id="count">0/50</span>
+          <button class="btn small" id="clearFiles" type="button" hidden>清空</button>
         </div>
         <div class="drop" id="drop" tabindex="0">
           <div class="up"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg></div>
-          点击上传或拖拽图片到此区域
+          点击上传、拖拽图片，或按 Ctrl+V 粘贴
           <small>支持 JPG、PNG、WebP 格式，最多 50 张</small>
         </div>
         <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" multiple hidden>
@@ -693,6 +695,7 @@ function inputSize(f) {
 
 function renderThumbs() {
   $("count").textContent = `${files.length}/${MAX_FILES}`;
+  $("clearFiles").hidden = files.length === 0;
   $("cropHint").hidden = files.length === 0;
   $("thumbs").innerHTML = files.map((f) => {
     const badge = [f.crop ? "已框选" : "", f.parts?.length ? `配件×${f.parts.length}` : "", f.colors?.length ? `颜色×${f.colors.length}` : ""].filter(Boolean).join(" · ");
@@ -734,6 +737,32 @@ $("drop").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key ==
 $("fileInput").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
 $("drop").addEventListener("dragover", (e) => { e.preventDefault(); $("drop").classList.add("over"); });
 $("drop").addEventListener("dragleave", () => $("drop").classList.remove("over"));
+// 一键清空左侧图片（框选、标注、取色一起清掉）
+$("clearFiles").addEventListener("click", () => {
+  if (running) { toast("正在处理，先点“停止”"); return; }
+  if (!confirm(`清空左侧全部 ${files.length} 张图片？（框选、标注、取色也会一起清掉，右侧结果不受影响）`)) return;
+  files = [];
+  renderThumbs();
+});
+
+let pasteCount = 0;
+// Ctrl+V 粘贴图片：浏览器里“复制图片”、截图工具截的图都可以。
+// 只拦截剪贴板里有图片的情况，在输入框里粘贴文字不受影响。
+document.addEventListener("paste", (e) => {
+  const items = [...(e.clipboardData?.items || [])].filter((it) => it.kind === "file" && it.type.startsWith("image/"));
+  if (!items.length) return;
+  e.preventDefault();
+  const stamp = beijingTime().slice(11).replace(/:/g, "");
+  const list = items.map((it, i) => {
+    const f = it.getAsFile();
+    const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[f.type] || "png";
+    pasteCount++;
+    return new File([f], `粘贴图片-${stamp}-${pasteCount}.${ext}`, { type: f.type });
+  });
+  addFiles(list);
+  toast(`已粘贴 ${list.length} 张图片`);
+});
+
 // 拖到页面任意位置都能添加（在 document 上统一处理，产品图区域只负责高亮）
 let dragDepth = 0;
 const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
