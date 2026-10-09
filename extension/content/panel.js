@@ -9,7 +9,7 @@
 (() => {
   if (window.__aitutuPanel) return;
   window.__aitutuPanel = true;
-  const VERSION = "0.1.0";
+  const VERSION = "0.1.1";
 
   // ------------------------------------------------------------ 设置
   const MODES = {
@@ -771,8 +771,14 @@
     readSettings();
     saveSettings();
     if (!GEM.input()) { setStatus("没找到 Gemini 输入框：请先打开 gemini.google.com 的对话页面。", "bad"); return; }
+    if (!list && files.length && files.every((f) => f.done)) {
+      // 面板里的图都做过了（打了 ✓）：比如换了模型想再做一遍
+      if (!confirm(`面板里的 ${files.length} 张图都已经做过（打了 ✓）。\n要把它们全部再做一遍吗？（之前的结果会保留）`)) return;
+      files.forEach((f) => (f.done = false));
+      renderThumbs();
+    }
     list = list || files.filter((f) => !f.done).slice(0, S.batchSize);
-    if (!list.length) { setStatus("没有要做的图片：先加图片（做完的图片会打 ✓）。", "warn"); return; }
+    if (!list.length) { setStatus("没有要做的图片：先加图片。", "warn"); return; }
     running = true;
     abortCtl = new AbortController();
     const signal = abortCtl.signal;
