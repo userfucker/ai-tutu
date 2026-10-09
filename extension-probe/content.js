@@ -11,7 +11,7 @@
 (() => {
   if (window.__aitutuProbe) return;
   window.__aitutuProbe = true;
-  const VERSION = "probe-0.1.0";
+  const VERSION = "probe-0.1.1";
 
   // ------------------------------------------------------------ 小工具
   const short = (s, n = 50) => {
@@ -25,11 +25,16 @@
     return r.width > 0 && r.height > 0;
   };
   const isOurs = (el) => !!(el.closest && el.closest("#aitutu-probe-host"));
-  /** 侧边栏 / 对话列表里的东西可能带对话标题，一律不收集 */
-  const inNav = (el) =>
-    !!el.closest(
-      'nav,[role="navigation"],side-navigation,bard-sidenav,mat-sidenav,conversations-list,[class*="conversation-list"],[class*="sidenav"],[class*="side-nav"],[class*="sidebar"]',
-    );
+  /**
+   * 侧边栏 / 对话列表里的东西可能带对话标题，一律不收集。
+   * 注意：Gemini 整个页面都套在 bard-sidenav-container / bard-sidenav-content 里，
+   * 不能按 class 名里的 "sidenav" 判断（0.1.0 就是这样把整页都跳过了）。
+   * 只认真正的侧边栏组件；聊天窗口和输入区里的东西一律不算侧边栏。
+   */
+  const NAV_SEL =
+    'nav,[role="navigation"],side-navigation-v2,side-navigation-content,conversations-list,project-sidenav-list,gem-nav-list-item,mat-nav-list,sidenav-mavatar-footer,bard-sidenav';
+  const MAIN_SEL = "chat-window,input-container,chat-app-banners,top-bar-actions,model-response,user-query";
+  const inNav = (el) => !el.closest(MAIN_SEL) && !!el.closest(NAV_SEL);
   function cssPath(el) {
     const parts = [];
     let e = el;
