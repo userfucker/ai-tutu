@@ -9,7 +9,7 @@
 (() => {
   if (window.__aitutuPanel) return;
   window.__aitutuPanel = true;
-  const VERSION = "0.2.1";
+  const VERSION = "0.3.0";
   const SITE = AITUTU_SITE; // gemini.js 或 copilot.js 提供
   const AI = SITE.name;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -24,6 +24,7 @@
     mode: "white", ratio: "1:1", background: "white", outSize: "800", format: "jpeg", fill: "85", angle: "keep",
     retouch: "on", sharp: "keep", contrast: "0", bright: "0", requirement: "",
     batchSize: 10, session: "new", everyN: 5, send: "B", model: "Flash", extended: "any", holes: "off",
+    gapMin: 20, gapMax: 60, retryWait: 30, onFail: "stop",
   };
   const LABELS = {
     outSize: { 800: "800×800", 1024: "1K（1024）", original: "AI 原尺寸" },
@@ -103,6 +104,15 @@
   .job .ph { width: 64px; height: 64px; border-radius: 6px; border: 1px dashed #d4d4d8; display: grid; place-items: center; color: #a1a1aa; font-size: 11px; }
   .tag { display: inline-block; font-size: 11px; border-radius: 999px; padding: 0 7px; background: #f4f4f5; color: #52525b; margin: 1px 2px 1px 0; }
   .tag.ok { background: #dcfce7; color: #15803d; } .tag.bad { background: #fee2e2; color: #b91c1c; } .tag.warn { background: #fef9c3; color: #854d0e; }
+  .chatlist { max-height: 260px; overflow-y: auto; margin-top: 6px; }
+  .chatlist label { display: flex; gap: 6px; align-items: center; padding: 3px 2px; font-size: 12px; border-bottom: 1px solid #f4f4f5; cursor: pointer; }
+  .chatlist label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chatlist .gone { color: #a1a1aa; text-decoration: line-through; }
+  .setbox { margin-top: 8px; padding: 10px; border: 1px dashed #d4d4d8; border-radius: 10px; }
+  .setbox input[type=number] { width: 100%; }
+  .selbar { margin: 6px 0 2px; padding: 4px 0; border-bottom: 1px solid #f4f4f5; }
+  .job { grid-template-columns: 16px 64px 64px 1fr !important; }
+  .job .ck { margin-top: 24px; }
   .job .txt { font-size: 11px; color: #71717a; overflow-wrap: anywhere; }
   /* 框选 / 标注 / 取色 弹窗 */
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: flex-start; justify-content: center; padding: 16px; overflow-y: auto; z-index: 5; }
@@ -196,12 +206,36 @@
 
     <div class="card">
       <div class="row"><b>结果</b><span class="muted" id="sumText"></span></div>
+      <div class="row selbar" id="selBar" hidden>
+        <label class="muted"><input type="checkbox" id="selAll"> 全选</label><span class="muted" id="selCount"></span>
+        <button id="selRetry" disabled>重做选中</button><button id="selZip" disabled>下载选中 zip</button><button id="selDel" class="danger" disabled>删除选中</button>
+      </div>
       <div id="jobs"></div>
       <div class="row" style="margin-top:8px">
         <button id="zipBtn" disabled>打包下载 zip</button>
+        <button id="setBtn">设置</button>
         <button id="copyLog">复制日志</button>
         <button id="clearJobs" style="margin-left:auto">清空结果</button>
       </div>
+      <div class="setbox" id="setBox" hidden>
+        <div class="grid">
+          <label class="f">每张间隔（秒，随机）<span class="row" style="flex-wrap:nowrap"><input type="number" id="gapMin" min="0" max="600">～<input type="number" id="gapMax" min="0" max="600"></span></label>
+          <label class="f">失败后等待（秒）再重试<input type="number" id="retryWait" min="0" max="600"></label>
+        </div>
+        <label class="f" style="margin-top:8px">被拒或出错时<select id="onFail"><option value="stop">自动停止</option><option value="retry">自动重试（每张重试 1 次，然后继续下一张）</option></select></label>
+        <div class="muted" style="margin-top:6px">间隔只用于 B 模式（自动发送）。出现人机验证、额度 / 频率限制时总是停下。</div>
+      </div>
+    </div>
+    <div class="card" id="chatCard" hidden>
+      <div class="row"><b>${AI} 会话管理</b><span class="muted" id="chatCount"></span>
+        <button id="chatLoad" style="margin-left:auto">读取左侧会话</button></div>
+      <div class="muted">只能读到左侧已经显示出来的会话；想删更早的，先在左侧往下滚动，再点“读取”。删除后找不回来。</div>
+      <div class="row" id="chatBar" hidden style="margin-top:6px">
+        <label class="muted"><input type="checkbox" id="chatAll"> 全选</label>
+        <button id="chatDel" class="danger" disabled>删除选中</button><button id="chatStop" disabled>停止</button>
+      </div>
+      <div id="chatList" class="chatlist"></div>
+      <div class="status" id="chatStatus" hidden></div>
     </div>
   </div>
 </div>
@@ -280,12 +314,16 @@
     S.send = $("send").value;
     S.model = $("model").value;
     S.holes = $("holes").value;
+    S.gapMin = Math.max(0, Math.min(600, Number($("gapMin").value) || 0));
+    S.gapMax = Math.max(S.gapMin, Math.min(600, Number($("gapMax").value) || 0));
+    S.retryWait = Math.max(0, Math.min(600, Number($("retryWait").value) || 0));
+    S.onFail = $("onFail").value;
     S.extended = $("extended").value;
   }
   function renderBatchHints() {
     $("everyNWrap").hidden = $("session").value !== "everyN";
     $("sendHint").textContent = $("send").value === "B"
-      ? "B 模式：插件自动发送，每张之间随机等 20～60 秒；遇到被拒、验证、额度提示或页面切到后台，会自动停下 / 暂停。"
+      ? `B 模式：插件自动发送，每张之间随机等 ${S.gapMin}～${S.gapMax} 秒（在“设置”里改）；被拒 / 出错时${S.onFail === "retry" ? "自动重试" : "自动停下"}，遇到验证、额度提示停下，页面切到后台暂停。`
       : "A 模式：插件把图片和提示词填好后会提示你，你检查一下按回车发送，插件接着收图、准备下一张。";
   }
   function loadSettingsToUi() {
@@ -296,6 +334,10 @@
     $("send").value = S.send;
     $("model").value = S.model ?? "Flash";
     $("holes").value = S.holes || "off";
+    $("gapMin").value = S.gapMin ?? 20;
+    $("gapMax").value = S.gapMax ?? 60;
+    $("retryWait").value = S.retryWait ?? 30;
+    $("onFail").value = S.onFail || "stop";
     $("extended").value = S.extended || "any";
     applyMode();
     renderBatchHints();
@@ -634,6 +676,7 @@
       const [label, cls] = STATUS[j.status];
       const sec = j.endedAt ? ` ${((j.endedAt - j.startedAt) / 1000).toFixed(0)} 秒` : "";
       return `<div class="job">
+        <input type="checkbox" class="ck" data-sel="${j.id}" ${sel.has(j.id) ? "checked" : ""}>
         <img src="${j.inputUrl || j.file.dataUrl}" data-view="${j.inputUrl || j.file.dataUrl}" title="交给 ${AI} 的图">
         ${j.outUrl ? `<img src="${j.outUrl}" data-view="${j.outUrl}" title="最终输出">` : `<div class="ph">${j.status === "running" ? "生成中…" : "—"}</div>`}
         <div><div><b>${esc(j.file.name)}</b></div>
@@ -643,21 +686,79 @@
           ${j.error ? `<div class="txt" style="color:#b91c1c">${esc(j.error)}</div>` : ""}
           ${j.text && j.status !== "ok" ? `<div class="txt">${AI}：${esc(j.text.slice(0, 160))}</div>` : ""}
           <div class="row" style="margin-top:3px">
-            ${j.outUrl ? `<button data-dl="${j.id}">下载</button>` : ""}${j.aiUrl ? `<button data-view="${j.aiUrl}">看 AI 原图</button>` : ""}
+            ${j.outUrl ? `<button data-dl="${j.id}">下载</button>` : ""}
             ${["refused", "fail", "cancel"].includes(j.status) && !running ? `<button data-retry="${j.id}">重做这张</button>` : ""}
+            ${j.status !== "running" ? `<button data-del="${j.id}" class="danger" title="删除这条结果和面板里对应的产品图">删除</button>` : ""}
           </div></div></div>`;
     }).join("");
     const ok = jobs.filter((j) => j.status === "ok").length;
     $("sumText").textContent = jobs.length ? `共 ${jobs.length} 张，完成 ${ok}` : "";
     $("zipBtn").disabled = !ok;
+    for (const id of [...sel]) if (!jobs.some((j) => j.id === id)) sel.delete(id);
+    $("selBar").hidden = !jobs.length;
+    $("selCount").textContent = sel.size ? `已选 ${sel.size}` : "";
+    $("selAll").checked = jobs.length > 0 && sel.size === jobs.length;
+    $("selRetry").disabled = running || !selJobs().some((j) => j.status !== "running");
+    $("selZip").disabled = !selJobs().some((j) => j.status === "ok");
+    $("selDel").disabled = !selJobs().some((j) => j.status !== "running");
   }
+  // ---- 多选：重做 / 下载 zip / 删除
+  const sel = new Set();
+  const selJobs = () => jobs.filter((j) => sel.has(j.id));
+  /** 删除结果，同时把面板里对应的产品图删掉（正在做的那张不能删） */
+  function deleteJobs(list) {
+    list = list.filter((j) => j.status !== "running");
+    const delFiles = new Set(list.map((j) => j.file));
+    list.forEach((j) => { j.removed = true; sel.delete(j.id); });
+    jobs = jobs.filter((j) => !j.removed);
+    files = files.filter((f) => !delFiles.has(f));
+    renderJobs();
+    renderThumbs();
+    return list.length;
+  }
+  function retryJobs(list) {
+    if (running) { toast("正在处理，先点“停止”"); return; }
+    list = list.filter((j) => j.status !== "running");
+    const fs = [...new Set(list.map((j) => j.file))];
+    fs.forEach((f) => (f.done = false));
+    list.forEach((j) => sel.delete(j.id));
+    jobs = jobs.filter((j) => !list.includes(j));
+    renderJobs();
+    renderThumbs();
+    if (fs.length) startBatch(fs);
+  }
+  async function zipJobs(list) {
+    const ok = list.filter((j) => j.status === "ok");
+    if (!ok.length) { toast("没有可下载的图"); return; }
+    const used = new Set();
+    const items = ok.map((j) => {
+      let n = outName(j), k = 2;
+      while (used.has(n)) n = outName(j).replace(/(\.[a-z]+)$/, `-${k++}$1`);
+      used.add(n);
+      return { name: n, blob: j.outBlob };
+    });
+    downloadBlob(await makeZip(items), `AI图图-${bj().replace(/[-: ]/g, "").slice(0, 14)}.zip`);
+  }
+  $("selAll").addEventListener("change", () => { if ($("selAll").checked) jobs.forEach((j) => sel.add(j.id)); else sel.clear(); renderJobs(); });
+  $("selRetry").addEventListener("click", () => retryJobs(selJobs()));
+  $("selZip").addEventListener("click", () => zipJobs(selJobs()));
+  $("selDel").addEventListener("click", () => { const n = deleteJobs(selJobs()); toast(`已删除 ${n} 条`); });
+  $("setBtn").addEventListener("click", () => { $("setBox").hidden = !$("setBox").hidden; });
+  $("jobs").addEventListener("change", (e) => {
+    const id = Number(e.target.dataset.sel);
+    if (!id) return;
+    if (e.target.checked) sel.add(id); else sel.delete(id);
+    renderJobs();
+  });
   $("jobs").addEventListener("click", (e) => {
+    const del = Number(e.target.dataset.del);
+    if (del) { deleteJobs(jobs.filter((x) => x.id === del)); return; }
     const v = e.target.dataset.view;
     if (v) { openViewer(v); return; }
     const dl = Number(e.target.dataset.dl);
     if (dl) { const j = jobs.find((x) => x.id === dl); downloadBlob(j.outBlob, outName(j)); return; }
     const rt = Number(e.target.dataset.retry);
-    if (rt) { const j = jobs.find((x) => x.id === rt); j.file.done = false; jobs = jobs.filter((x) => x !== j); renderJobs(); renderThumbs(); startBatch([j.file]); }
+    if (rt) retryJobs(jobs.filter((x) => x.id === rt));
   });
   function downloadBlob(blob, name) {
     const a = document.createElement("a");
@@ -670,20 +771,11 @@
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
   }
-  $("zipBtn").addEventListener("click", async () => {
-    const ok = jobs.filter((j) => j.status === "ok");
-    const used = new Set();
-    const list = ok.map((j) => {
-      let n = outName(j), k = 2;
-      while (used.has(n)) n = outName(j).replace(/(\.[a-z]+)$/, `-${k++}$1`);
-      used.add(n);
-      return { name: n, blob: j.outBlob };
-    });
-    downloadBlob(await makeZip(list), `AI图图-${bj().replace(/[-: ]/g, "").slice(0, 14)}.zip`);
-  });
+  $("zipBtn").addEventListener("click", () => zipJobs(jobs));
   $("clearJobs").addEventListener("click", () => {
     if (running) { toast("正在处理，先点“停止”"); return; }
     jobs = [];
+    sel.clear();
     renderJobs();
   });
   $("copyLog").addEventListener("click", async () => {
@@ -694,6 +786,7 @@
       lines.push(`原图 ${j.file.w}×${j.file.h}${j.file.crop ? `，框选 ${j.inputW}×${j.inputH}` : ""}；AI 比例 ${j.aiRatio}；模型 ${j.model || "?"}；新会话 ${j.newChat ? "是" : "否"}；配件 ${j.partCount || 0}；颜色 ${j.file.colors?.length || 0}`);
       if (j.aiW) lines.push(`${AI} 出图：${j.aiW}×${j.aiH}，${Math.round(j.aiBytes / 1024)} KB；最终输出：${j.w}×${j.h}${j.ext}${j.note ? "，" + j.note : ""}`);
       j.steps.forEach((s) => lines.push("- " + s));
+      if (j.retries) lines.push(`自动重试过 ${j.retries} 次`);
       if (j.modeWarn) lines.push("提示：" + j.modeWarn);
       if (j.nudged) lines.push("第一次回复（没出图，已催一次）：" + j.nudged.slice(0, 200));
       if (j.error) lines.push("错误：" + j.error);
@@ -718,10 +811,10 @@
       await sleep(1000);
     }
   }
-  async function countdown(sec, signal, what) {
+  async function countdown(sec, signal, what, tail = "秒后发送下一张…") {
     for (let t = sec; t > 0; t--) {
       if (signal.aborted) throw new Error("已停止");
-      setStatus(`${what}：${t} 秒后发送下一张…`, "");
+      setStatus(`${what}：${t} ${tail}`, "");
       await sleep(1000);
     }
   }
@@ -857,31 +950,50 @@
     jobs.push(...batchJobs);
     renderJobs();
     let stopReason = "";
+    let retried = 0, failedKept = 0;
+    // 页面上 data-aitutu-test-gap 只给自动测试用（把间隔缩短成固定秒数）
+    const testGap = document.documentElement.dataset.aitutuTestGap;
+    const gapSec = () => (testGap !== undefined ? Number(testGap) : S.gapMin + Math.floor(Math.random() * (S.gapMax - S.gapMin + 1)));
     for (let i = 0; i < batchJobs.length; i++) {
       const j = batchJobs[i];
       if (signal.aborted) break;
-      setStatus(`第 ${i + 1}/${batchJobs.length} 张：${j.file.name}`);
-      let r;
-      try {
-        r = await runOne(j, signal, i === 0);
-      } catch (e) {
-        if (signal.aborted) { j.status = "cancel"; break; }
-        j.status = "fail";
-        j.error = e.message;
-        r = "fail";
+      if (j.removed) continue; // 排队时被删掉了
+      let r = "";
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (attempt) {
+          // 自动重试：等一会儿，同一张再做一次
+          retried++;
+          j.retries = attempt;
+          j.error = ""; j.text = ""; j.nudged = "";
+          const wait = testGap !== undefined ? Number(testGap) : S.retryWait;
+          try { await countdown(wait, signal, `第 ${i + 1} 张没成功，重试`, "秒后重试…"); } catch { break; }
+          j.steps.push(`—— 第 ${attempt + 1} 次 ——`);
+        }
+        setStatus(`第 ${i + 1}/${batchJobs.length} 张：${j.file.name}${attempt ? "（重试）" : ""}`);
+        try {
+          r = await runOne(j, signal, i === 0 && !attempt);
+        } catch (e) {
+          if (signal.aborted) { j.status = "cancel"; break; }
+          j.status = "fail";
+          j.error = e.message;
+          r = "fail";
+        }
+        j.endedAt = Date.now();
+        renderJobs();
+        renderThumbs();
+        // 重试只管“被拒 / 出错”；验证、额度提示重试也没用
+        if (r === "ok" || signal.aborted || S.send !== "B" || S.onFail !== "retry" || !["refused", "fail"].includes(r)) break;
       }
-      j.endedAt = Date.now();
-      renderJobs();
-      renderThumbs();
+      if (signal.aborted) break;
       if (S.send === "B" && r !== "ok") {
-        stopReason = { alert: j.error, limit: `${AI} 提示额度 / 频率限制`, refused: `${AI} 拒绝出图`, fail: "出错：" + j.error }[r];
-        break;
+        if (S.onFail === "retry" && ["refused", "fail"].includes(r)) failedKept++; // 重试过还不行：记下，接着做下一张
+        else {
+          stopReason = { alert: j.error, limit: `${AI} 提示额度 / 频率限制`, refused: `${AI} 拒绝出图`, fail: "出错：" + j.error }[r];
+          break;
+        }
       }
       if (S.send === "B" && i < batchJobs.length - 1) {
-        // 页面上 data-aitutu-test-gap 只给自动测试用（把 20～60 秒缩短）
-        const testGap = document.documentElement.dataset.aitutuTestGap;
-        const gap = testGap !== undefined ? Number(testGap) : 20 + Math.floor(Math.random() * 41);
-        try { await countdown(gap, signal, `第 ${i + 1} 张完成`); } catch { break; }
+        try { await countdown(gapSec(), signal, `第 ${i + 1} 张${r === "ok" ? "完成" : "没成功"}`); } catch { break; }
       }
     }
     batchJobs.filter((j) => j.status === "waiting" || j.status === "running").forEach((j) => (j.status = "cancel"));
@@ -892,8 +1004,72 @@
     const ok = batchJobs.filter((j) => j.status === "ok").length;
     if (signal.aborted) setStatus(`已停止。这一批完成 ${ok}/${batchJobs.length} 张。`, "warn");
     else if (stopReason) setStatus(`已自动停下：${stopReason}。完成 ${ok}/${batchJobs.length} 张。处理好后可以点“重做这张”或继续下一批。`, "bad");
+    else if (failedKept) setStatus(`这一批做完了：完成 ${ok}/${batchJobs.length} 张，${failedKept} 张重试后还是没成功（可以勾选后“重做选中”）。`, "warn");
     else setStatus(`这一批完成：${ok}/${batchJobs.length} 张。${files.some((f) => !f.done) ? "还有没做的图，可以点“开始这一批”继续。" : ""}`, ok === batchJobs.length ? "ok" : "warn");
   }
+  // ------------------------------------------------------------ 会话管理（批量删除左侧会话，目前只有 Copilot）
+  let chats = [];
+  const chatSel = new Set();
+  let chatAbort = null;
+  if (SITE.listChats) $("chatCard").hidden = false;
+  const chatStatus = (msg, kind = "") => { $("chatStatus").hidden = !msg; $("chatStatus").className = "status" + (kind ? " " + kind : ""); $("chatStatus").textContent = msg; };
+  function renderChats() {
+    $("chatBar").hidden = !chats.length;
+    $("chatCount").textContent = chats.length ? `${chats.length} 个，选中 ${chatSel.size}` : "";
+    $("chatAll").checked = chats.length > 0 && chats.filter((c) => !c.gone).every((c) => chatSel.has(c.id));
+    $("chatDel").disabled = !!chatAbort || !chatSel.size;
+    $("chatList").innerHTML = chats.map((c) => `<label class="${c.gone ? "gone" : ""}"><input type="checkbox" data-chat="${esc(c.id)}" ${chatSel.has(c.id) ? "checked" : ""} ${c.gone ? "disabled" : ""}><span title="${esc(c.title)}">${esc(c.title)}</span></label>`).join("");
+  }
+  $("chatLoad").addEventListener("click", () => {
+    chats = SITE.listChats();
+    chatSel.clear();
+    renderChats();
+    chatStatus(chats.length ? "" : "左侧没找到会话：请先展开左侧边栏。", chats.length ? "" : "warn");
+  });
+  $("chatList").addEventListener("change", (e) => {
+    const id = e.target.dataset.chat;
+    if (!id) return;
+    if (e.target.checked) chatSel.add(id); else chatSel.delete(id);
+    renderChats();
+  });
+  $("chatAll").addEventListener("change", () => {
+    chats.filter((c) => !c.gone).forEach((c) => ($("chatAll").checked ? chatSel.add(c.id) : chatSel.delete(c.id)));
+    renderChats();
+  });
+  $("chatStop").addEventListener("click", () => chatAbort && chatAbort.abort());
+  $("chatDel").addEventListener("click", async () => {
+    if (running) { toast("正在作图，先等这一批做完或点“停止”"); return; }
+    const todo = chats.filter((c) => chatSel.has(c.id) && !c.gone);
+    if (!todo.length) return;
+    if (!confirm(`确定删除选中的 ${todo.length} 个 ${AI} 会话？删除后找不回来。`)) return;
+    chatAbort = new AbortController();
+    $("chatStop").disabled = false;
+    renderChats();
+    let ok = 0, fail = 0;
+    for (const c of todo) {
+      if (chatAbort.signal.aborted) break;
+      chatStatus(`正在删除 ${ok + fail + 1}/${todo.length}：${c.title}`);
+      try {
+        await SITE.deleteChat(c, chatAbort.signal);
+        c.gone = true;
+        chatSel.delete(c.id);
+        ok++;
+      } catch (e) {
+        if (chatAbort.signal.aborted) break;
+        fail++;
+        c.error = e.message;
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); // 收起没点完的菜单
+      }
+      renderChats();
+      await sleep(800 + Math.floor(Math.random() * 700));
+    }
+    const stopped = chatAbort.signal.aborted;
+    chatAbort = null;
+    $("chatStop").disabled = true;
+    renderChats();
+    chatStatus(`${stopped ? "已停止。" : ""}删除了 ${ok} 个${fail ? `，${fail} 个没删掉（${todo.find((c) => c.error)?.error || ""}）` : ""}。`, fail ? "warn" : "ok");
+  });
+
   $("startBtn").addEventListener("click", () => startBatch());
   $("stopBtn").addEventListener("click", () => { if (abortCtl) abortCtl.abort(); });
   document.addEventListener("keydown", (e) => {

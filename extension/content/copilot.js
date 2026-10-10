@@ -275,6 +275,74 @@ async function copWaitResult(base, signal) {
 
 const copGrabImage = (img) => siteGrabImage(img, (src) => [src], "Copilot");
 
+
+// ------------------------------------------------------------ 左侧会话列表：批量删除
+// 来自 Lee 2026-10-10 的两份录制：
+//  个人版（www.copilot.com）：每行一个 button#conversation-options-<会话id>（“View Options / 视图选项”）→
+//    菜单项 button[role=menuitem]，title “Delete conversation, 标题”（中文界面是“删除…”）→
+//    确认框里 title=“Delete”的按钮（另一个是“Keep”）
+//  工作版（copilot.com/chat）：每行 a.fui-NavSubItem[href*="/chat/conversation/<id>"]，旁边 “更多”按钮 →
+//    菜单项 [role=menuitem][aria-label=删除] → 确认框 .fui-DialogSurface 里文字“删除”的按钮（另一个是“取消”）
+const DEL_RE = /^(delete|删除)/i;
+const textOf = (e) => ((e && (e.getAttribute("title") || e.getAttribute("aria-label") || e.innerText)) || "").replace(/\s+/g, " ").trim();
+
+function copListChats() {
+  const out = [];
+  // 个人版
+  for (const b of document.querySelectorAll('button[id^="conversation-options-"]')) {
+    const id = b.id.replace("conversation-options-", "");
+    if (!id || out.some((x) => x.id === id)) continue;
+    const row = b.closest(".cursor-pointer") || b.parentElement?.parentElement?.parentElement;
+    const title = ((row && row.innerText) || "").split("\n").map((t) => t.replace(/[…⋯]+$/, "").trim()).filter(Boolean)[0] || id;
+    out.push({ id, title, ui: "consumer" });
+  }
+  // 工作版
+  for (const a of document.querySelectorAll('a[href*="/chat/conversation/"]')) {
+    const m = /\/chat\/conversation\/([^?/#]+)/.exec(a.getAttribute("href") || "");
+    if (!m || out.some((x) => x.id === m[1])) continue;
+    const title = (a.getAttribute("aria-label") || a.innerText || m[1]).split("\n")[0].replace(/按 Tab 可访问.*$/, "").trim();
+    out.push({ id: m[1], title, ui: "m365" });
+  }
+  return out;
+}
+
+function copChatRowParts(chat) {
+  if (chat.ui === "consumer") {
+    const more = document.getElementById("conversation-options-" + chat.id);
+    return { more, row: more && (more.closest(".cursor-pointer") || more.parentElement) };
+  }
+  const a = [...document.querySelectorAll('a[href*="/chat/conversation/"]')].find((x) => (x.getAttribute("href") || "").includes(chat.id));
+  const box = a && (a.closest(".fui-SplitNavItem") || a.parentElement);
+  const more = box && [...box.querySelectorAll("button")].find((b) => /^(更多|more)/i.test(b.getAttribute("aria-label") || "") || b.classList.contains("fui-MenuButton"));
+  return { more, row: a };
+}
+
+/** 删除一个会话：点“…/更多” → 菜单里“删除” → 确认框里“删除”，等这一行从列表里消失 */
+async function copDeleteChat(chat, signal) {
+  const { more } = copChatRowParts(chat);
+  if (!more) throw new Error("列表里找不到这个会话（可能已经删掉了）");
+  more.scrollIntoView({ block: "center" });
+  more.click();
+  const item = await copWait(
+    () => [...document.querySelectorAll('[role="menuitem"]')].find((e) => vis(e) && (DEL_RE.test(textOf(e)) || DEL_RE.test((e.innerText || "").trim()))),
+    { timeout: 5000, signal, what: "菜单里的“删除”" },
+  );
+  item.click();
+  const confirmBtn = await copWait(
+    () => {
+      const dlg = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], .fui-DialogSurface, div.fixed.inset-0')].filter(vis);
+      for (const d of dlg) {
+        const b = [...d.querySelectorAll("button")].find((x) => vis(x) && !x.disabled && /^(delete|删除)$/i.test((x.innerText || x.getAttribute("title") || "").trim()));
+        if (b) return b;
+      }
+      return null;
+    },
+    { timeout: 5000, signal, what: "确认框里的“删除”" },
+  );
+  confirmBtn.click();
+  await copWait(() => !copListChats().some((x) => x.id === chat.id), { timeout: 15000, signal, what: "会话从列表里消失" });
+}
+
 /** 面板（panel.js）用的统一接口（和 gemini.js 里的一样） */
 const AITUTU_SITE = {
   id: "copilot",
@@ -293,6 +361,8 @@ const AITUTU_SITE = {
   waitResult: copWaitResult,
   grabImage: copGrabImage,
   limitRe: COP_LIMIT_RE,
+  listChats: copListChats,
+  deleteChat: copDeleteChat,
   // 回的是生图参数文字（如 {"orientation":"square"}）而不是图：催一次
   nudge: (text) => (/^\s*[{\[][\s\S]*"(orientation|prompt|size|aspect|image)/i.test(text) ? "请直接生成这张图片（不要回复参数或 JSON）。Please generate the image now." : ""),
   // 只记录当前模式（日志里看），不切换
