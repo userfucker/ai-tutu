@@ -9,7 +9,7 @@
 (() => {
   if (window.__aitutuPanel) return;
   window.__aitutuPanel = true;
-  const VERSION = "0.3.0";
+  const VERSION = "0.4.0";
   const SITE = AITUTU_SITE; // gemini.js 或 copilot.js 提供
   const AI = SITE.name;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -23,8 +23,8 @@
   const DEFAULTS = {
     mode: "white", ratio: "1:1", background: "white", outSize: "800", format: "jpeg", fill: "85", angle: "keep",
     retouch: "on", sharp: "keep", contrast: "0", bright: "0", requirement: "",
-    batchSize: 10, session: "new", everyN: 5, send: "B", model: "Flash", extended: "any", holes: "off",
-    gapMin: 20, gapMax: 60, retryWait: 30, onFail: "stop",
+    batchSize: 10, session: "new", everyN: 5, send: "B", model: "Flash", extended: "any", holes: "auto",
+    gapMin: 20, gapMax: 60, retryWait: 30, onFail: "stop", retryMax: 3, retryNewChat: false, askWhy: true, holesV: 2,
   };
   const LABELS = {
     outSize: { 800: "800×800", 1024: "1K（1024）", original: "AI 原尺寸" },
@@ -33,7 +33,8 @@
   let S = { ...DEFAULTS };
   // 设置按网站分开存（Gemini 一套、Copilot 一套），关了浏览器也保留，除非手动改
   const SETTINGS_KEY = `aitutuSettings:${SITE.id}`;
-  const saveSettings = () => { try { chrome.storage.local.set({ [SETTINGS_KEY]: S }); } catch {} };
+  // 精修要求不保存：刷新 / 重开浏览器后清空，免得上一个产品的描述（篮球）带到下一个产品（杯子）上
+  const saveSettings = () => { try { chrome.storage.local.set({ [SETTINGS_KEY]: { ...S, requirement: "" } }); } catch {} };
 
   // ------------------------------------------------------------ 状态
   let files = []; // {id,name,size,type,dataUrl,base64,w,h,crop,mask,parts,partsNote,colors,sampler,done}
@@ -43,6 +44,7 @@
   let abortCtl = null;
   let panelActive = false;
   let sessionCount = 0; // 当前对话里已经做了几张
+  let saveTimer = null, restoring = true; // 刷新后恢复面板内容（见文件末尾 saveTab / restoreTab）
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const bj = (ms = Date.now()) => {
@@ -83,9 +85,10 @@
   .dropmask { position: absolute; inset: 0; z-index: 4; display: none; place-items: center; background: rgba(24,24,27,.55); color: #fff; font-size: 18px; font-weight: 600;
     border: 3px dashed #fff; border-radius: 12px; pointer-events: none; }
   .wrap.dragging .dropmask { display: grid; }
-  .thumbs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px; }
+  .thumbs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 8px; }
   .thumb { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid #e4e4e7; cursor: pointer; background: #f4f4f5; }
-  .thumb img { width: 100%; height: 100%; object-fit: fill; display: block; }
+  .thumb { aspect-ratio: 1 / 1; }
+  .thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
   .thumb .x { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%; border: 0; padding: 0; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; line-height: 18px; }
   .thumb .badge { position: absolute; left: 2px; bottom: 2px; right: 2px; font-size: 9px; background: rgba(220,252,231,.95); color: #15803d; border-radius: 4px; padding: 0 3px; white-space: nowrap; overflow: hidden; }
   .thumb .box { position: absolute; border: 2px solid #22c55e; pointer-events: none; }
@@ -104,6 +107,7 @@
   .job .ph { width: 64px; height: 64px; border-radius: 6px; border: 1px dashed #d4d4d8; display: grid; place-items: center; color: #a1a1aa; font-size: 11px; }
   .tag { display: inline-block; font-size: 11px; border-radius: 999px; padding: 0 7px; background: #f4f4f5; color: #52525b; margin: 1px 2px 1px 0; }
   .tag.ok { background: #dcfce7; color: #15803d; } .tag.bad { background: #fee2e2; color: #b91c1c; } .tag.warn { background: #fef9c3; color: #854d0e; }
+  .chathead { cursor: pointer; user-select: none; }
   .chatlist { max-height: 260px; overflow-y: auto; margin-top: 6px; }
   .chatlist label { display: flex; gap: 6px; align-items: center; padding: 3px 2px; font-size: 12px; border-bottom: 1px solid #f4f4f5; cursor: pointer; }
   .chatlist label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -147,8 +151,7 @@
   <div class="dropmask">松开鼠标，添加图片</div>
   <div class="panel">
     <div class="card">
-      <div class="row"><h2>AI图图 · 电商作图</h2><span class="muted" style="margin-left:auto">v${VERSION}</span></div>
-      <div class="muted">在 ${AI} 网页版里批量精修产品图。每张都由 ${AI} 生成，插件负责填图、填提示词、收图和后期处理。</div>
+      <div class="row"><h2>AI图图 · 电商作图 · ${AI}</h2><span class="muted" style="margin-left:auto">v${VERSION}</span></div>
     </div>
 
     <div class="card">
@@ -176,7 +179,7 @@
           <option value="9:16">9:16 竖屏</option><option value="16:9">16:9 宽屏</option></select></label>
         <label class="f">输出尺寸<select id="outSize"></select></label>
         <label class="f">输出格式<select id="format"></select></label>
-        <label class="f" id="holesWrap" hidden title="戒指、环形零件这类中间有洞的产品才选“也抠透明”；金属件选“保留”，否则大块白色高光会被抠透明">镂空处<select id="holes"><option value="off">保留（金属件选这个）</option><option value="on">也抠透明（戒指等）</option></select></label>
+        <label class="f" id="holesWrap" hidden title="被产品围住的白色（枝叶间的空隙、戒指中间的孔、金属高光）怎么处理">镂空处<select id="holes"><option value="auto">自动（推荐）</option><option value="off">保留（白色都不抠）</option><option value="on">都抠透明</option></select></label>
         <label class="f">主体大小<select id="fill"><option value="keep">保持原图</option><option value="70">适中 70%</option><option value="85">饱满 85%</option></select></label>
         <label class="f">拍摄角度<select id="angle"><option value="keep">保持原图</option><option value="auto">自动摆正</option><option value="front">正面平视</option><option value="45">45° 俯视</option><option value="top">正上方俯拍</option></select></label>
         <label class="f">精修<select id="retouch"><option value="on">精修（去瑕疵）</option><option value="off">不精修</option></select></label>
@@ -214,21 +217,24 @@
       <div class="row" style="margin-top:8px">
         <button id="zipBtn" disabled>打包下载 zip</button>
         <button id="setBtn">设置</button>
-        <button id="copyLog">复制日志</button>
         <button id="clearJobs" style="margin-left:auto">清空结果</button>
       </div>
       <div class="setbox" id="setBox" hidden>
         <div class="grid">
           <label class="f">每张间隔（秒，随机）<span class="row" style="flex-wrap:nowrap"><input type="number" id="gapMin" min="0" max="600">～<input type="number" id="gapMax" min="0" max="600"></span></label>
           <label class="f">失败后等待（秒）再重试<input type="number" id="retryWait" min="0" max="600"></label>
+          <label class="f">被拒或出错时<select id="onFail"><option value="stop">自动停止</option><option value="retry">自动重试</option></select></label>
+          <label class="f">每张最多重试（次）<input type="number" id="retryMax" min="1" max="10"></label>
         </div>
-        <label class="f" style="margin-top:8px">被拒或出错时<select id="onFail"><option value="stop">自动停止</option><option value="retry">自动重试（每张重试 1 次，然后继续下一张）</option></select></label>
-        <div class="muted" style="margin-top:6px">间隔只用于 B 模式（自动发送）。出现人机验证、额度 / 频率限制时总是停下。</div>
+        <label class="muted" style="display:block;margin-top:8px"><input type="checkbox" id="askWhy"> 没出图时，先在同一个对话里发一句“怎么回事不生成图片？”</label>
+        <label class="muted" style="display:block;margin-top:4px"><input type="checkbox" id="retryNewChat"> 重试时打开新会话（不勾就在原来的对话里重发）</label>
+        <div class="muted" style="margin-top:6px">间隔只用于 B 模式（自动发送）。重试几次还不行就记下来，接着做下一张。出现人机验证、额度 / 频率限制时总是停下。</div>
       </div>
     </div>
     <div class="card" id="chatCard" hidden>
-      <div class="row"><b>${AI} 会话管理</b><span class="muted" id="chatCount"></span>
+      <div class="row chathead" id="chatHead"><b><span id="chatArrow">▸</span> ${AI} 会话管理</b><span class="muted" id="chatCount"></span>
         <button id="chatLoad" style="margin-left:auto">读取左侧会话</button></div>
+      <div id="chatBody" hidden>
       <div class="muted">只能读到左侧已经显示出来的会话；想删更早的，先在左侧往下滚动，再点“读取”。删除后找不回来。</div>
       <div class="row" id="chatBar" hidden style="margin-top:6px">
         <label class="muted"><input type="checkbox" id="chatAll"> 全选</label>
@@ -236,6 +242,7 @@
       </div>
       <div id="chatList" class="chatlist"></div>
       <div class="status" id="chatStatus" hidden></div>
+      </div>
     </div>
   </div>
 </div>
@@ -318,6 +325,9 @@
     S.gapMax = Math.max(S.gapMin, Math.min(600, Number($("gapMax").value) || 0));
     S.retryWait = Math.max(0, Math.min(600, Number($("retryWait").value) || 0));
     S.onFail = $("onFail").value;
+    S.retryMax = Math.max(1, Math.min(10, Number($("retryMax").value) || 3));
+    S.askWhy = $("askWhy").checked;
+    S.retryNewChat = $("retryNewChat").checked;
     S.extended = $("extended").value;
   }
   function renderBatchHints() {
@@ -327,7 +337,8 @@
       : "A 模式：插件把图片和提示词填好后会提示你，你检查一下按回车发送，插件接着收图、准备下一张。";
   }
   function loadSettingsToUi() {
-    $("requirement").value = S.requirement || "";
+    $("requirement").value = "";
+    S.requirement = "";
     $("batchSize").value = S.batchSize;
     $("session").value = S.session;
     $("everyN").value = S.everyN;
@@ -338,6 +349,9 @@
     $("gapMax").value = S.gapMax ?? 60;
     $("retryWait").value = S.retryWait ?? 30;
     $("onFail").value = S.onFail || "stop";
+    $("retryMax").value = S.retryMax ?? 3;
+    $("askWhy").checked = S.askWhy !== false;
+    $("retryNewChat").checked = !!S.retryNewChat;
     $("extended").value = S.extended || "any";
     applyMode();
     renderBatchHints();
@@ -351,7 +365,7 @@
     readSettings();
     saveSettings();
   });
-  root.querySelectorAll("select, input[type=number], textarea#requirement").forEach((el) =>
+  root.querySelectorAll("select, input[type=number], textarea#requirement, #askWhy, #retryNewChat").forEach((el) =>
     el.addEventListener("change", () => {
       if (FIELDS.includes(el.id) && !(el.id in MODES[S.mode].locks)) S[el.id] = el.value;
       readSettings();
@@ -365,6 +379,7 @@
       // 0.2.0 以前只有一套设置（aitutuSettings），Gemini 第一次升级时接着用
       const saved = (r && r[SETTINGS_KEY]) || (SITE.id === "gemini" && r && r.aitutuSettings);
       if (saved) S = { ...DEFAULTS, ...saved };
+      if (S.holesV !== 2) { if (S.holes === "off") S.holes = "auto"; S.holesV = 2; } // 0.4.0 起默认“自动”
       if (r && r.aitutuClosed) { $("wrap").classList.add("closed"); $("handle").innerHTML = "AI<br>图<br>图<br>◀"; }
       loadSettingsToUi();
     });
@@ -389,13 +404,15 @@
     renderThumbs();
   }
   function renderThumbs() {
+    scheduleSave();
     $("count").textContent = `${files.length} 张，未做 ${files.filter((f) => !f.done).length} 张`;
     $("clearFiles").hidden = !files.length;
     $("thumbHint").hidden = !files.length;
     $("thumbs").innerHTML = files.map((f) => {
       const badge = [f.crop ? "框选" : "", f.parts?.length ? `配件${f.parts.length}` : "", f.colors?.length ? `色${f.colors.length}` : ""].filter(Boolean).join("·");
-      return `<div class="thumb${f.done ? " done" : ""}" data-open="${f.id}" style="aspect-ratio:${f.w || 1}/${f.h || 1}" title="${esc(f.name)}">
-        <img src="${f.dataUrl}">${f.crop ? `<span class="box" style="left:${f.crop.x * 100}%;top:${f.crop.y * 100}%;width:${f.crop.w * 100}%;height:${f.crop.h * 100}%"></span>` : ""}
+      // 缩略图一律是小正方形（图片完整放在里面），不跟图片长宽走；框选在点开后的编辑框里做
+      return `<div class="thumb${f.done ? " done" : ""}" data-open="${f.id}" title="${esc(f.name)}">
+        <img src="${f.dataUrl}">
         ${badge ? `<span class="badge">${badge}</span>` : ""}<button class="x" data-remove="${f.id}">×</button></div>`;
     }).join("");
   }
@@ -671,7 +688,16 @@
     const tag = { white: "白底", refine: "精修", free: "处理" }[j.mode] || "处理";
     return `${base}-${tag}-${j.w}x${j.h}${j.ext}`;
   }
+  /** 结果里的文件名：超过 10 个字只显示前 10 个（鼠标停上去看全名） */
+  const shortName = (n) => { const base = n.replace(/\.[^.]+$/, ""); return base.length > 10 ? base.slice(0, 10) + "…" : base; };
+  /** 处理说明 + 模型合成一个标签，去掉重复的话（PNG 就是透明底，不用再写“透明底”） */
+  function infoTag(j) {
+    const parts = (j.note || "").split("，").filter(Boolean).map((t) => (/^白底提纯/.test(t) ? "白底提纯" : t === "透明底（含镂空）" ? "含镂空" : t)).filter((t) => t !== "透明底");
+    if (j.model) parts.push(j.model + (j.modeWarn ? " ⚠" : ""));
+    return parts.length ? `<span class="tag${j.modeWarn ? " warn" : ""}" title="${esc([j.note, j.modeWarn].filter(Boolean).join("；"))}">${esc(parts.join(" · "))}</span>` : "";
+  }
   function renderJobs() {
+    scheduleSave();
     $("jobs").innerHTML = jobs.slice().reverse().map((j) => {
       const [label, cls] = STATUS[j.status];
       const sec = j.endedAt ? ` ${((j.endedAt - j.startedAt) / 1000).toFixed(0)} 秒` : "";
@@ -679,10 +705,10 @@
         <input type="checkbox" class="ck" data-sel="${j.id}" ${sel.has(j.id) ? "checked" : ""}>
         <img src="${j.inputUrl || j.file.dataUrl}" data-view="${j.inputUrl || j.file.dataUrl}" title="交给 ${AI} 的图">
         ${j.outUrl ? `<img src="${j.outUrl}" data-view="${j.outUrl}" title="最终输出">` : `<div class="ph">${j.status === "running" ? "生成中…" : "—"}</div>`}
-        <div><div><b>${esc(j.file.name)}</b></div>
-          <span class="tag ${cls}">${label}${sec}</span>${j.w ? `<span class="tag">${j.w}×${j.h}${j.ext === ".png" ? " PNG" : ""}</span>` : ""}${j.note ? `<span class="tag">${esc(j.note)}</span>` : ""}${j.model ? `<span class="tag${j.modeWarn ? " warn" : ""}" title="${esc(j.modeWarn || "")}">${esc(j.model)}${j.modeWarn ? " ⚠" : ""}</span>` : ""}
+        <div><div title="${esc(j.file.name)}"><b>${esc(shortName(j.file.name))}</b></div>
+          <span class="tag ${cls}">${label}${sec}${j.retries ? `（重试 ${j.retries} 次）` : ""}</span>${j.w ? `<span class="tag">${j.w}×${j.h}${j.ext === ".png" ? " PNG" : ""}</span>` : ""}${infoTag(j)}
           ${j.partCount ? `<span class="tag warn">标注配件 ${j.partCount} 处，请核对</span>` : ""}
-          <div class="txt">${esc(j.steps[j.steps.length - 1] || "")}</div>
+          ${j.status !== "ok" && j.steps.length ? `<div class="txt">${esc(j.steps[j.steps.length - 1])}</div>` : ""}
           ${j.error ? `<div class="txt" style="color:#b91c1c">${esc(j.error)}</div>` : ""}
           ${j.text && j.status !== "ok" ? `<div class="txt">${AI}：${esc(j.text.slice(0, 160))}</div>` : ""}
           <div class="row" style="margin-top:3px">
@@ -716,15 +742,13 @@
     renderThumbs();
     return list.length;
   }
+  /** 重做：就在原来那条记录上重做（不新加记录，失败的记录不会留在列表里） */
   function retryJobs(list) {
     if (running) { toast("正在处理，先点“停止”"); return; }
     list = list.filter((j) => j.status !== "running");
     const fs = [...new Set(list.map((j) => j.file))];
     fs.forEach((f) => (f.done = false));
     list.forEach((j) => sel.delete(j.id));
-    jobs = jobs.filter((j) => !list.includes(j));
-    renderJobs();
-    renderThumbs();
     if (fs.length) startBatch(fs);
   }
   async function zipJobs(list) {
@@ -778,27 +802,6 @@
     sel.clear();
     renderJobs();
   });
-  $("copyLog").addEventListener("click", async () => {
-    const lines = [`# AI图图 插件日志（v${VERSION}）`, `时间：${bj()}`, `浏览器：${navigator.userAgent}`,
-      `设置：${JSON.stringify({ ...S, requirement: undefined })}`, `精修要求：${S.requirement || "（无）"}`, ""];
-    for (const j of jobs) {
-      lines.push(`## ${j.file.name}：${STATUS[j.status][0]}${j.endedAt ? `，${((j.endedAt - j.startedAt) / 1000).toFixed(1)} 秒` : ""}`);
-      lines.push(`原图 ${j.file.w}×${j.file.h}${j.file.crop ? `，框选 ${j.inputW}×${j.inputH}` : ""}；AI 比例 ${j.aiRatio}；模型 ${j.model || "?"}；新会话 ${j.newChat ? "是" : "否"}；配件 ${j.partCount || 0}；颜色 ${j.file.colors?.length || 0}`);
-      if (j.aiW) lines.push(`${AI} 出图：${j.aiW}×${j.aiH}，${Math.round(j.aiBytes / 1024)} KB；最终输出：${j.w}×${j.h}${j.ext}${j.note ? "，" + j.note : ""}`);
-      j.steps.forEach((s) => lines.push("- " + s));
-      if (j.retries) lines.push(`自动重试过 ${j.retries} 次`);
-      if (j.modeWarn) lines.push("提示：" + j.modeWarn);
-      if (j.nudged) lines.push("第一次回复（没出图，已催一次）：" + j.nudged.slice(0, 200));
-      if (j.error) lines.push("错误：" + j.error);
-      if (j.text) lines.push(`${AI} 回复：` + j.text.slice(0, 500));
-      lines.push("");
-    }
-    if (jobs[0]?.prompt) lines.push("## 第 1 张的提示词", jobs[0].prompt);
-    const text = lines.join("\n");
-    try { await navigator.clipboard.writeText(text); toast("日志已复制"); }
-    catch { toast("复制失败：请允许剪贴板权限"); }
-  });
-
   // ------------------------------------------------------------ 批量处理
   function step(j, msg) {
     j.steps.push(`${((Date.now() - j.startedAt) / 1000).toFixed(1)}s ${msg}`);
@@ -839,7 +842,7 @@
     input.extras.forEach((x, i) => upload.push(toFile(x.base64, x.kind === "mark" ? "配件标注图.jpg" : `配件特写${i}.jpg`)));
     j.aiRatio = aiRatioOf(j.file);
     // 2. 会话
-    const needNew = S.session === "new" || (S.session === "everyN" && sessionCount % S.everyN === 0);
+    const needNew = j.forceChat ? j.forceChat === "new" : S.session === "new" || (S.session === "everyN" && sessionCount % S.everyN === 0);
     j.newChat = needNew;
     if (needNew) {
       step(j, "发起新对话");
@@ -884,8 +887,9 @@
     setStatus(`第 ${j.idx}/${j.total} 张：等 ${AI} 出图…`);
     step(j, `等 ${AI} 出图`);
     let r = await SITE.waitResult(base, signal);
-    // 没出图但回的是“参数文字”（Copilot 实测回了 {"orientation":"square"}）：同一个对话里催一次
-    const nudge = !r.alert && r.refused && SITE.nudge ? SITE.nudge(r.text || "") : "";
+    // 没出图：同一个对话里催一次。回的是“参数文字”（Copilot 实测回了 {"orientation":"square"}）用专门的话，
+    // 其他情况在设置里勾了“发一句”就问“怎么回事不生成图片？”
+    const nudge = !r.alert && r.refused ? (SITE.nudge && SITE.nudge(r.text || "")) || (S.askWhy ? "怎么回事不生成图片？" : "") : "";
     if (nudge) {
       step(j, `${AI} 没出图，只回了：${(r.text || "").slice(0, 60)}；再催一次`);
       j.nudged = r.text;
@@ -918,7 +922,7 @@
       ratio: S.mode === "white" ? 1 : S.mode === "free" && S.ratio !== "auto" ? ratioValue(S.ratio) : null,
       inputRatio: inSize.w / inSize.h, inputSize: inSize,
       outSize: S.outSize, fill: S.fill, background: S.background, format: S.format, contrast: S.contrast, bright: S.bright,
-      holes: S.holes === "on",
+      holes: S.holes === "on" ? true : S.holes === "off" ? false : "auto",
     });
     if (out.same) { j.outBlob = blob; j.w = j.aiW; j.h = j.aiH; j.ext = blob.type === "image/png" ? ".png" : ".jpg"; }
     else { j.outBlob = out.blob; j.w = out.w; j.h = out.h; j.ext = out.ext; j.note = out.note; }
@@ -946,8 +950,16 @@
     const signal = abortCtl.signal;
     $("startBtn").disabled = true;
     $("stopBtn").disabled = false;
-    const batchJobs = list.map((f, i) => ({ id: nextId++, file: f, mode: S.mode, status: "waiting", steps: [], idx: i + 1, total: list.length }));
-    jobs.push(...batchJobs);
+    // 每张图只有一条记录：这张图以前做过就在原记录上重做（清掉旧结果），没做过才新建
+    const batchJobs = list.map((f, i) => {
+      const old = jobs.filter((x) => x.file === f).pop();
+      const fresh = { file: f, mode: S.mode, status: "waiting", steps: [], idx: i + 1, total: list.length, error: "", text: "", nudged: "", retries: 0,
+        aiUrl: null, outBlob: null, outUrl: null, outData: null, w: 0, h: 0, ext: "", note: "", model: "", modeWarn: "", startedAt: 0, endedAt: 0, inputUrl: null, forceChat: "" };
+      if (old) { Object.assign(old, fresh); return old; }
+      const j = { id: nextId++, ...fresh };
+      jobs.push(j);
+      return j;
+    });
     renderJobs();
     let stopReason = "";
     let retried = 0, failedKept = 0;
@@ -959,11 +971,14 @@
       if (signal.aborted) break;
       if (j.removed) continue; // 排队时被删掉了
       let r = "";
-      for (let attempt = 0; attempt < 2; attempt++) {
+      j.forceChat = "";
+      const maxAttempts = S.send === "B" && S.onFail === "retry" ? 1 + S.retryMax : 1;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
         if (attempt) {
-          // 自动重试：等一会儿，同一张再做一次
+          // 自动重试：等一会儿，同一张再做一次（在原对话里重发，或者按设置开新会话）
           retried++;
           j.retries = attempt;
+          j.forceChat = S.retryNewChat ? "new" : "same";
           j.error = ""; j.text = ""; j.nudged = "";
           const wait = testGap !== undefined ? Number(testGap) : S.retryWait;
           try { await countdown(wait, signal, `第 ${i + 1} 张没成功，重试`, "秒后重试…"); } catch { break; }
@@ -1012,6 +1027,15 @@
   const chatSel = new Set();
   let chatAbort = null;
   if (SITE.listChats) $("chatCard").hidden = false;
+  // 折叠：点标题展开 / 收起（默认收起，记住上次的状态）
+  const setChatOpen = (open) => { $("chatBody").hidden = !open; $("chatArrow").textContent = open ? "▾" : "▸"; };
+  $("chatHead").addEventListener("click", (e) => {
+    if (e.target.closest("button")) return;
+    const open = $("chatBody").hidden;
+    setChatOpen(open);
+    try { chrome.storage.local.set({ aitutuChatOpen: open }); } catch {}
+  });
+  try { chrome.storage.local.get("aitutuChatOpen", (r) => setChatOpen(!!(r && r.aitutuChatOpen))); } catch {}
   const chatStatus = (msg, kind = "") => { $("chatStatus").hidden = !msg; $("chatStatus").className = "status" + (kind ? " " + kind : ""); $("chatStatus").textContent = msg; };
   function renderChats() {
     $("chatBar").hidden = !chats.length;
@@ -1021,6 +1045,7 @@
     $("chatList").innerHTML = chats.map((c) => `<label class="${c.gone ? "gone" : ""}"><input type="checkbox" data-chat="${esc(c.id)}" ${chatSel.has(c.id) ? "checked" : ""} ${c.gone ? "disabled" : ""}><span title="${esc(c.title)}">${esc(c.title)}</span></label>`).join("");
   }
   $("chatLoad").addEventListener("click", () => {
+    setChatOpen(true);
     chats = SITE.listChats();
     chatSel.clear();
     renderChats();
@@ -1078,6 +1103,66 @@
     else if ($("modal").classList.contains("show")) closeEditor();
   });
 
+  // ------------------------------------------------------------ 刷新页面后保留产品图和结果（关掉标签页 / 浏览器才清空，存在插件后台）
+  const toDataUrl = (blob) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
+  function scheduleSave() {
+    if (restoring) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveTab, 800);
+  }
+  async function saveTab() {
+    try {
+      const fs = files.map((f) => ({
+        id: f.id, name: f.name, size: f.size, type: f.type, dataUrl: f.dataUrl, w: f.w, h: f.h, crop: f.crop || null, done: !!f.done,
+        colors: f.colors || [], partsNote: f.partsNote || "", parts: f.parts || [], maskUrl: f.mask ? f.mask.toDataURL("image/png") : "",
+      }));
+      const js = [];
+      for (const j of jobs) {
+        if (j.outBlob && !j.outData) j.outData = await toDataUrl(j.outBlob);
+        js.push({
+          id: j.id, fileId: j.file.id, mode: j.mode, status: ["running", "waiting"].includes(j.status) ? "cancel" : j.status,
+          steps: j.steps.slice(-3), error: j.error || "", text: (j.text || "").slice(0, 500), retries: j.retries || 0,
+          outData: j.outData || "", inputUrl: j.inputUrl || "", w: j.w || 0, h: j.h || 0, ext: j.ext || "", note: j.note || "",
+          model: j.model || "", modeWarn: j.modeWarn || "", startedAt: j.startedAt || 0, endedAt: j.endedAt || 0, partCount: j.partCount || 0,
+          aiW: j.aiW || 0, aiH: j.aiH || 0, aiRatio: j.aiRatio || "",
+        });
+      }
+      chrome.runtime.sendMessage({ type: "aitutu-tab-save", data: { files: fs, jobs: js, nextId, savedAt: Date.now() } }, () => void chrome.runtime.lastError);
+    } catch (e) {
+      console.warn("[AI图图] 保存面板内容失败：", e);
+    }
+  }
+  async function restoreTab() {
+    let data = null;
+    try {
+      data = await new Promise((res) => chrome.runtime.sendMessage({ type: "aitutu-tab-load" }, (r) => { void chrome.runtime.lastError; res(r && r.ok ? r.data : null); }));
+    } catch {}
+    if (data && (data.files?.length || data.jobs?.length)) {
+      for (const d of data.files || []) {
+        const f = { ...d };
+        delete f.maskUrl;
+        if (d.maskUrl) {
+          const im = await loadImage(d.maskUrl);
+          if (im) { f.mask = document.createElement("canvas"); f.mask.width = im.naturalWidth; f.mask.height = im.naturalHeight; f.mask.getContext("2d").drawImage(im, 0, 0); }
+        }
+        if (!files.some((x) => x.id === f.id)) files.push(f);
+      }
+      for (const d of data.jobs || []) {
+        const file = files.find((f) => f.id === d.fileId);
+        if (!file || jobs.some((x) => x.id === d.id)) continue;
+        const j = { ...d, file };
+        delete j.fileId;
+        if (d.outData) { j.outBlob = await (await fetch(d.outData)).blob(); j.outUrl = URL.createObjectURL(j.outBlob); }
+        jobs.push(j);
+      }
+      nextId = Math.max(nextId, data.nextId || 0, ...files.map((f) => f.id + 1), ...jobs.map((j) => j.id + 1));
+      toast(`已恢复 ${files.length} 张产品图${jobs.length ? `、${jobs.length} 条结果` : ""}`);
+    }
+    restoring = false;
+    renderThumbs();
+    renderJobs();
+  }
   renderThumbs();
   renderJobs();
+  restoreTab();
 })();

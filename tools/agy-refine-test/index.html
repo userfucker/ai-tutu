@@ -297,8 +297,8 @@
           <label class="f">输出格式
             <select id="format"></select>
           </label>
-          <label class="f" id="holesWrap" hidden title="戒指、环形零件这类中间有洞的产品才勾；金属件不要勾，否则大块白色高光会被抠透明">镂空处
-            <span style="display:flex;align-items:center;gap:6px;min-height:34px"><input type="checkbox" id="holes"> 中间的白色也抠透明</span>
+          <label class="f" id="holesWrap" hidden title="被产品围住的白色（枝叶间的空隙、戒指中间的孔、金属高光）怎么处理">镂空处
+            <select id="holes"><option value="auto">自动（推荐）</option><option value="off">保留（白色都不抠）</option><option value="on">都抠透明</option></select>
           </label>
           <label class="f">主体大小
             <select id="fill">
@@ -1082,7 +1082,7 @@ function settings() {
     sharp: $("sharp").value,
     contrast: $("contrast").value,
     bright: $("bright").value,
-    holes: $("holes").checked,
+    holes: $("holes").value,
   };
 }
 
@@ -1109,9 +1109,11 @@ function updateSizeNote() {
   }
   $("holesWrap").hidden = s.format !== "png-alpha";
   if (s.background === "white") parts.push("白底提纯：AI 出的背景偏乳白 / 偏色时，程序自动校正成纯白（产品一起校正）。");
-  if (s.format === "png-alpha") parts.push(s.holes
-    ? "透明底由程序抠图，并且会把被产品围住的大块白色也抠掉（镂空）。金属件的白色高光可能被误抠，请重点看。"
-    : "透明底由程序抠图：只抠和四周相连的纯白，碰到轮廓就停；产品内部的白色高光保留。产品边缘如果是和背景连成一片的纯白，可能被抠掉一点，请看轮廓。");
+  if (s.format === "png-alpha") parts.push({
+    on: "透明底由程序抠图，被产品围住的大块白色也全部抠掉（镂空）。金属件的白色高光可能被误抠，请重点看。",
+    off: "透明底由程序抠图：只抠和四周相连的纯白，被产品围住的白色都保留。",
+    auto: "透明底由程序抠图：被产品围住的白色按周围颜色判断——周围是叶子、泥土这类有颜色的算空隙抠掉，周围是灰色金属的算高光保留。",
+  }[s.holes] || "");
   if (s.fill !== "keep") parts.push(s.background === "white" ? `白底图会自动校准到商品约占 ${s.fill}%。` : `原图背景无法自动校准主体大小，只靠 AI 按要求构图。`);
   if (s.angle !== "keep") parts.push("改了角度：AI 要补画原图看不到的部分，请逐张核对文字和零件。");
   if (s.contrast !== "0" || s.bright !== "0") parts.push("对比度 / 亮度由程序在 AI 出图后调整（纯白背景保持纯白）。");
@@ -1238,7 +1240,7 @@ async function makeOutput(job, ai) {
     format: s.format,
     contrast: s.contrast,
     bright: s.bright,
-    holes: s.holes,
+    holes: s.holes === "on" ? true : s.holes === "off" ? false : "auto",
   });
   if (r.same) return { ...ai, same: true };
   return { url: URL.createObjectURL(r.blob), w: r.w, h: r.h, bytes: r.blob.size, ext: r.ext, upscaled: r.upscaled, note: r.note, subjectPct: r.subjectPct };
@@ -1789,8 +1791,8 @@ document.addEventListener("keydown", (e) => {
 applyMode(mode);
 loadModels(false);
 fetchUsage();
-$("holes").checked = store("holes") === "1";
-$("holes").addEventListener("change", () => { store("holes", $("holes").checked ? "1" : "0"); updateSizeNote(); });
+$("holes").value = ["auto", "off", "on"].includes(store("holes2")) ? store("holes2") : "auto";
+$("holes").addEventListener("change", () => { store("holes2", $("holes").value); updateSizeNote(); });
 updateSizeNote();
 renderSummary();
 </script>

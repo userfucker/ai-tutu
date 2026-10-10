@@ -15,7 +15,7 @@ const T = {
       white: "Pure white (RGB 255,255,255) clean seamless background; remove everything from the original background, including shadow edges; a subtle natural contact shadow under the product is allowed.",
       original: "Keep the original background and scene; only clean obvious clutter and stains in the background; do not replace the background.",
       refine: "Keep the original background, scene, lighting and color tone; only remove specks, stains and dust from the background; do not replace it or change the style.",
-      alpha: "Pure white (RGB 255,255,255) clean background with everything from the original background removed; absolutely no shadows, reflections or cast shadows (it will be cut out to a transparent PNG afterwards); crisp, clean product edges without fringes or halos.",
+      alpha: "Pure white (RGB 255,255,255) clean background with everything from the original background removed; absolutely no shadows, reflections or cast shadows (it will be cut out to a transparent PNG afterwards); crisp, clean product edges without fringes or halos; every gap between leaves, branches, handles or parts must show the same pure white background.",
     },
     angle: {
       keep: "Keep the camera angle, perspective, product orientation and placement exactly as in the reference; cables, harnesses and accessories keep their routing and positions; do not rotate, flip or rearrange anything.",
@@ -53,7 +53,7 @@ const T = {
       white: "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物和阴影边缘；可以保留产品下方自然、轻微的接触投影。",
       original: "保留原图的背景和场景，只清理背景里明显的杂物和污点，不要换背景。",
       refine: "保留原图的背景、场景、光线和色调，只去掉背景里的杂点、污渍和灰尘，不要换背景，不要改变画面风格。",
-      alpha: "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物；不要任何投影、倒影和阴影（之后要抠成透明底）；产品边缘清晰锐利、轮廓干净，没有毛边和白边。",
+      alpha: "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物；不要任何投影、倒影和阴影（之后要抠成透明底）；产品边缘清晰锐利、轮廓干净，没有毛边和白边；枝叶之间、把手里、零件之间的空隙也要露出同样的纯白背景。",
     },
     angle: {
       keep: "保持原图的拍摄角度、透视、产品朝向和摆放方式完全不变；线缆、线束和配件的走向与位置也不变；不要旋转、翻转或重新摆放任何部分。",
@@ -355,7 +355,8 @@ function edgeColor(img) {
  * 抠透明底（只用于白底图）：
  *  1. 从图片四周往里找“和外边相连的纯白”，这部分是背景。只认几乎纯白（容差 T）而且平整的像素：
  *     碰到明显的明暗变化（轮廓线、金属高光的边）就停，免得顺着贴边的高光抠进产品里（Lee 2026-10-09 反馈金属高光被抠透明）。
- *  2. opts.holes = true 时，被产品围起来的大块纯白（比如环形零件中间的孔）也算背景；默认不算（金属高光常是大块纯白）。
+ *  2. 被产品围起来的大块纯白（环形零件中间的孔、树苗枝叶间的空隙）：opts.holes = true 都算背景、false 都保留、
+ *     "auto" 按周围颜色判断（周围是叶子泥土这类有颜色的 → 背景；周围是灰色金属 → 高光，保留）。
  *  3. 背景里零星的小杂点去掉。
  *  4. 边缘 1 像素做柔和过渡（去锯齿），并把边缘残留的白色去掉（去白边）。
  */
@@ -402,10 +403,38 @@ function cutoutWhite(g, W, H, opts = {}) {
     }
     add.forEach((i) => (bg[i] = 1));
   }
-  // 连通块：flag=1 找“被围住的白色”（opts.holes 时大块算孔），flag=0 找“前景”（小块算杂点）
+  // 连通块：flag=1 找“被围住的白色”（大块的才考虑算孔），flag=0 找“前景”（小块算杂点）
+  //  opts.holes：true = 被围住的大块纯白都抠掉；false = 都保留；"auto" = 看它周围是什么：
+  //   花草树苗枝叶间的空隙，周围是有颜色的叶子 / 泥土（饱和度高）或很深的颜色，边缘利落 → 是背景，抠掉；
+  //   金属、陶瓷上的白色高光，周围是灰色、慢慢变暗 → 是产品，保留。（Lee 2026-10-10：树苗 PNG 中间一块白）
   const seen = new Uint8Array(N);
   const holeMin = Math.max(200, N * 0.002);
   const speckMax = Math.max(20, N * 0.00015);
+  const holeMinAuto = Math.max(40, N * 0.00004);
+  const sat = (i) => Math.max(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) - Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
+  const label = opts.holes === "auto" ? new Int32Array(N) : null;
+  let regionNo = 0;
+  const looksLikeGap = (len) => {
+    // 区域外面 3～10 个像素处（跨过过渡边）真正有内容的像素（离白 ≥ 40）是什么颜色
+    const ds = [], ss = [];
+    const stepK = Math.max(1, Math.floor(len / 6000));
+    for (let k = 0; k < len; k += stepK) {
+      const i = q[k], x = i % W, y = (i - x) / W;
+      for (const r of [3, 6, 10]) {
+        for (const [dx, dy] of [[r, 0], [-r, 0], [0, r], [0, -r]]) {
+          const xx = x + dx, yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+          const j = yy * W + xx;
+          if (label[j] === regionNo || bg[j] || dist[j] < 40) continue;
+          ds.push(dist[j]); ss.push(sat(j));
+        }
+      }
+    }
+    if (ds.length < 20) return false;
+    const med = (a) => a.sort((m, n) => m - n)[a.length >> 1];
+    const ms = med(ss), md = med(ds);
+    return ms >= 25 || md >= 140;
+  };
   for (const white of opts.holes ? [1, 0] : [0]) {
     seen.fill(0);
     for (let start = 0; start < N; start++) {
@@ -421,7 +450,26 @@ function cutoutWhite(g, W, H, opts = {}) {
           q[qt++] = j;
         }
       }
-      if (white ? qt >= holeMin : qt <= speckMax) for (let k = 0; k < qt; k++) bg[q[k]] = 1;
+      // auto 时小一点的空隙也看（枝叶间常有小空隙），反正要过“周围颜色”这一关
+      let take = white ? qt >= (label ? holeMinAuto : holeMin) : qt <= speckMax;
+      if (take && white && label) {
+        regionNo++;
+        for (let k = 0; k < qt; k++) label[q[k]] = regionNo;
+        take = looksLikeGap(qt);
+      }
+      if (take) for (let k = 0; k < qt; k++) bg[q[k]] = 1;
+    }
+  }
+  // 抠掉的孔旁边的白色过渡像素也算背景（和外圈一样扩两圈）
+  if (opts.holes) {
+    for (let pass = 0; pass < 2; pass++) {
+      const add = [];
+      for (let i = 0; i < N; i++) {
+        if (bg[i] || dist[i] > T) continue;
+        const x = i % W;
+        if ((x > 0 && bg[i - 1]) || (x < W - 1 && bg[i + 1]) || (i >= W && bg[i - W]) || (i < N - W && bg[i + W])) add.push(i);
+      }
+      add.forEach((i) => (bg[i] = 1));
     }
   }
   // 透明度 + 边缘处理
@@ -476,7 +524,7 @@ function adjustTone(g, W, H, bright, contrast) {
  *   outSize: "800" | "1024" | "2048" | "original"（AI 原尺寸）| "source"（和原图一样大）
  *   fill: "keep" | "70" | "85"，background: "white" | "original"，format: "jpeg" | "png" | "png-alpha"
  *   contrast, bright: "0" | "1" | "2"
- *   holes: true = PNG 透明底时，被产品围住的大块白色（镂空）也抠掉；默认不抠
+ *   holes: PNG 透明底时被产品围住的大块白色：true 抠掉 / false 保留 / "auto" 按周围颜色判断
  *   whiten: false = 不做白底提纯（默认白底图都做）
  * }
  * 返回 { blob, w, h, ext, upscaled, note, subjectPct } ；不需要处理时返回 { same: true }。
@@ -533,8 +581,8 @@ async function composeOutput(img, o) {
     if (o.contrast !== "0") notes.push(`对比度${{ 1: "稍微提高", 2: "明显提高" }[o.contrast]}`);
   }
   if (alpha) {
-    cutoutWhite(g, W, H, { holes: !!o.holes });
-    notes.push(o.holes ? "透明底（含镂空）" : "透明底");
+    cutoutWhite(g, W, H, { holes: o.holes });
+    notes.push(o.holes === true ? "透明底（含镂空）" : "透明底");
   }
   const png = o.format !== "jpeg";
   const blob = await canvasToBlob(c, png ? "image/png" : "image/jpeg", 0.92);
