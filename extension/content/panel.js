@@ -9,7 +9,7 @@
 (() => {
   if (window.__aitutuPanel) return;
   window.__aitutuPanel = true;
-  const VERSION = "0.5.2";
+  const VERSION = "0.6.0";
   const SITE = AITUTU_SITE; // gemini.js 或 copilot.js 提供
   const AI = SITE.name;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -17,7 +17,7 @@
   // ------------------------------------------------------------ 设置
   const MODES = {
     white: { label: "抠白底图 1:1", locks: { ratio: "1:1", background: "white" }, outSizes: ["800", "1024"], formats: ["jpeg", "png-alpha"] },
-    refine: { label: "图片精修", locks: { ratio: "auto", background: "original", fill: "keep", angle: "keep", retouch: "on", format: "jpeg" }, outSizes: ["original", "800", "1024"], formats: ["jpeg"] },
+    refine: { label: "图片精修", locks: { ratio: "auto", fill: "keep", angle: "keep", retouch: "on", format: "jpeg" }, outSizes: ["original", "800", "1024"], formats: ["jpeg"] },
     free: { label: "自由模式", locks: {}, outSizes: ["800", "1024", "original"], formats: ["jpeg", "png", "png-alpha"] },
   };
   const DEFAULTS = {
@@ -25,6 +25,7 @@
     retouch: "on", sharp: "keep", contrast: "0", bright: "0", requirement: "",
     batchSize: 10, session: "new", everyN: 5, send: "B", model: "Flash", extended: "any", holes: "auto",
     gapMin: 20, gapMax: 60, retryWait: 30, onFail: "stop", retryMax: 3, retryNewChat: false, askWhy: true, holesV: 2,
+    refineBg: "original", // 图片精修的背景：original 原图背景（默认）/ white 白底图 / custom 自定义（写在精修要求里）
   };
   const LABELS = {
     outSize: { 800: "800×800", 1024: "1K（1024）", original: "AI 原尺寸" },
@@ -34,7 +35,7 @@
   // 设置按网站分开存（Gemini 一套、Copilot 一套），关了浏览器也保留，除非手动改
   const SETTINGS_KEY = `aitutuSettings:${SITE.id}`;
   // 精修要求不保存：刷新 / 重开浏览器后清空，免得上一个产品的描述（篮球）带到下一个产品（杯子）上
-  const saveSettings = () => { try { chrome.storage.local.set({ [SETTINGS_KEY]: { ...S, requirement: "" } }); } catch {} };
+  const saveSettings = () => { try { chrome.storage.local.set({ [SETTINGS_KEY]: { ...S, requirement: "", productName: "" } }); } catch {} };
 
   // ------------------------------------------------------------ 状态
   let extraFiles = []; // “取当前会话的图”取回来的图（不是产品图，不在缩略图里，只给结果记录用）
@@ -141,6 +142,13 @@
   .sel .h { position: absolute; width: 14px; height: 14px; background: #fff; border: 2px solid #22c55e; border-radius: 3px; }
   .h.nw { left: -8px; top: -8px; cursor: nwse-resize; } .h.ne { right: -8px; top: -8px; cursor: nesw-resize; }
   .h.sw { left: -8px; bottom: -8px; cursor: nesw-resize; } .h.se { right: -8px; bottom: -8px; cursor: nwse-resize; }
+  .h.n { left: calc(50% - 7px); top: -8px; cursor: ns-resize; } .h.s { left: calc(50% - 7px); bottom: -8px; cursor: ns-resize; }
+  .h.w { top: calc(50% - 7px); left: -8px; cursor: ew-resize; } .h.e { top: calc(50% - 7px); right: -8px; cursor: ew-resize; }
+  /* 不是"框选商品"工具时：框变成细线，不能拖动、不能调大小 */
+  .stage.painting .sel { border-width: 1px; box-shadow: none; }
+  .stage.painting .sel .h { display: none; }
+  .rotbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .rotbar input[type=range] { width: 140px; }
   .colors .crow { display: flex; gap: 6px; align-items: center; font-size: 12px; margin-top: 4px; }
   .crow .sw { width: 18px; height: 18px; border-radius: 5px; border: 1px solid #d4d4d8; flex: none; }
   .crow input { flex: 1; border: 1px solid #e4e4e7; border-radius: 7px; padding: 3px 6px; font: inherit; }
@@ -148,6 +156,13 @@
   .viewer { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none; z-index: 6; overflow: hidden; }
   .viewer.show { display: block; }
   .viewer img { position: absolute; left: 0; top: 0; transform-origin: 0 0; max-width: none; background: repeating-conic-gradient(#e4e4e7 0% 25%, #fff 0% 50%) 50% / 20px 20px; cursor: grab; }
+  .vnav { position: absolute; top: 50%; transform: translateY(-50%); width: 46px; height: 64px; border: 0; border-radius: 10px; background: rgba(24,24,27,.6); color: #fff; font-size: 34px; line-height: 1; cursor: pointer; z-index: 2; }
+  .vnav:hover { background: rgba(24,24,27,.9); }
+  .vnav.prev { left: 14px; } .vnav.next { right: 14px; }
+  .vidx { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); color: #ddd; font-size: 13px; background: rgba(24,24,27,.6); border-radius: 999px; padding: 2px 10px; }
+  .cmenu { position: fixed; display: none; z-index: 8; background: #fff; border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.25); padding: 4px 0; min-width: 200px; }
+  .cmenu div { padding: 8px 14px; cursor: pointer; font-size: 13px; white-space: nowrap; }
+  .cmenu div:hover { background: #f4f4f5; }
   .vbar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 6px; background: rgba(24,24,27,.9); border-radius: 999px; padding: 5px 8px; }
   .vbar button { background: rgba(255,255,255,.15); color: #fff; border: 0; border-radius: 999px; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #18181b; color: #fff; padding: 7px 14px; border-radius: 999px; display: none; z-index: 7; font-size: 13px; }
@@ -175,7 +190,8 @@
     </div>
 
     <div class="card">
-      <b>精修要求</b>
+      <div class="row"><b>精修要求</b><select id="tplSel" style="margin-left:auto;max-width:60%" title="在“设置”里添加模板"><option value="">选择精修模板…</option></select></div>
+      <div class="row" style="margin-top:6px;flex-wrap:nowrap"><span style="white-space:nowrap">这个是：</span><input id="productName" placeholder="产品名称（选填，模板里的 [产品名] 会换成它）" style="flex:1;border:1px solid #e4e4e7;border-radius:9px;padding:5px 8px;font:inherit"></div>
       <textarea id="requirement" placeholder="简单描述产品：是什么、什么材质、怎么摆放的；哪些是背景（例如：放在书上的手机壳，书本是背景）。颜色不用写，需要锁定颜色请用吸管取色。"></textarea>
       <div class="grid" style="margin-top:8px">
         <label class="f">背景<select id="background"><option value="white">白底图</option><option value="original">原图背景</option></select></label>
@@ -235,6 +251,9 @@
         </div>
         <label class="muted" style="display:block;margin-top:8px"><input type="checkbox" id="askWhy"> 没出图时，先在同一个对话里发一句“怎么回事不生成图片？”</label>
         <label class="muted" style="display:block;margin-top:4px"><input type="checkbox" id="retryNewChat"> 重试时打开新会话（不勾就在原来的对话里重发）</label>
+        <div style="margin-top:10px"><b>精修文本模板</b> <span class="muted">（可以用 [产品名] 代表“这个是：”里填的产品名；选模板会替换精修要求里原来的内容）</span></div>
+        <div id="tplList"></div>
+        <button id="tplAdd" style="margin-top:6px">添加模板</button>
         <div class="muted" style="margin-top:6px">间隔只用于 B 模式（自动发送）。重试几次还不行就记下来，接着做下一张。出现人机验证、额度 / 频率限制时总是停下。</div>
       </div>
     </div>
@@ -261,18 +280,22 @@
     <span class="muted">粗细</span><input type="range" id="brush" min="4" max="80" value="20" style="width:90px">
     <button id="markClear" title="清除当前工具画的内容（框选 / 自由框选 / 画笔标注 / 取色）">清除标注</button><button id="markClearAll" title="清除这张图的框选、自由框选、画笔标注和取色">全部清除</button>
   </div>
+  <div class="rotbar"><span class="muted">旋转</span><button id="rotL" title="向左转 90°">↺ 90°</button><button id="rotR" title="向右转 90°">↻ 90°</button>
+    <span class="muted">微调</span><input type="range" id="rotFine" min="-45" max="45" step="1" value="0"><span class="muted" id="rotVal">0°</span><button id="rotReset">复原</button>
+    <span class="muted">（框选、标注会跟着一起转；发给 AI 的是转好的图）</span></div>
   <div class="muted" id="toolHint"></div>
   <div class="stage" id="stage"><img id="mImg" draggable="false"><canvas class="mark" id="markCv"></canvas><div class="picks" id="picks"></div>
-    <svg class="lasso" id="lassoSvg" viewBox="0 0 100 100" preserveAspectRatio="none" hidden><path id="lassoMask" fill-rule="evenodd"></path><polygon id="lassoPoly"></polygon><polyline id="lassoLine"></polyline></svg>
-    <div class="sel" id="sel" hidden><span class="h nw" data-h="nw"></span><span class="h ne" data-h="ne"></span><span class="h sw" data-h="sw"></span><span class="h se" data-h="se"></span></div></div>
+    <svg class="lasso" id="lassoSvg" viewBox="0 0 100 100" preserveAspectRatio="none" style="display:none"><path id="lassoMask" fill-rule="evenodd"></path><polygon id="lassoPoly"></polygon><polyline id="lassoLine"></polyline></svg>
+    <div class="sel" id="sel" hidden><span class="h nw" data-h="nw"></span><span class="h n" data-h="n"></span><span class="h ne" data-h="ne"></span><span class="h e" data-h="e"></span><span class="h se" data-h="se"></span><span class="h s" data-h="s"></span><span class="h sw" data-h="sw"></span><span class="h w" data-h="w"></span></div></div>
   <input id="partsNote" placeholder="配件说明（选填）：例如“右边两个白色插头是配件，必须保留”" style="border:1px solid #e4e4e7;border-radius:9px;padding:6px 8px;font:inherit">
   <div class="colors" id="colors"></div>
   <div class="row"><span class="muted" id="mInfo" style="margin-right:auto"></span>
     <button id="cropClear">清除框选</button><button id="cropAll">框选应用到所有图片</button><button id="mRemove" class="danger">移除这张</button><button class="primary" id="mOk" style="padding:5px 14px">完成</button></div>
 </div></div>
 
-<div class="viewer" id="viewer"><img id="vImg" draggable="false"><div class="vbar">
+<div class="viewer" id="viewer"><img id="vImg" draggable="false"><button class="vnav prev" id="vPrev" title="上一张（←）">‹</button><button class="vnav next" id="vNext" title="下一张（→）">›</button><span class="vidx" id="vIdx"></span><div class="vbar">
   <button data-z="out">－</button><button data-z="in">＋</button><button data-z="one">1:1</button><button data-z="fit">适应窗口</button><button data-z="close">关闭</button></div></div>
+<div class="cmenu" id="cmenu"><div data-cm="add">添加到产品图（替换现有的产品图）</div><div data-cm="view">查看大图</div></div>
 <div class="toast" id="toast"></div>`;
   document.documentElement.appendChild(host);
   const $ = (id) => root.getElementById(id);
@@ -302,6 +325,10 @@
     root.querySelectorAll("#modes button").forEach((b) => b.classList.toggle("active", b.dataset.mode === S.mode));
     $("outSize").innerHTML = cfg.outSizes.map((v) => `<option value="${v}">${LABELS.outSize[v]}</option>`).join("");
     $("format").innerHTML = cfg.formats.map((v) => `<option value="${v}">${LABELS.format[v]}</option>`).join("");
+    // 背景：图片精修有"原图背景（默认）/ 白底图 / 自定义"，其他模式是"白底图 / 原图背景"
+    $("background").innerHTML = S.mode === "refine"
+      ? `<option value="original">原图背景</option><option value="white">白底图</option><option value="custom">自定义（写在精修要求里）</option>`
+      : `<option value="white">白底图</option><option value="original">原图背景</option>`;
     for (const id of FIELDS) {
       const el = $(id);
       if (id in cfg.locks) {
@@ -309,7 +336,8 @@
         el.disabled = true;
       } else {
         el.disabled = false;
-        el.value = [...el.options].some((o) => o.value === S[id]) ? S[id] : el.options[0].value;
+        const want = id === "background" && S.mode === "refine" ? S.refineBg : S[id];
+        el.value = [...el.options].some((o) => o.value === want) ? want : el.options[0].value;
       }
     }
     $("modelWrap").hidden = $("extendedWrap").hidden = !SITE.ensureMode;
@@ -321,7 +349,10 @@
     $("holesWrap").hidden = $("format").value !== "png-alpha";
   }
   function readSettings() {
+    const bgBefore = S.background;
     for (const id of FIELDS) S[id] = $(id).value;
+    if (S.mode === "refine") { S.refineBg = $("background").value; S.background = bgBefore; } // 精修的背景单独存
+    S.productName = $("productName").value.trim();
     S.requirement = $("requirement").value.trim();
     S.batchSize = Math.max(1, Math.min(50, Number($("batchSize").value) || 10));
     S.session = $("session").value;
@@ -375,7 +406,9 @@
   });
   root.querySelectorAll("select, input[type=number], textarea#requirement, #askWhy, #retryNewChat").forEach((el) =>
     el.addEventListener("change", () => {
-      if (FIELDS.includes(el.id) && !(el.id in MODES[S.mode].locks)) S[el.id] = el.value;
+      if (FIELDS.includes(el.id) && !(el.id in MODES[S.mode].locks)) {
+        if (el.id === "background" && S.mode === "refine") S.refineBg = el.value; else S[el.id] = el.value;
+      }
       readSettings();
       applyMode();
       renderBatchHints();
@@ -394,6 +427,47 @@
   } catch {
     loadSettingsToUi();
   }
+
+  // ------------------------------------------------------------ 精修文本模板（Lee 2026-10-11）
+  // 在"设置"里加多条，精修要求上方下拉选一条：替换精修要求框里的内容。Gemini / Copilot 共用一套，长期保存。
+  let templates = [];
+  const saveTemplates = () => { try { chrome.storage.local.set({ aitutuTemplates: templates }); } catch {} };
+  function renderTemplates() {
+    $("tplSel").innerHTML = `<option value="">选择精修模板…${templates.length ? "" : "（在“设置”里添加）"}</option>` +
+      templates.map((t, i) => `<option value="${i}">${esc((t.split(/\n/)[0] || "").slice(0, 30) || `模板 ${i + 1}`)}</option>`).join("");
+    $("tplList").innerHTML = templates.map((t, i) => `<div class="row" style="margin-top:6px;align-items:flex-start;flex-wrap:nowrap">
+      <textarea data-tpl="${i}" rows="2" style="flex:1;min-height:44px">${esc(t)}</textarea><button data-tpldel="${i}" class="danger">删除</button></div>`).join("") ||
+      `<div class="muted" style="margin-top:4px">还没有模板。</div>`;
+  }
+  $("tplAdd").addEventListener("click", () => { templates.push("这个是[产品名]，"); saveTemplates(); renderTemplates(); });
+  $("tplList").addEventListener("input", (e) => {
+    const i = e.target.dataset.tpl;
+    if (i === undefined) return;
+    templates[Number(i)] = e.target.value;
+    saveTemplates();
+    clearTimeout(renderTemplates.t);
+    renderTemplates.t = setTimeout(() => { const sel = $("tplSel"); const v = sel.value; sel.innerHTML = ""; renderTemplatesSelectOnly(); sel.value = v; }, 400);
+  });
+  function renderTemplatesSelectOnly() {
+    $("tplSel").innerHTML = `<option value="">选择精修模板…</option>` +
+      templates.map((t, i) => `<option value="${i}">${esc((t.split(/\n/)[0] || "").slice(0, 30) || `模板 ${i + 1}`)}</option>`).join("");
+  }
+  $("tplList").addEventListener("click", (e) => {
+    const i = e.target.dataset.tpldel;
+    if (i === undefined) return;
+    templates.splice(Number(i), 1);
+    saveTemplates();
+    renderTemplates();
+  });
+  $("tplSel").addEventListener("change", (e) => {
+    const t = templates[Number(e.target.value)];
+    e.target.value = "";
+    if (t === undefined) return;
+    $("requirement").value = t; // 每次只用一条：替换原来的内容
+    S.requirement = t.trim();
+    toast("已填入模板");
+  });
+  try { chrome.storage.local.get("aitutuTemplates", (r) => { templates = (r && Array.isArray(r.aitutuTemplates)) ? r.aitutuTemplates : []; renderTemplates(); }); } catch { renderTemplates(); }
 
   // ------------------------------------------------------------ 加图片
   async function addFiles(list) {
@@ -504,6 +578,8 @@
     $("mPrev").disabled = edIndex === 0;
     $("mNext").disabled = edIndex === files.length - 1;
     $("partsNote").value = f.partsNote || "";
+    $("rotFine").value = f.fine || 0;
+    $("rotVal").textContent = `${f.fine || 0}°`;
     setTool(tool);
     drawMark();
     renderPicks();
@@ -529,7 +605,7 @@
     const f = edFile();
     const extra = (f.parts?.length ? ` · 配件 ${f.parts.length} 处` : "") + (f.colors?.length ? ` · 颜色 ${f.colors.length} 个` : "");
     // 自由框选：圈外变暗，圈的轮廓画绿线；外接矩形就是实际裁剪范围
-    $("lassoSvg").hidden = !edLasso;
+    $("lassoSvg").style.display = edLasso ? "" : "none"; // SVG 元素改 .hidden 没用（0.5.1 自由框选看不见就是这个原因）
     if (edLasso) {
       const pts = edLasso.map((p) => `${(p.x * 100).toFixed(2)},${(p.y * 100).toFixed(2)}`);
       const drawing = drag && drag.mode === "lasso";
@@ -602,7 +678,8 @@
     g.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over";
     g.strokeStyle = "rgb(255,40,40)";
     g.lineCap = g.lineJoin = "round";
-    g.lineWidth = Number($("brush").value) * (m.width / shown);
+    // 画笔 = 滑动条的 15%，橡皮擦 = 滑动条的 50%
+    g.lineWidth = Math.max(1, Number($("brush").value) * (tool === "eraser" ? 0.5 : 0.15)) * (m.width / shown);
     g.beginPath();
     g.moveTo(a.x * m.width, a.y * m.height);
     g.lineTo(b.x * m.width + 0.01, b.y * m.height);
@@ -628,8 +705,8 @@
       return;
     }
     const h = e.target.dataset.h;
-    if (h && edRect) edLasso = null; // 拖角调大小就变回普通矩形框
-    if (h && edRect) drag = { mode: "new", start: { x: h.includes("w") ? edRect.x + edRect.w : edRect.x, y: h.includes("n") ? edRect.y + edRect.h : edRect.y } };
+    if (h && edRect) edLasso = null; // 拖点调大小就变回普通矩形框
+    if (h && edRect) drag = { mode: "resize", h, orig: { ...edRect } };
     else if (e.target === $("sel") && edRect) drag = { mode: "move", start: p, orig: { ...edRect }, lassoOrig: edLasso && edLasso.map((q) => ({ ...q })) };
     else { drag = { mode: "new", start: p }; edRect = { x: p.x, y: p.y, w: 0, h: 0 }; edLasso = null; }
     $("stage").setPointerCapture(e.pointerId);
@@ -644,7 +721,16 @@
       if (Math.hypot(p.x - last.x, p.y - last.y) > 0.004) { edLasso.push(p); drawSel(); }
       return;
     }
-    if (drag.mode === "move") {
+    if (drag.mode === "resize") {
+      // 8 个点：四角同时改两条边，四边中点只改一条边；不保持宽高比
+      const o = drag.orig, h = drag.h, MIN = 0.02;
+      let x0 = o.x, y0 = o.y, x1 = o.x + o.w, y1 = o.y + o.h;
+      if (h.includes("w")) x0 = Math.min(p.x, x1 - MIN);
+      if (h.includes("e")) x1 = Math.max(p.x, x0 + MIN);
+      if (h.includes("n")) y0 = Math.min(p.y, y1 - MIN);
+      if (h.includes("s")) y1 = Math.max(p.y, y0 + MIN);
+      edRect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    } else if (drag.mode === "move") {
       const o = drag.orig;
       edRect = { ...o, x: Math.min(1 - o.w, Math.max(0, o.x + p.x - drag.start.x)), y: Math.min(1 - o.h, Math.max(0, o.y + p.y - drag.start.y)) };
       if (edLasso && drag.lassoOrig) { const dx = edRect.x - o.x, dy = edRect.y - o.y; edLasso = drag.lassoOrig.map((q) => ({ x: q.x + dx, y: q.y + dy })); }
@@ -693,6 +779,81 @@
     if (kind === "all" || kind === "picker") { f.colors = []; renderPicks(); }
     drawSel();
   }
+  // ------------------------------------------------------------ 旋转（Lee 2026-10-11）
+  // 角度 = 90° 的整数倍（左右转按钮）+ 微调（-45°～45°）。每次都从原图重新转（不会越转越糊），
+  // 框选、自由框选、画笔标注、取色点跟着一起转；发给 AI 的就是转好的图。
+  async function rotateTo(f, rot90, fine) {
+    if (!f.orig) f.orig = { dataUrl: f.dataUrl, w: f.w, h: f.h, type: f.type, size: f.size };
+    const oldA = (f.rot90 || 0) + (f.fine || 0);
+    const newA = rot90 + fine;
+    const delta = newA - oldA;
+    if (!delta) return;
+    const img = await loadImage(f.orig.dataUrl);
+    if (!img) return;
+    const W0 = f.orig.w, H0 = f.orig.h;
+    const rad = (newA * Math.PI) / 180;
+    const right = newA % 90 === 0; // 90° 整数倍：尺寸精确对调，不留白边
+    const c = right ? Math.round(Math.abs(Math.cos(rad))) : Math.abs(Math.cos(rad));
+    const sn = right ? Math.round(Math.abs(Math.sin(rad))) : Math.abs(Math.sin(rad));
+    const W = Math.round(W0 * c + H0 * sn), H = Math.round(W0 * sn + H0 * c);
+    const cv = document.createElement("canvas");
+    cv.width = W; cv.height = H;
+    const g = cv.getContext("2d");
+    g.fillStyle = "#ffffff"; // 微调转出来的四个角补白
+    g.fillRect(0, 0, W, H);
+    g.translate(W / 2, H / 2);
+    g.rotate(rad);
+    g.imageSmoothingQuality = "high";
+    g.drawImage(img, -W0 / 2, -H0 / 2);
+    const png = f.orig.type === "image/png";
+    const blob = await canvasToBlob(cv, png ? "image/png" : "image/jpeg", 0.95);
+    const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+    // 标注坐标：旧图（f.w×f.h）→ 新图（W×H），绕中心转 delta
+    const dr = (delta * Math.PI) / 180, cs = Math.cos(dr), si = Math.sin(dr);
+    const tp = (q) => {
+      const x = q.x * f.w - f.w / 2, y = q.y * f.h - f.h / 2;
+      return { x: Math.min(1, Math.max(0, (x * cs - y * si + W / 2) / W)), y: Math.min(1, Math.max(0, (x * si + y * cs + H / 2) / H)) };
+    };
+    const bbox = (pts) => {
+      const xs = pts.map((q) => q.x), ys = pts.map((q) => q.y);
+      const x0 = Math.min(...xs), y0 = Math.min(...ys);
+      return { x: x0, y: y0, w: Math.max(...xs) - x0, h: Math.max(...ys) - y0 };
+    };
+    if (f.lasso && f.lasso.length > 2) {
+      f.lasso = f.lasso.map(tp);
+      f.crop = bbox(f.lasso);
+    } else if (f.crop) {
+      const r = f.crop;
+      f.crop = bbox([{ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y }, { x: r.x, y: r.y + r.h }, { x: r.x + r.w, y: r.y + r.h }].map(tp));
+    }
+    if (f.colors) f.colors = f.colors.map((c0) => ({ ...c0, ...tp(c0) }));
+    if (f.mask) {
+      const k = f.mask.width / f.w;
+      const m = document.createElement("canvas");
+      m.width = Math.max(1, Math.round(W * k)); m.height = Math.max(1, Math.round(H * k));
+      const mg = m.getContext("2d");
+      mg.translate(m.width / 2, m.height / 2);
+      mg.rotate(dr);
+      mg.drawImage(f.mask, -f.mask.width / 2, -f.mask.height / 2);
+      f.mask = m;
+      f.parts = findParts(m);
+    }
+    Object.assign(f, { dataUrl, base64: dataUrl.split(",")[1], w: W, h: H, type: blob.type, size: blob.size, rot90, fine, sampler: null });
+  }
+  async function rotateEditor(rot90, fine) {
+    const f = edFile();
+    if (!f) return;
+    saveEditor();
+    await rotateTo(f, ((rot90 % 360) + 360) % 360, fine);
+    showEditor();
+    renderThumbs();
+  }
+  $("rotL").addEventListener("click", () => { const f = edFile(); rotateEditor((f.rot90 || 0) - 90, f.fine || 0); });
+  $("rotR").addEventListener("click", () => { const f = edFile(); rotateEditor((f.rot90 || 0) + 90, f.fine || 0); });
+  $("rotFine").addEventListener("input", (e) => { $("rotVal").textContent = `${e.target.value}°`; });
+  $("rotFine").addEventListener("change", (e) => { const f = edFile(); rotateEditor(f.rot90 || 0, Number(e.target.value)); });
+  $("rotReset").addEventListener("click", () => rotateEditor(0, 0));
+
   $("markClear").addEventListener("click", () => clearMarks(tool));
   $("markClearAll").addEventListener("click", () => clearMarks("all"));
   $("mRemove").addEventListener("click", () => {
@@ -723,10 +884,32 @@
     V.s = s;
     vApply();
   }
-  function openViewer(src) { $("vImg").onload = vFit; $("vImg").src = src; $("viewer").classList.add("show"); }
+  // 看大图：结果里的所有图（交给 AI 的图、修好的图，从左到右、从上到下）用左右箭头循环切换
+  let vList = [], vPos = 0;
+  function showAt(i) {
+    if (!vList.length) return;
+    vPos = (i + vList.length) % vList.length;
+    $("vImg").onload = vFit;
+    $("vImg").src = vList[vPos];
+    $("vIdx").textContent = vList.length > 1 ? `${vPos + 1} / ${vList.length}` : "";
+    $("vPrev").hidden = $("vNext").hidden = vList.length < 2;
+  }
+  function openViewer(src, list) {
+    vList = list && list.length ? list : [src];
+    $("viewer").classList.add("show");
+    showAt(Math.max(0, vList.indexOf(src)));
+  }
+  const jobImages = () => [...$("jobs").querySelectorAll("img[data-view]")].map((im) => im.dataset.view);
+  $("vPrev").addEventListener("click", (e) => { e.stopPropagation(); showAt(vPos - 1); });
+  $("vNext").addEventListener("click", (e) => { e.stopPropagation(); showAt(vPos + 1); });
+  document.addEventListener("keydown", (e) => {
+    if (!$("viewer").classList.contains("show")) return;
+    if (e.key === "ArrowLeft") { e.preventDefault(); showAt(vPos - 1); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); showAt(vPos + 1); }
+  }, true);
   $("viewer").addEventListener("wheel", (e) => { e.preventDefault(); vZoom(V.s * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY); }, { passive: false });
   $("viewer").addEventListener("pointerdown", (e) => {
-    if (e.target.closest(".vbar")) return;
+    if (e.target.closest(".vbar") || e.target.closest(".vnav")) return;
     V.drag = { x: e.clientX, y: e.clientY, ox: V.x, oy: V.y, moved: false, onImg: e.target === $("vImg") };
     $("viewer").setPointerCapture(e.pointerId);
   });
@@ -838,11 +1021,45 @@
     if (e.target.checked) sel.add(id); else sel.delete(id);
     renderJobs();
   });
+  // 结果里的图（修好的图 / 交给 AI 的图）右键"添加"：清空现有产品图，把这张放进去，方便接着调整
+  let cmTarget = null;
+  $("jobs").addEventListener("contextmenu", (e) => {
+    const im = e.target.closest("img[data-view]");
+    if (!im) return;
+    e.preventDefault();
+    cmTarget = im;
+    const m = $("cmenu");
+    m.style.display = "block";
+    m.style.left = Math.min(e.clientX, innerWidth - 220) + "px";
+    m.style.top = Math.min(e.clientY, innerHeight - 90) + "px";
+  });
+  document.addEventListener("pointerdown", (e) => { if (!e.composedPath().includes($("cmenu"))) $("cmenu").style.display = "none"; }, true);
+  $("cmenu").addEventListener("click", async (e) => {
+    const act = e.target.dataset.cm;
+    $("cmenu").style.display = "none";
+    if (!act || !cmTarget) return;
+    const src = cmTarget.dataset.view;
+    if (act === "view") { openViewer(src, jobImages()); return; }
+    if (running) { toast("正在处理，先点“停止”"); return; }
+    try {
+      const blob = await (await fetch(src)).blob();
+      const jobEl = cmTarget.closest(".job");
+      const base = (jobEl && jobEl.querySelector("b") ? jobEl.querySelector("b").textContent : "结果").replace(/\.[^.]+$/, "");
+      const isOut = cmTarget.title === "最终输出";
+      const type = /^image\/(png|jpeg|webp)$/.test(blob.type) ? blob.type : "image/png";
+      const file = new File([blob], `${base}-${isOut ? "修好" : "原图"}.${type === "image/jpeg" ? "jpg" : type.split("/")[1]}`, { type });
+      files = [];
+      await addFiles([file]);
+      toast("已添加到产品图（原来的产品图已清空）");
+    } catch (err) {
+      toast("添加失败：" + (err && err.message ? err.message : err));
+    }
+  });
   $("jobs").addEventListener("click", (e) => {
     const del = Number(e.target.dataset.del);
     if (del) { deleteJobs(jobs.filter((x) => x.id === del)); return; }
     const v = e.target.dataset.view;
-    if (v) { openViewer(v); return; }
+    if (v) { openViewer(v, jobImages()); return; }
     const dl = Number(e.target.dataset.dl);
     if (dl) { const j = jobs.find((x) => x.id === dl); downloadBlob(j.outBlob, outName(j)); return; }
     const rt = Number(e.target.dataset.retry);
@@ -901,7 +1118,7 @@
     const out = await composeOutput(img, {
       ratio: S.mode === "white" ? 1 : S.mode === "free" && S.ratio !== "auto" ? ratioValue(S.ratio) : null,
       inputRatio: inSize.w / inSize.h, inputSize: inSize,
-      outSize: S.outSize, fill: S.fill, background: S.background, format: S.format, contrast: S.contrast, bright: S.bright,
+      outSize: S.outSize, fill: S.fill, background: S.mode === "refine" ? (S.refineBg === "white" ? "white" : "original") : S.background, format: S.format, contrast: S.contrast, bright: S.bright,
       holes: S.holes === "on" ? true : S.holes === "off" ? false : "auto",
     });
     if (out.same) { j.outBlob = blob; j.w = j.aiW; j.h = j.aiH; j.ext = blob.type === "image/png" ? ".png" : ".jpg"; }
@@ -946,7 +1163,8 @@
       }
     }
     j.model = SITE.currentMode ? SITE.currentMode()?.label || "（没找到模型按钮）" : "";
-    j.prompt = buildWebPrompt(S, j.file, j.aiRatio, { fresh: !needNew && (sessionCount > 0 || !isFirst || SITE.hasMessages()) });
+    const ps = { ...S, requirement: fillProduct(j.req || "", j.productName || ""), productName: j.productName || "", background: S.mode === "refine" ? S.refineBg : S.background };
+    j.prompt = buildWebPrompt(ps, j.file, j.aiRatio, { fresh: !needNew && (sessionCount > 0 || !isFirst || SITE.hasMessages()) });
     // 3. 填图和提示词
     await SITE.clearInput(signal);
     step(j, `贴图 ${upload.length} 张`);
@@ -1025,8 +1243,12 @@
     const batchJobs = list.map((f, i) => {
       // 成功的记录保留（同一张图做几次好对比提示词）；只有失败 / 被拒 / 停止的记录会被这次的结果覆盖
       const old = jobs.filter((x) => x.file === f && x.status !== "ok").pop();
+      // 精修要求框做完一批就清空：重做时框是空的，就用这张图上次用的要求和产品名
+      const prev = jobs.filter((x) => x.file === f).pop();
+      const req = S.requirement || (prev && prev.req) || "";
+      const productName = S.productName || (prev && prev.productName) || "";
       const fresh = { file: f, mode: S.mode, status: "waiting", steps: [], idx: i + 1, total: list.length, error: "", text: "", nudged: "", retries: 0,
-        aiUrl: null, outBlob: null, outUrl: null, outData: null, w: 0, h: 0, ext: "", note: "", model: "", modeWarn: "", startedAt: 0, endedAt: 0, inputUrl: null, forceChat: "" };
+        aiUrl: null, outBlob: null, outUrl: null, outData: null, w: 0, h: 0, ext: "", note: "", model: "", modeWarn: "", startedAt: 0, endedAt: 0, inputUrl: null, forceChat: "", req, productName };
       if (old) { Object.assign(old, fresh); return old; }
       const j = { id: nextId++, ...fresh };
       jobs.push(j);
@@ -1084,6 +1306,13 @@
       }
     }
     batchJobs.filter((j) => j.status === "waiting" || j.status === "running").forEach((j) => (j.status = "cancel"));
+    if (!signal.aborted) {
+      // 做完一批（或一张）：清空精修要求和产品名，免得带到下一个产品上（重做时会用这张图上次的要求）
+      $("requirement").value = "";
+      $("productName").value = "";
+      S.requirement = "";
+      S.productName = "";
+    }
     running = false;
     $("startBtn").disabled = false;
     $("stopBtn").disabled = true;
@@ -1227,7 +1456,7 @@
           steps: j.steps.slice(-3), error: j.error || "", text: (j.text || "").slice(0, 500), retries: j.retries || 0,
           outData: j.outData || "", inputUrl: j.inputUrl || "", w: j.w || 0, h: j.h || 0, ext: j.ext || "", note: j.note || "",
           model: j.model || "", modeWarn: j.modeWarn || "", startedAt: j.startedAt || 0, endedAt: j.endedAt || 0, partCount: j.partCount || 0,
-          aiW: j.aiW || 0, aiH: j.aiH || 0, aiRatio: j.aiRatio || "", aiSrc: j.aiSrc || "",
+          aiW: j.aiW || 0, aiH: j.aiH || 0, aiRatio: j.aiRatio || "", aiSrc: j.aiSrc || "", req: j.req || "", productName: j.productName || "",
         });
       }
       chrome.runtime.sendMessage({ type: "aitutu-tab-save", data: { files: fs, jobs: js, nextId, savedAt: Date.now() } }, () => void chrome.runtime.lastError);

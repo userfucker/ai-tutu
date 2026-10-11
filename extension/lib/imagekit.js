@@ -15,6 +15,7 @@ const T = {
       white: "Pure white (RGB 255,255,255) clean seamless background; remove everything from the original background, including shadow edges; a subtle natural contact shadow under the product is allowed.",
       original: "Keep the original background and scene; only clean obvious clutter and stains in the background; do not replace the background.",
       refine: "Keep the original background, scene, lighting and color tone; only remove specks, stains and dust from the background; do not replace it or change the style.",
+      custom: "Use the background described in the user note (Chinese). If the user note does not describe a background, keep the original background, scene, lighting and color tone, and only remove specks, stains and dust from it.",
       alpha: "Pure white (RGB 255,255,255) clean background with everything from the original background removed; absolutely no shadows, reflections or cast shadows (it will be cut out to a transparent PNG afterwards); crisp, clean product edges without fringes or halos; every gap between leaves, branches, handles or parts must show the same pure white background.",
     },
     angle: {
@@ -54,6 +55,7 @@ const T = {
       white: "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物和阴影边缘；可以保留产品下方自然、轻微的接触投影。",
       original: "保留原图的背景和场景，只清理背景里明显的杂物和污点，不要换背景。",
       refine: "保留原图的背景、场景、光线和色调，只去掉背景里的杂点、污渍和灰尘，不要换背景，不要改变画面风格。",
+      custom: "背景按用户备注里写的要求做；如果备注里没有写背景要求，就保留原图的背景、场景、光线和色调，只去掉背景里的杂点、污渍和灰尘。",
       alpha: "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物；不要任何投影、倒影和阴影（之后要抠成透明底）；产品边缘清晰锐利、轮廓干净，没有毛边和白边；枝叶之间、把手里、零件之间的空隙也要露出同样的纯白背景。",
     },
     angle: {
@@ -610,6 +612,18 @@ async function composeOutput(img, o) {
 }
 
 /**
+ * 精修要求里的产品名占位符：[产品名]（也认 {产品名}、【产品名】）。
+ * 填了产品名就替换；没填就把含占位符的那一句整句去掉（按 。；！？ 和换行分句）。
+ */
+function fillProduct(text, name) {
+  const has = (t) => /[\[{【]产品名[\]}】]/.test(t);
+  const t = String(text || "");
+  if (!t) return "";
+  if (name) return t.replace(/[\[{【]产品名[\]}】]/g, name).trim();
+  return t.split(/(?<=[。；;！!？?\n])/).filter((seg) => !has(seg)).join("").trim();
+}
+
+/**
  * Gemini 网页版用的提示词（英文）：网页版没有比例参数，比例写进提示词。
  * s = 设置（mode, background, format, fill, angle, retouch, sharp, requirement）
  * f = 图片（crop / parts / partsNote / colors）
@@ -631,7 +645,8 @@ function buildWebPrompt(s, f, aiRatio, opts = {}) {
   let background = L.background[s.background];
   if (s.mode === "refine") {
     compose = L.composeRefine(aiRatio);
-    background = L.background.refine;
+    // 精修的背景：原图背景（默认）/ 白底图 / 自定义（按用户备注，没写就保留原图背景）
+    background = s.background === "white" ? L.background.white : s.background === "custom" ? L.background.custom : L.background.refine;
   } else if (s.format === "png-alpha") {
     background = L.background.alpha;
   }
@@ -642,6 +657,7 @@ function buildWebPrompt(s, f, aiRatio, opts = {}) {
     `Generate one image: a refined e-commerce product photo of the exact product in the first uploaded image (aspect ratio ${aiRatio}${aiRatio === "1:1" ? ", square" : ""}).` +
       (nParts ? ` The second uploaded image is an accessory annotation image${nDetails ? " and the following one(s) are accessory close-ups" : ""}; use them only as references.` : ""),
     "Requirements:",
+    ...(s.productName ? [`- Product: this is "${s.productName}" (product name in Chinese; use it to understand what the product is).`] : []),
     "- Same product: it must be exactly the same product as in the reference image. Shape, proportions, structure, colors, materials, patterns, text, logos and the number of parts must not change; do not add or remove any part.",
     `- Colors: every color must match the reference image exactly. Color names in the user's note are only hints; if they conflict with the image, follow the image.${colors.length ? L.colors(colors) : ""}`,
     `- Accessories: ${parts}`,
