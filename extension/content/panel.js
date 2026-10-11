@@ -9,7 +9,7 @@
 (() => {
   if (window.__aitutuPanel) return;
   window.__aitutuPanel = true;
-  const VERSION = "0.4.0";
+  const VERSION = "0.5.0";
   const SITE = AITUTU_SITE; // gemini.js 或 copilot.js 提供
   const AI = SITE.name;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -37,6 +37,7 @@
   const saveSettings = () => { try { chrome.storage.local.set({ [SETTINGS_KEY]: { ...S, requirement: "" } }); } catch {} };
 
   // ------------------------------------------------------------ 状态
+  let extraFiles = []; // “取当前会话的图”取回来的图（不是产品图，不在缩略图里，只给结果记录用）
   let files = []; // {id,name,size,type,dataUrl,base64,w,h,crop,mask,parts,partsNote,colors,sampler,done}
   let jobs = []; // {id,file,status,steps[],aiUrl,outBlob,outUrl,w,h,note,text,error,startedAt,endedAt}
   let nextId = 1;
@@ -132,6 +133,10 @@
   .pick { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.6); color: #fff; font: bold 11px/16px sans-serif; text-align: center; text-shadow: 0 0 2px #000; }
   .sel { position: absolute; border: 2px solid #22c55e; box-shadow: 0 0 0 9999px rgba(0,0,0,.45); cursor: move; }
   .stage.painting .sel { pointer-events: none; }
+  .lasso { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .lasso path { fill: rgba(0,0,0,.45); }
+  .lasso polygon { fill: none; stroke: #22c55e; stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .sel.withLasso { box-shadow: none; border-style: dashed; border-color: rgba(34,197,94,.6); }
   .sel .h { position: absolute; width: 14px; height: 14px; background: #fff; border: 2px solid #22c55e; border-radius: 3px; }
   .h.nw { left: -8px; top: -8px; cursor: nwse-resize; } .h.ne { right: -8px; top: -8px; cursor: nesw-resize; }
   .h.sw { left: -8px; bottom: -8px; cursor: nesw-resize; } .h.se { right: -8px; bottom: -8px; cursor: nwse-resize; }
@@ -216,6 +221,7 @@
       <div id="jobs"></div>
       <div class="row" style="margin-top:8px">
         <button id="zipBtn" disabled>打包下载 zip</button>
+        <button id="grabBtn" title="把当前对话里 AI 生成的图都取回来（插件漏收的图也能拿回来），按现在的设置做后期">取当前会话的图</button>
         <button id="setBtn">设置</button>
         <button id="clearJobs" style="margin-left:auto">清空结果</button>
       </div>
@@ -250,12 +256,13 @@
 <div class="modal" id="modal"><div class="mcard">
   <div class="row"><b id="mTitle" style="margin-right:auto"></b><button id="mPrev">上一张</button><button id="mNext">下一张</button></div>
   <div class="row">
-    <div class="seg" id="tools"><button data-tool="crop" class="active">框选商品</button><button data-tool="brush">画笔标注配件</button><button data-tool="eraser">橡皮擦</button><button data-tool="picker">吸管取色</button></div>
+    <div class="seg" id="tools"><button data-tool="crop" class="active">框选商品</button><button data-tool="lasso">自由框选</button><button data-tool="brush">画笔标注配件</button><button data-tool="eraser">橡皮擦</button><button data-tool="picker">吸管取色</button></div>
     <span class="muted">粗细</span><input type="range" id="brush" min="4" max="80" value="20" style="width:90px">
     <button id="markClear">清除标注</button>
   </div>
   <div class="muted" id="toolHint"></div>
   <div class="stage" id="stage"><img id="mImg" draggable="false"><canvas class="mark" id="markCv"></canvas><div class="picks" id="picks"></div>
+    <svg class="lasso" id="lassoSvg" viewBox="0 0 100 100" preserveAspectRatio="none" hidden><path id="lassoMask" fill-rule="evenodd"></path><polygon id="lassoPoly"></polygon></svg>
     <div class="sel" id="sel" hidden><span class="h nw" data-h="nw"></span><span class="h ne" data-h="ne"></span><span class="h sw" data-h="sw"></span><span class="h se" data-h="se"></span></div></div>
   <input id="partsNote" placeholder="配件说明（选填）：例如“右边两个白色插头是配件，必须保留”" style="border:1px solid #e4e4e7;border-radius:9px;padding:6px 8px;font:inherit">
   <div class="colors" id="colors"></div>
@@ -465,10 +472,11 @@
   }, true);
 
   // ------------------------------------------------------------ 框选 / 标注 / 取色（和测试页面同样的操作）
-  let edIndex = -1, edRect = null, drag = null, tool = "crop";
+  let edIndex = -1, edRect = null, edLasso = null, drag = null, tool = "crop";
   const edFile = () => files[edIndex];
   const TOOL_HINT = {
     crop: "按住拖出一个框，把商品框进去（四周留一点空）。拖框内部移动，拖四个角调大小。",
+    lasso: "按住鼠标沿着商品外面画一圈（任意形状），松开自动闭合；圈外面的部分不交给 AI。再画一次就重新圈。",
     brush: `在容易被当成杂物的小配件上涂抹，连在一起的算一个配件；会把标注图和配件特写一起交给 ${AI}。`,
     eraser: "擦掉涂错的地方。",
     picker: "在产品上点一下取色号，要求这个部位保持这个颜色（最多 8 个）。",
@@ -489,6 +497,7 @@
   function showEditor() {
     const f = edFile();
     edRect = f.crop ? { ...f.crop } : null;
+    edLasso = f.crop && f.lasso ? f.lasso.map((p) => ({ ...p })) : null;
     $("mImg").src = f.dataUrl;
     $("mTitle").textContent = `第 ${edIndex + 1}/${files.length} 张：${f.name}（${f.w}×${f.h}）`;
     $("mPrev").disabled = edIndex === 0;
@@ -518,11 +527,19 @@
   function drawSel() {
     const f = edFile();
     const extra = (f.parts?.length ? ` · 配件 ${f.parts.length} 处` : "") + (f.colors?.length ? ` · 颜色 ${f.colors.length} 个` : "");
+    // 自由框选：圈外变暗，圈的轮廓画绿线；外接矩形就是实际裁剪范围
+    $("lassoSvg").hidden = !edLasso;
+    if (edLasso) {
+      const pts = edLasso.map((p) => `${(p.x * 100).toFixed(2)},${(p.y * 100).toFixed(2)}`);
+      $("lassoPoly").setAttribute("points", pts.join(" "));
+      $("lassoMask").setAttribute("d", `M0,0H100V100H0Z M${pts.join(" L")} Z`);
+    }
     if (!edRect) { $("sel").hidden = true; $("mInfo").textContent = `未框选：整张图交给 ${AI}` + extra; return; }
     const sel = $("sel");
     sel.hidden = false;
+    sel.classList.toggle("withLasso", !!edLasso);
     Object.assign(sel.style, { left: edRect.x * 100 + "%", top: edRect.y * 100 + "%", width: edRect.w * 100 + "%", height: edRect.h * 100 + "%" });
-    $("mInfo").textContent = `框选 ${Math.round(edRect.w * f.w)}×${Math.round(edRect.h * f.h)}` + extra;
+    $("mInfo").textContent = `${edLasso ? "自由框选" : "框选"} ${Math.round(edRect.w * f.w)}×${Math.round(edRect.h * f.h)}` + extra;
   }
   function renderPicks() {
     const list = edFile().colors || [];
@@ -537,6 +554,7 @@
     const f = edFile();
     if (!f) return;
     f.crop = edRect && edRect.w > 0.02 && edRect.h > 0.02 ? { ...edRect } : null;
+    f.lasso = f.crop && edLasso ? edLasso.map((p) => ({ ...p })) : null;
     f.partsNote = $("partsNote").value.trim();
   }
   function closeEditor() {
@@ -586,6 +604,14 @@
     e.preventDefault();
     const p = stagePt(e);
     if (tool === "picker") { pickColor(p); return; }
+    if (tool === "lasso") {
+      drag = { mode: "lasso" };
+      edLasso = [p];
+      edRect = null;
+      $("stage").setPointerCapture(e.pointerId);
+      drawSel();
+      return;
+    }
     if (tool !== "crop") {
       drag = { mode: "paint", last: p };
       $("stage").setPointerCapture(e.pointerId);
@@ -593,9 +619,10 @@
       return;
     }
     const h = e.target.dataset.h;
+    if (h && edRect) edLasso = null; // 拖角调大小就变回普通矩形框
     if (h && edRect) drag = { mode: "new", start: { x: h.includes("w") ? edRect.x + edRect.w : edRect.x, y: h.includes("n") ? edRect.y + edRect.h : edRect.y } };
-    else if (e.target === $("sel") && edRect) drag = { mode: "move", start: p, orig: { ...edRect } };
-    else { drag = { mode: "new", start: p }; edRect = { x: p.x, y: p.y, w: 0, h: 0 }; }
+    else if (e.target === $("sel") && edRect) drag = { mode: "move", start: p, orig: { ...edRect }, lassoOrig: edLasso && edLasso.map((q) => ({ ...q })) };
+    else { drag = { mode: "new", start: p }; edRect = { x: p.x, y: p.y, w: 0, h: 0 }; edLasso = null; }
     $("stage").setPointerCapture(e.pointerId);
     drawSel();
   });
@@ -603,9 +630,15 @@
     if (!drag) return;
     const p = stagePt(e);
     if (drag.mode === "paint") { paintSeg(drag.last, p); drag.last = p; return; }
+    if (drag.mode === "lasso") {
+      const last = edLasso[edLasso.length - 1];
+      if (Math.hypot(p.x - last.x, p.y - last.y) > 0.004) { edLasso.push(p); drawSel(); }
+      return;
+    }
     if (drag.mode === "move") {
       const o = drag.orig;
       edRect = { ...o, x: Math.min(1 - o.w, Math.max(0, o.x + p.x - drag.start.x)), y: Math.min(1 - o.h, Math.max(0, o.y + p.y - drag.start.y)) };
+      if (edLasso && drag.lassoOrig) { const dx = edRect.x - o.x, dy = edRect.y - o.y; edLasso = drag.lassoOrig.map((q) => ({ x: q.x + dx, y: q.y + dy })); }
     } else {
       const s = drag.start;
       edRect = { x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), w: Math.abs(p.x - s.x), h: Math.abs(p.y - s.y) };
@@ -613,6 +646,16 @@
     drawSel();
   });
   $("stage").addEventListener("pointerup", () => {
+    if (drag && drag.mode === "lasso") {
+      drag = null;
+      if (edLasso.length < 3) { edLasso = null; drawSel(); return; }
+      const xs = edLasso.map((q) => q.x), ys = edLasso.map((q) => q.y);
+      const x0 = Math.min(...xs), y0 = Math.min(...ys);
+      edRect = { x: x0, y: y0, w: Math.max(...xs) - x0, h: Math.max(...ys) - y0 };
+      if (edRect.w < 0.02 || edRect.h < 0.02) { edRect = null; edLasso = null; }
+      drawSel();
+      return;
+    }
     if (drag && drag.mode === "paint") {
       drag = null;
       const f = edFile();
@@ -626,10 +669,10 @@
   });
   $("mPrev").addEventListener("click", () => { saveEditor(); edIndex--; showEditor(); });
   $("mNext").addEventListener("click", () => { saveEditor(); edIndex++; showEditor(); });
-  $("cropClear").addEventListener("click", () => { edRect = null; drawSel(); });
+  $("cropClear").addEventListener("click", () => { edRect = null; edLasso = null; drawSel(); });
   $("cropAll").addEventListener("click", () => {
     if (!edRect) { toast("先框一个区域"); return; }
-    files.forEach((f) => (f.crop = { ...edRect }));
+    files.forEach((f) => { f.crop = { ...edRect }; f.lasso = edLasso ? edLasso.map((q) => ({ ...q })) : null; });
     toast(`框选已应用到全部 ${files.length} 张`);
   });
   $("markClear").addEventListener("click", () => { const f = edFile(); f.mask = null; f.parts = []; drawMark(); drawSel(); });
@@ -713,7 +756,7 @@
           ${j.text && j.status !== "ok" ? `<div class="txt">${AI}：${esc(j.text.slice(0, 160))}</div>` : ""}
           <div class="row" style="margin-top:3px">
             ${j.outUrl ? `<button data-dl="${j.id}">下载</button>` : ""}
-            ${["refused", "fail", "cancel"].includes(j.status) && !running ? `<button data-retry="${j.id}">重做这张</button>` : ""}
+            ${["refused", "fail", "cancel"].includes(j.status) && !running && !j.file.fromChat ? `<button data-retry="${j.id}">重做这张</button>` : ""}
             ${j.status !== "running" ? `<button data-del="${j.id}" class="danger" title="删除这条结果和面板里对应的产品图">删除</button>` : ""}
           </div></div></div>`;
     }).join("");
@@ -734,10 +777,12 @@
   /** 删除结果，同时把面板里对应的产品图删掉（正在做的那张不能删） */
   function deleteJobs(list) {
     list = list.filter((j) => j.status !== "running");
-    const delFiles = new Set(list.map((j) => j.file));
     list.forEach((j) => { j.removed = true; sel.delete(j.id); });
     jobs = jobs.filter((j) => !j.removed);
+    // 产品图只有在它的记录全删光了才一起删（同一张图可能有好几条成功记录）
+    const delFiles = new Set(list.map((j) => j.file).filter((f) => !jobs.some((x) => x.file === f)));
     files = files.filter((f) => !delFiles.has(f));
+    extraFiles = extraFiles.filter((f) => !delFiles.has(f));
     renderJobs();
     renderThumbs();
     return list.length;
@@ -745,7 +790,7 @@
   /** 重做：就在原来那条记录上重做（不新加记录，失败的记录不会留在列表里） */
   function retryJobs(list) {
     if (running) { toast("正在处理，先点“停止”"); return; }
-    list = list.filter((j) => j.status !== "running");
+    list = list.filter((j) => j.status !== "running" && !j.file.fromChat);
     const fs = [...new Set(list.map((j) => j.file))];
     fs.forEach((f) => (f.done = false));
     list.forEach((j) => sel.delete(j.id));
@@ -827,6 +872,24 @@
     return S.ratio;
   }
 
+  /** AI 出图 → 按当前设置后期处理，结果写进记录 j（inSize = 交给 AI 的图的尺寸，用来定比例） */
+  async function finishJob(j, blob, inSize) {
+    j.aiUrl = URL.createObjectURL(blob);
+    const img = await loadImage(j.aiUrl);
+    j.aiW = img.naturalWidth; j.aiH = img.naturalHeight; j.aiBytes = blob.size;
+    step(j, `收到 ${j.aiW}×${j.aiH}，后期处理`);
+    inSize = inSize || { w: j.aiW, h: j.aiH };
+    const out = await composeOutput(img, {
+      ratio: S.mode === "white" ? 1 : S.mode === "free" && S.ratio !== "auto" ? ratioValue(S.ratio) : null,
+      inputRatio: inSize.w / inSize.h, inputSize: inSize,
+      outSize: S.outSize, fill: S.fill, background: S.background, format: S.format, contrast: S.contrast, bright: S.bright,
+      holes: S.holes === "on" ? true : S.holes === "off" ? false : "auto",
+    });
+    if (out.same) { j.outBlob = blob; j.w = j.aiW; j.h = j.aiH; j.ext = blob.type === "image/png" ? ".png" : ".jpg"; }
+    else { j.outBlob = out.blob; j.w = out.w; j.h = out.h; j.ext = out.ext; j.note = out.note; }
+    j.outUrl = URL.createObjectURL(j.outBlob);
+  }
+
   async function runOne(j, signal, isFirst) {
     j.status = "running";
     j.startedAt = Date.now();
@@ -884,6 +947,7 @@
       await SITE.waitUserSend(base, signal);
     }
     sessionCount++;
+    if (SITE.verifySent) await SITE.verifySent(base, upload.length, signal); // 图片真的发出去了吗（Copilot 偶尔收不到图）
     setStatus(`第 ${j.idx}/${j.total} 张：等 ${AI} 出图…`);
     step(j, `等 ${AI} 出图`);
     let r = await SITE.waitResult(base, signal);
@@ -902,7 +966,7 @@
         setStatus(`第 ${j.idx}/${j.total} 张：${AI} 没出图，插件填好了催促的话，请按回车发送。`, "warn");
         await SITE.waitUserSend(base2, signal);
       }
-      r = await SITE.waitResult(base2, signal);
+      r = await SITE.waitResult(base2, signal, base); // 第一次发送以后出来的图也算（图晚到的情况）
     }
     if (r.alert) { j.status = "fail"; j.error = r.alert; return "alert"; }
     j.text = r.text || "";
@@ -913,20 +977,8 @@
     }
     // 5. 收图 + 后期
     const blob = await SITE.grabImage(r.img);
-    j.aiUrl = URL.createObjectURL(blob);
-    const img = await loadImage(j.aiUrl);
-    j.aiW = img.naturalWidth; j.aiH = img.naturalHeight; j.aiBytes = blob.size;
-    step(j, `收到 ${j.aiW}×${j.aiH}，后期处理`);
-    const inSize = { w: input.w, h: input.h };
-    const out = await composeOutput(img, {
-      ratio: S.mode === "white" ? 1 : S.mode === "free" && S.ratio !== "auto" ? ratioValue(S.ratio) : null,
-      inputRatio: inSize.w / inSize.h, inputSize: inSize,
-      outSize: S.outSize, fill: S.fill, background: S.background, format: S.format, contrast: S.contrast, bright: S.bright,
-      holes: S.holes === "on" ? true : S.holes === "off" ? false : "auto",
-    });
-    if (out.same) { j.outBlob = blob; j.w = j.aiW; j.h = j.aiH; j.ext = blob.type === "image/png" ? ".png" : ".jpg"; }
-    else { j.outBlob = out.blob; j.w = out.w; j.h = out.h; j.ext = out.ext; j.note = out.note; }
-    j.outUrl = URL.createObjectURL(j.outBlob);
+    j.aiSrc = r.img.currentSrc || r.img.src;
+    await finishJob(j, blob, { w: input.w, h: input.h });
     j.status = "ok";
     j.file.done = true;
     step(j, "完成");
@@ -952,7 +1004,8 @@
     $("stopBtn").disabled = false;
     // 每张图只有一条记录：这张图以前做过就在原记录上重做（清掉旧结果），没做过才新建
     const batchJobs = list.map((f, i) => {
-      const old = jobs.filter((x) => x.file === f).pop();
+      // 成功的记录保留（同一张图做几次好对比提示词）；只有失败 / 被拒 / 停止的记录会被这次的结果覆盖
+      const old = jobs.filter((x) => x.file === f && x.status !== "ok").pop();
       const fresh = { file: f, mode: S.mode, status: "waiting", steps: [], idx: i + 1, total: list.length, error: "", text: "", nudged: "", retries: 0,
         aiUrl: null, outBlob: null, outUrl: null, outData: null, w: 0, h: 0, ext: "", note: "", model: "", modeWarn: "", startedAt: 0, endedAt: 0, inputUrl: null, forceChat: "" };
       if (old) { Object.assign(old, fresh); return old; }
@@ -1095,6 +1148,37 @@
     chatStatus(`${stopped ? "已停止。" : ""}删除了 ${ok} 个${fail ? `，${fail} 个没删掉（${todo.find((c) => c.error)?.error || ""}）` : ""}。`, fail ? "warn" : "ok");
   });
 
+  // ---- 取当前会话的图：插件漏收、或者你自己在网页里让 AI 改过的图，都能拿回来
+  $("grabBtn").addEventListener("click", async () => {
+    if (running) { toast("正在作图，先等这一批做完"); return; }
+    const imgs = SITE.chatImages ? SITE.chatImages() : [];
+    const have = new Set(jobs.map((j) => j.aiSrc).filter(Boolean));
+    const todo = imgs.filter((i) => !have.has(i.currentSrc || i.src));
+    if (!todo.length) { toast(imgs.length ? "当前会话里的图都已经在结果里了" : "当前会话里没找到 AI 生成的图"); return; }
+    setStatus(`正在取回当前会话的 ${todo.length} 张图…`);
+    const stamp = bj().slice(11).replace(/:/g, "");
+    let n = 0;
+    for (const [k, img] of todo.entries()) {
+      try {
+        const blob = await SITE.grabImage(img);
+        const dataUrl = await toDataUrl(blob);
+        const f = { id: nextId++, name: `会话图片-${stamp}-${k + 1}.png`, size: blob.size, type: blob.type, dataUrl, w: img.naturalWidth, h: img.naturalHeight, done: true, fromChat: true };
+        extraFiles.push(f);
+        const j = { id: nextId++, file: f, mode: S.mode, status: "running", steps: [], idx: k + 1, total: todo.length, startedAt: Date.now(), aiSrc: img.currentSrc || img.src };
+        jobs.push(j);
+        await finishJob(j, blob, null);
+        j.status = "ok";
+        j.endedAt = Date.now();
+        step(j, "从当前会话取回");
+        n++;
+      } catch (e) {
+        console.warn("[AI图图] 取图失败：", e);
+      }
+    }
+    renderJobs();
+    setStatus(`从当前会话取回 ${n} 张图（按现在的设置做了后期）。`, n ? "ok" : "warn");
+  });
+
   $("startBtn").addEventListener("click", () => startBatch());
   $("stopBtn").addEventListener("click", () => { if (abortCtl) abortCtl.abort(); });
   document.addEventListener("keydown", (e) => {
@@ -1112,8 +1196,8 @@
   }
   async function saveTab() {
     try {
-      const fs = files.map((f) => ({
-        id: f.id, name: f.name, size: f.size, type: f.type, dataUrl: f.dataUrl, w: f.w, h: f.h, crop: f.crop || null, done: !!f.done,
+      const fs = files.concat(extraFiles).map((f) => ({
+        id: f.id, name: f.name, size: f.size, type: f.type, dataUrl: f.dataUrl, w: f.w, h: f.h, crop: f.crop || null, lasso: f.lasso || null, done: !!f.done, fromChat: !!f.fromChat,
         colors: f.colors || [], partsNote: f.partsNote || "", parts: f.parts || [], maskUrl: f.mask ? f.mask.toDataURL("image/png") : "",
       }));
       const js = [];
@@ -1124,7 +1208,7 @@
           steps: j.steps.slice(-3), error: j.error || "", text: (j.text || "").slice(0, 500), retries: j.retries || 0,
           outData: j.outData || "", inputUrl: j.inputUrl || "", w: j.w || 0, h: j.h || 0, ext: j.ext || "", note: j.note || "",
           model: j.model || "", modeWarn: j.modeWarn || "", startedAt: j.startedAt || 0, endedAt: j.endedAt || 0, partCount: j.partCount || 0,
-          aiW: j.aiW || 0, aiH: j.aiH || 0, aiRatio: j.aiRatio || "",
+          aiW: j.aiW || 0, aiH: j.aiH || 0, aiRatio: j.aiRatio || "", aiSrc: j.aiSrc || "",
         });
       }
       chrome.runtime.sendMessage({ type: "aitutu-tab-save", data: { files: fs, jobs: js, nextId, savedAt: Date.now() } }, () => void chrome.runtime.lastError);
@@ -1145,17 +1229,18 @@
           const im = await loadImage(d.maskUrl);
           if (im) { f.mask = document.createElement("canvas"); f.mask.width = im.naturalWidth; f.mask.height = im.naturalHeight; f.mask.getContext("2d").drawImage(im, 0, 0); }
         }
-        if (!files.some((x) => x.id === f.id)) files.push(f);
+        if (f.fromChat) { if (!extraFiles.some((x) => x.id === f.id)) extraFiles.push(f); }
+        else if (!files.some((x) => x.id === f.id)) files.push(f);
       }
       for (const d of data.jobs || []) {
-        const file = files.find((f) => f.id === d.fileId);
+        const file = files.concat(extraFiles).find((f) => f.id === d.fileId);
         if (!file || jobs.some((x) => x.id === d.id)) continue;
         const j = { ...d, file };
         delete j.fileId;
         if (d.outData) { j.outBlob = await (await fetch(d.outData)).blob(); j.outUrl = URL.createObjectURL(j.outBlob); }
         jobs.push(j);
       }
-      nextId = Math.max(nextId, data.nextId || 0, ...files.map((f) => f.id + 1), ...jobs.map((j) => j.id + 1));
+      nextId = Math.max(nextId, data.nextId || 0, ...files.concat(extraFiles).map((f) => f.id + 1), ...jobs.map((j) => j.id + 1));
       toast(`已恢复 ${files.length} 张产品图${jobs.length ? `、${jobs.length} 条结果` : ""}`);
     }
     restoring = false;

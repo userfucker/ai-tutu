@@ -255,6 +255,49 @@ function gemFullSizeUrls(src) {
 }
 const gemGrabImage = (img) => siteGrabImage(img, gemFullSizeUrls, "Gemini");
 
+
+// ------------------------------------------------------------ 左侧对话列表：批量删除（Lee 2026-10-11 探测报告）
+//  每行 gem-nav-list-item 里 a[href="/app/<对话id>"]，旁边 “……的更多选项”按钮（gem-conversation-actions-menu-button）→
+//  菜单 button[data-testid=delete-button]（“删除”）→ 确认框 mat-dialog-container 里 mat-dialog-actions 的“删除”
+const gemVis = (e) => !!e && e.getBoundingClientRect().width > 0;
+function gemListChats() {
+  const out = [];
+  for (const a of document.querySelectorAll('conversations-list a[href*="/app/"], side-navigation-v2 a[href*="/app/"]')) {
+    const m = /\/app\/([0-9a-z]{8,})/i.exec(a.getAttribute("href") || "");
+    if (!m || out.some((x) => x.id === m[1])) continue;
+    const title = (a.getAttribute("aria-label") || a.innerText || m[1]).split("\n")[0].trim();
+    out.push({ id: m[1], title });
+  }
+  return out;
+}
+async function gemDeleteChat(chat, signal) {
+  const a = [...document.querySelectorAll('a[href*="/app/"]')].find((x) => (x.getAttribute("href") || "").includes(chat.id));
+  const row = a && (a.closest("gem-nav-list-item") || a.parentElement);
+  if (!row) throw new Error("列表里找不到这个对话（可能已经删掉了）");
+  row.scrollIntoView({ block: "center" });
+  row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); // “更多”按钮鼠标移上去才显示
+  row.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false }));
+  await gemSleep(200);
+  const more = row.querySelector('.gem-conversation-actions-menu-button button, button[aria-label$="的更多选项"], button[aria-label*="More options" i]');
+  if (!more) throw new Error("没找到这个对话的“更多选项”按钮");
+  more.click();
+  const del = await gemWait(
+    () => [...document.querySelectorAll('button[data-testid="delete-button"], .conversation-actions-menu [role="menuitem"]')].find((b) => gemVis(b) && /删除|delete/i.test(b.innerText || "")),
+    { timeout: 5000, signal, what: "菜单里的“删除”" },
+  );
+  del.click();
+  const ok = await gemWait(
+    () => [...document.querySelectorAll("mat-dialog-container mat-dialog-actions button, mat-dialog-container button")].find((b) => gemVis(b) && !b.disabled && /^(删除|delete)$/i.test((b.innerText || "").trim())),
+    { timeout: 5000, signal, what: "确认框里的“删除”" },
+  );
+  ok.click();
+  await gemWait(() => !gemListChats().some((x) => x.id === chat.id), { timeout: 15000, signal, what: "对话从列表里消失" });
+}
+/** 当前对话里所有生成的图（“取当前会话的图”用） */
+function gemChatImages() {
+  return [...document.querySelectorAll("model-response generated-image img, model-response single-image img")].filter((i) => i.complete && i.naturalWidth >= 200);
+}
+
 /** 面板（panel.js）用的统一接口；copilot.js 里有同样的一套 */
 const AITUTU_SITE = {
   id: "gemini",
@@ -273,6 +316,9 @@ const AITUTU_SITE = {
   waitResult: gemWaitResult,
   grabImage: gemGrabImage,
   limitRe: GEM_LIMIT_RE,
+  listChats: gemListChats,
+  deleteChat: gemDeleteChat,
+  chatImages: gemChatImages,
   currentMode: gemCurrentMode,
   ensureMode: gemEnsureMode,
 };

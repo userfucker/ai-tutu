@@ -79,7 +79,34 @@ const copTurnIndex = (t) => Number(t.getAttribute("data-message-index") ?? NaN);
 function copMark() {
   const list = COP.turns();
   const idx = list.map(copTurnIndex).filter((n) => !isNaN(n));
-  return { els: new Set(list), maxIdx: idx.length ? Math.max(...idx) : -1, count: list.length };
+  // 发送前页面上已有的生成图、我的消息：之后只认新出来的
+  return { els: new Set(list), maxIdx: idx.length ? Math.max(...idx) : -1, count: list.length, imgs: new Set(copGenImages()), users: new Set(copUserMsgs()) };
+}
+/**
+ * 对话里所有“生成的图”（不只在最新回复里找：Lee 2026-10-11 遇到图出来了插件没认出来、还去问“怎么回事不生成图片？”）
+ * 认法：已知的生成图位置，再加上回复区里显示较大、不在我的消息和输入框里的图
+ */
+const COP_USER_SEL = '[data-testid="chatQuestion"], [id$="-user-message"], .fai-UserMessage';
+function copUserMsgs() {
+  return [...document.querySelectorAll(COP_USER_SEL)].filter((e) => !e.parentElement || !e.parentElement.closest(COP_USER_SEL));
+}
+function copGenImages() {
+  const known = [...document.querySelectorAll('[data-testid="ai-image-message"] img, img[alt="Generated image"], button[aria-label="Generated image"] img')];
+  const inTurns = COP.turns().flatMap((t) => [...t.querySelectorAll("img")]);
+  const all = [...new Set([...known, ...inTurns])];
+  return all.filter((i) => {
+    if (i.closest(COP_USER_SEL) || i.closest('[data-testid="composer"], [data-testid="chat-input-wrapper"]') || i.closest("#aitutu-panel-host")) return false;
+    const r = i.getBoundingClientRect();
+    return i.complete && i.naturalWidth >= 256 && i.naturalHeight >= 256 && r.width >= 120;
+  });
+}
+/** 发出去以后看一眼：我的新消息里有没有图（有时 Copilot 没收到图，Lee 2026-10-11） */
+async function copVerifySent(base, expected, signal) {
+  if (!expected) return;
+  const msg = await copWait(() => copUserMsgs().filter((m) => !base.users.has(m)).pop(), { timeout: 30000, signal, what: "我的消息出现在对话里" }).catch(() => null);
+  if (!msg) return; // 找不到我的消息（页面改版），不拦
+  const ok = await copWait(() => msg.querySelector("img") || msg.querySelector('[role="button"][aria-label*="."], [class*="Attachment" i]'), { timeout: 15000, signal, what: "我的消息里的图片" }).catch(() => null);
+  if (!ok) throw new Error("图片没发上去：Copilot 收到的消息里没有图");
 }
 function copNewTurn(base) {
   const list = COP.turns();
@@ -156,7 +183,8 @@ async function copClearInput(signal) {
 let copUploadWay = "";
 async function copPasteFiles(files, signal) {
   const input = await copWait(COP.input, { timeout: 10000, signal, what: "输入框" });
-  const ways = copUploadWay ? [copUploadWay] : ["paste", "input", "drop"];
+  // 上次成功的方法先试；不行再试其他方法（以前只试上次的方法，偶尔失败就整张失败）
+  const ways = [...new Set([copUploadWay, "paste", "input", "drop"].filter(Boolean))];
   const before = COP.attachments().length;
   let lastErr = "";
   for (const way of ways) {
@@ -223,11 +251,12 @@ async function copWaitReady(expected, signal) {
   await copWait(
     () => {
       const b = COP.sendBtn();
-      return COP.attachments().length >= expected && !COP.attachLoading() && b && !b.disabled && b.getAttribute("aria-disabled") !== "true";
+      const thumbs = [...document.querySelectorAll('[data-testid="composer-content"] img, .fx-AttachmentList img')];
+      return COP.attachments().length >= expected && !COP.attachLoading() && thumbs.every((i) => i.complete) && b && !b.disabled && b.getAttribute("aria-disabled") !== "true";
     },
     { timeout: 120000, signal, what: "图片上传完成" },
   );
-  await copSleep(800);
+  await copSleep(expected ? 1500 : 600); // 多等一会儿，让图片真正传完再发
 }
 
 function copClickSend() {
@@ -241,10 +270,17 @@ async function copWaitUserSend(base, signal) {
 }
 
 /** 等这一轮回复结束：出图（返回 img），或者没出图（被拒 / 只回了文字） */
-async function copWaitResult(base, signal) {
-  const turn = await copWait(() => copNewTurn(base), { timeout: 60000, signal, what: "Copilot 开始回复" });
+// Copilot 先回一句话、再花几十秒画图；看视频、网络慢时更久。没图时要等够久才算“没出图”（Lee 2026-10-11 第 5 条）
+const COP_QUIET_MS = 45000;
+const COP_SAYS_DONE = /已经生成|已生成|生成好了|生成了|这是.*图|here (is|are)|here's|i('ve| have) (created|generated|made)/i;
+/**
+ * 等这一轮回复结束：出图（返回 img），或者没出图（被拒 / 只回了文字）。
+ * since：从哪次发送开始算“新图”（催一次以后，第一次发送后出来的图也算，Lee 第 3 条：图出来了插件还去催）
+ */
+async function copWaitResult(base, signal, since = base) {
+  const turn = await copWait(() => copNewTurn(base), { timeout: 90000, signal, what: "Copilot 开始回复" });
   const t0 = Date.now();
-  let quietSince = 0;
+  let quietSince = Date.now();
   let lastText = "";
   for (;;) {
     if (signal && signal.aborted) throw new Error("已停止");
@@ -253,25 +289,24 @@ async function copWaitResult(base, signal) {
     const t = copNewTurn(base) || turn;
     const reply = COP.reply(t);
     const text = reply ? (reply.innerText || "").trim() : "";
-    const imgs = reply ? COP.images(reply) : [];
-    const img = imgs.find((i) => i.complete && i.naturalWidth >= 200);
+    const fresh = copGenImages().filter((i) => !since.imgs.has(i));
+    const img = fresh[fresh.length - 1];
     const busy = copBusy(reply) || (!img && copDesignerBusy());
     if (img && !busy) {
-      await copSleep(800);
+      await copSleep(1200);
       return { img, text };
     }
-    // 回复不再忙、也没有图、文字 10 秒没变：算没出图（Copilot 生图前会先回一句话，所以多等一会）
-    if (reply && !busy && !img && text) {
-      if (text !== lastText) { lastText = text; quietSince = Date.now(); }
-      if (Date.now() - quietSince > 10000) return { refused: true, text };
-    } else {
-      quietSince = 0;
-      lastText = text;
-    }
-    if (Date.now() - t0 > 300000) throw new Error("等待超时：Copilot 出图（5 分钟）");
+    if (text !== lastText || busy) { lastText = text; quietSince = Date.now(); }
+    // 不忙、没图、文字很久没变才算没出图；回复里说“已经生成了”就再多等一会儿
+    const quietBase = Number(document.documentElement.dataset.aitutuTestQuiet) || COP_QUIET_MS; // data-aitutu-test-quiet 只给自动测试用
+    const quietNeed = COP_SAYS_DONE.test(text) ? quietBase * 2 : quietBase;
+    if (reply && !busy && text && Date.now() - quietSince > quietNeed) return { refused: true, text };
+    if (Date.now() - t0 > 360000) throw new Error("等待超时：Copilot 出图（6 分钟）");
     await copSleep(500);
   }
 }
+/** 当前对话里所有生成的图（“取当前会话的图”用） */
+const copChatImages = () => copGenImages();
 
 const copGrabImage = (img) => siteGrabImage(img, (src) => [src], "Copilot");
 
@@ -361,6 +396,8 @@ const AITUTU_SITE = {
   waitResult: copWaitResult,
   grabImage: copGrabImage,
   limitRe: COP_LIMIT_RE,
+  verifySent: copVerifySent,
+  chatImages: copChatImages,
   listChats: copListChats,
   deleteChat: copDeleteChat,
   // 回的是生图参数文字（如 {"orientation":"square"}）而不是图：催一次

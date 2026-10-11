@@ -201,11 +201,22 @@ async function prepareInput(f) {
   const { w, h } = inputSize(f);
   let base;
   if (!f.crop) {
-    base = { dataUrl: f.dataUrl, base64: f.base64, w: f.w, h: f.h, bytes: f.size, name: f.name };
+    // base64 可能没有（刷新后从插件后台恢复的图只存了 dataUrl）
+    base = { dataUrl: f.dataUrl, base64: f.base64 || f.dataUrl.split(",")[1], w: f.w, h: f.h, bytes: f.size, name: f.name };
   } else {
     const c = document.createElement("canvas");
     c.width = w; c.height = h;
-    c.getContext("2d").drawImage(img, ox, oy, w, h, 0, 0, w, h);
+    const cg = c.getContext("2d");
+    cg.drawImage(img, ox, oy, w, h, 0, 0, w, h);
+    // 自由框选（任意形状）：框外面的部分涂成白色，只把圈出来的商品交给 AI
+    if (f.lasso && f.lasso.length > 2) {
+      cg.fillStyle = "#ffffff";
+      cg.beginPath();
+      cg.rect(0, 0, w, h);
+      f.lasso.forEach((pt, i) => (i ? cg.lineTo : cg.moveTo).call(cg, pt.x * f.w - ox, pt.y * f.h - oy));
+      cg.closePath();
+      cg.fill("evenodd");
+    }
     const blob = await canvasToBlob(c, "image/jpeg", 0.95);
     base = { dataUrl: URL.createObjectURL(blob), base64: await blobToBase64(blob), w, h, bytes: blob.size, name: f.name.replace(/\.[^.]+$/, "") + ".jpg", cropped: true };
   }
