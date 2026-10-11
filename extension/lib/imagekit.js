@@ -44,6 +44,7 @@ const T = {
     call: (r, paths) => `Immediately call invoke_subagent with subagent type image-generator (state this type explicitly in the parameters) and have it call generate_image exactly once to produce exactly one image, with parameters: ImageName: "refined"; AspectRatio: "${r}"; ImagePaths: ${paths}; Prompt: the English description you write after viewing the image (put it in your instructions to the subagent and have it use it verbatim). After delegating, just wait for it to finish: you may use manage_task to check progress; do nothing else.`,
     parts: (n, d, note) => `The ${n} area${n > 1 ? "s" : ""} marked with red numbered boxes in the annotation image ${n > 1 ? "are" : "is"} product accessor${n > 1 ? "ies" : "y"}, not stains or clutter, and must be fully preserved with the same shape, count and relative position.${d ? " The close-up images show their details." : ""} The red boxes and numbers are only markers; never draw them in the output.${note ? ` Accessory note (Chinese; translate faithfully): ${note}` : ""}`,
     partsNoteOnly: (note) => `Accessory note (Chinese; translate faithfully): ${note}. These accessories must be fully preserved; they are not clutter.`,
+    partsAt: (list, note) => `The following area${list.length > 1 ? "s" : ""} of the uploaded image contain${list.length > 1 ? "" : "s a"} product accessor${list.length > 1 ? "ies" : "y"}, not stains or clutter, and must be fully preserved with the same shape, count and relative position: ${list.map((p, i) => `${i + 1}) from ${p.l}% to ${p.r}% from the left and ${p.t}% to ${p.b}% from the top`).join("; ")}.${note ? ` Accessory note (Chinese; translate faithfully): ${note}` : ""}`,
     partsDefault: "All parts, accessories and cables in the reference are part of the product, not clutter; keep them all.",
     colors: (list) => ` Color lock (sampled from the reference image): ${list.map((c, i) => `${i + 1}) ${c.hex} at about ${c.px}% from the left and ${c.py}% from the top${c.note ? ` (${c.note})` : ""}`).join("; ")}. These areas must keep exactly these colors.`,
     none: "none",
@@ -195,7 +196,7 @@ const MAX_DETAILS = 4;
  *  - 标注图：同一张图，配件用红框 + 编号标出来（长边最多 1600）；
  *  - 配件特写：每个配件周围放大裁一张（最多 4 张，最大的优先）。
  */
-async function prepareInput(f) {
+async function prepareInput(f, opts = {}) {
   const img = await loadImage(f.dataUrl);
   const ox = f.crop ? Math.round(f.crop.x * f.w) : 0, oy = f.crop ? Math.round(f.crop.y * f.h) : 0;
   const { w, h } = inputSize(f);
@@ -224,7 +225,8 @@ async function prepareInput(f) {
   const parts = partsInInput(f);
   base.partCount = parts.length;
   base.detailCount = 0;
-  if (!parts.length) return base;
+  // single：只交一张图给 AI（插件用），配件位置由 buildWebPrompt 写进提示词，不生成标注图和特写
+  if (!parts.length || opts.single) return base;
 
   // 标注图
   const k = Math.min(1, 1600 / Math.max(w, h));
@@ -615,10 +617,15 @@ async function composeOutput(img, o) {
  */
 function buildWebPrompt(s, f, aiRatio, opts = {}) {
   const L = T.en;
-  const nParts = partsInInput(f).length;
-  const nDetails = Math.min(nParts, MAX_DETAILS);
+  const inParts = partsInInput(f);
+  // 插件只发一张图：配件不再单独发标注图 / 特写，按位置（百分比）写进提示词
+  const nParts = 0;
+  const nDetails = 0;
   const note = (f.partsNote || "").trim();
-  const parts = nParts ? L.parts(nParts, nDetails, note) : note ? L.partsNoteOnly(note) : L.partsDefault;
+  const { w: IW, h: IH } = inputSize(f);
+  const pct = (v, total) => Math.max(0, Math.min(100, Math.round((v / total) * 100)));
+  const at = inParts.map((p) => ({ l: pct(p.x, IW), r: pct(p.x + p.w, IW), t: pct(p.y, IH), b: pct(p.y + p.h, IH) }));
+  const parts = at.length ? L.partsAt(at, note) : note ? L.partsNoteOnly(note) : L.partsDefault;
   const colors = colorsInInput(f);
   let compose = L.compose(aiRatio, s.fill);
   let background = L.background[s.background];

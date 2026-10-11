@@ -9,7 +9,7 @@
 (() => {
   if (window.__aitutuPanel) return;
   window.__aitutuPanel = true;
-  const VERSION = "0.5.1";
+  const VERSION = "0.5.2";
   const SITE = AITUTU_SITE; // gemini.js 或 copilot.js 提供
   const AI = SITE.name;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -135,7 +135,8 @@
   .stage.painting .sel { pointer-events: none; }
   .lasso { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .lasso path { fill: rgba(0,0,0,.45); }
-  .lasso polygon { fill: none; stroke: #22c55e; stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .lasso polygon, .lasso polyline { fill: none; stroke: #22c55e; stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+  .lasso polyline { stroke: rgba(34,197,94,.85); stroke-width: 6; }
   .sel.withLasso { box-shadow: none; border-style: dashed; border-color: rgba(34,197,94,.6); }
   .sel .h { position: absolute; width: 14px; height: 14px; background: #fff; border: 2px solid #22c55e; border-radius: 3px; }
   .h.nw { left: -8px; top: -8px; cursor: nwse-resize; } .h.ne { right: -8px; top: -8px; cursor: nesw-resize; }
@@ -258,11 +259,11 @@
   <div class="row">
     <div class="seg" id="tools"><button data-tool="crop" class="active">框选商品</button><button data-tool="lasso">自由框选</button><button data-tool="brush">画笔标注配件</button><button data-tool="eraser">橡皮擦</button><button data-tool="picker">吸管取色</button></div>
     <span class="muted">粗细</span><input type="range" id="brush" min="4" max="80" value="20" style="width:90px">
-    <button id="markClear">清除标注</button>
+    <button id="markClear" title="清除当前工具画的内容（框选 / 自由框选 / 画笔标注 / 取色）">清除标注</button><button id="markClearAll" title="清除这张图的框选、自由框选、画笔标注和取色">全部清除</button>
   </div>
   <div class="muted" id="toolHint"></div>
   <div class="stage" id="stage"><img id="mImg" draggable="false"><canvas class="mark" id="markCv"></canvas><div class="picks" id="picks"></div>
-    <svg class="lasso" id="lassoSvg" viewBox="0 0 100 100" preserveAspectRatio="none" hidden><path id="lassoMask" fill-rule="evenodd"></path><polygon id="lassoPoly"></polygon></svg>
+    <svg class="lasso" id="lassoSvg" viewBox="0 0 100 100" preserveAspectRatio="none" hidden><path id="lassoMask" fill-rule="evenodd"></path><polygon id="lassoPoly"></polygon><polyline id="lassoLine"></polyline></svg>
     <div class="sel" id="sel" hidden><span class="h nw" data-h="nw"></span><span class="h ne" data-h="ne"></span><span class="h sw" data-h="sw"></span><span class="h se" data-h="se"></span></div></div>
   <input id="partsNote" placeholder="配件说明（选填）：例如“右边两个白色插头是配件，必须保留”" style="border:1px solid #e4e4e7;border-radius:9px;padding:6px 8px;font:inherit">
   <div class="colors" id="colors"></div>
@@ -476,8 +477,8 @@
   const edFile = () => files[edIndex];
   const TOOL_HINT = {
     crop: "按住拖出一个框，把商品框进去（四周留一点空）。拖框内部移动，拖四个角调大小。",
-    lasso: "按住鼠标沿着商品外面画一圈（任意形状），松开自动闭合；圈外面的部分不交给 AI。再画一次就重新圈。",
-    brush: `在容易被当成杂物的小配件上涂抹，连在一起的算一个配件；会把标注图和配件特写一起交给 ${AI}。`,
+    lasso: "像画笔一样按住鼠标沿着商品外面画一圈（任意形状），松开自动闭合；只把圈里面的内容交给 AI，圈外面涂白。再画一次就重新圈。",
+    brush: `在容易被当成杂物的小配件上涂抹，连在一起的算一个配件；只发一张图给 ${AI}，配件的位置写在提示词里。`,
     eraser: "擦掉涂错的地方。",
     picker: "在产品上点一下取色号，要求这个部位保持这个颜色（最多 8 个）。",
   };
@@ -531,8 +532,16 @@
     $("lassoSvg").hidden = !edLasso;
     if (edLasso) {
       const pts = edLasso.map((p) => `${(p.x * 100).toFixed(2)},${(p.y * 100).toFixed(2)}`);
-      $("lassoPoly").setAttribute("points", pts.join(" "));
-      $("lassoMask").setAttribute("d", `M0,0H100V100H0Z M${pts.join(" L")} Z`);
+      const drawing = drag && drag.mode === "lasso";
+      // 画的时候像画笔一样显示一条粗线；松开后闭合成圈，圈外变暗
+      $("lassoLine").setAttribute("points", drawing ? pts.join(" ") : "");
+      $("lassoPoly").setAttribute("points", drawing ? "" : pts.join(" "));
+      $("lassoMask").setAttribute("d", drawing ? "" : `M0,0H100V100H0Z M${pts.join(" L")} Z`);
+    }
+    if (edLasso) {
+      $("sel").hidden = true; // 自由框选不显示方框
+      $("mInfo").textContent = (edRect ? `自由框选 ${Math.round(edRect.w * f.w)}×${Math.round(edRect.h * f.h)}（只发圈里的内容）` : "正在画…") + extra;
+      return;
     }
     if (!edRect) { $("sel").hidden = true; $("mInfo").textContent = `未框选：整张图交给 ${AI}` + extra; return; }
     const sel = $("sel");
@@ -675,7 +684,17 @@
     files.forEach((f) => { f.crop = { ...edRect }; f.lasso = edLasso ? edLasso.map((q) => ({ ...q })) : null; });
     toast(`框选已应用到全部 ${files.length} 张`);
   });
-  $("markClear").addEventListener("click", () => { const f = edFile(); f.mask = null; f.parts = []; drawMark(); drawSel(); });
+  // 清除标注：只清当前工具画的内容；全部清除：这张图的框选、自由框选、画笔标注、取色都清掉
+  function clearMarks(kind) {
+    const f = edFile();
+    if (kind === "all" || kind === "crop") { if (!edLasso) edRect = null; }
+    if (kind === "all" || kind === "lasso") { if (edLasso) edRect = null; edLasso = null; }
+    if (kind === "all" || kind === "brush" || kind === "eraser") { f.mask = null; f.parts = []; drawMark(); }
+    if (kind === "all" || kind === "picker") { f.colors = []; renderPicks(); }
+    drawSel();
+  }
+  $("markClear").addEventListener("click", () => clearMarks(tool));
+  $("markClearAll").addEventListener("click", () => clearMarks("all"));
   $("mRemove").addEventListener("click", () => {
     const f = edFile();
     files = files.filter((x) => x !== f);
@@ -896,7 +915,7 @@
     renderJobs();
     await waitVisible(signal);
     // 1. 准备图片（框选、标注图、特写）
-    const input = await prepareInput(j.file);
+    const input = await prepareInput(j.file, { single: true }); // 只发一张图（配件位置写进提示词）
     j.inputW = input.w; j.inputH = input.h;
     j.inputUrl = input.cropped ? input.dataUrl : null;
     j.partCount = input.partCount;
