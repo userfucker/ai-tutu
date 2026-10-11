@@ -9,7 +9,7 @@
 (() => {
   if (window.__aitutuPanel) return;
   window.__aitutuPanel = true;
-  const VERSION = "0.5.0";
+  const VERSION = "0.5.1";
   const SITE = AITUTU_SITE; // gemini.js 或 copilot.js 提供
   const AI = SITE.name;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1250,4 +1250,26 @@
   renderThumbs();
   renderJobs();
   restoreTab();
+  // ------------------------------------------------------------ 淘宝采集插件发来的图（0.5.1，Lee 2026-10-11）
+  // 后台（background.js）收到淘宝插件的图片后转到这里，跟拖进来的图一样走 addFiles。
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (!msg || msg.type !== "aitutu-import-files" || !Array.isArray(msg.images)) return false;
+    (async () => {
+      for (let i = 0; i < 50 && restoring; i++) await sleep(200); // 等刷新后的恢复做完，免得编号冲突
+      const list = msg.images.map((im) => {
+        const bin = atob(im.b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return new File([bytes], im.name || "淘宝图片.jpg", { type: im.mime || "image/jpeg" });
+      });
+      const before = files.length;
+      await addFiles(list);
+      if ($("wrap").classList.contains("closed")) $("handle").click(); // 面板收起着就展开
+      const added = files.length - before;
+      toast(`收到淘宝插件发来的 ${added} 张图片`);
+      sendResponse({ ok: true, added });
+    })().catch((e) => sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }));
+    return true;
+  });
+  try { chrome.runtime.sendMessage({ type: "aitutu-wt-hello" }, () => void chrome.runtime.lastError); } catch {}
 })();
