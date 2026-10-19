@@ -2,3 +2,5 @@ node_modules/
 tools/*/runs/
 *.zip
 .DS_Store
+tests/studio/out/
+tests/studio/out2/

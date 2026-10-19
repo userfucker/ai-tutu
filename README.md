@@ -11,6 +11,8 @@
 | --- | --- |
 | `docs/` | 项目记忆、设计文档 |
 | `tools/agy-refine-test/` | 测试程序：一键智能产品精修（agy 生图），见里面的《使用说明.md》 |
-| `extension/` | 浏览器插件：在 Gemini 网页版里批量抠白底图 / 精修（半自动），见里面的《使用说明.md》 |
+| `extension/` | 浏览器插件：在 Gemini / Copilot 网页版里批量抠白底图 / 精修（半自动）；**详情页工作室**（产品图 + AI 背景 + 自动排版，多语言多平台），见里面的《使用说明.md》 |
+| `tests/studio/` | 详情页工作室的自动测试（模拟 Gemini 页面 + Playwright）：`node tests/studio/e2e.mjs`、`node tests/studio/e2e2.mjs` |
+| `tools/studio-fonts.mjs` | 从 @fontsource 包生成工作室用的字体文件 |
 | `extension-probe/` | Gemini 页面探测插件（开发插件时收集页面结构用） |
 | `extension-probe-copilot/` | Copilot 页面探测插件（准备做 Copilot 版） |

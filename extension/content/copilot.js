@@ -305,6 +305,27 @@ async function copWaitResult(base, signal, since = base) {
     await copSleep(500);
   }
 }
+/** 等一轮“文字回复”结束（详情页工作室用）：不忙、文字 3 秒没变 */
+async function copWaitText(base, signal) {
+  await copWait(() => copNewTurn(base), { timeout: 90000, signal, what: "Copilot 开始回复" });
+  const t0 = Date.now();
+  let last = "", since = Date.now();
+  for (;;) {
+    if (signal && signal.aborted) throw new Error("已停止");
+    const alert = copPageAlert();
+    if (alert) return { alert };
+    const t = copNewTurn(base);
+    const reply = t ? COP.reply(t) : null;
+    const text = reply ? (reply.innerText || "").trim() : "";
+    if (!reply || copBusy(reply) || text !== last) { last = text; since = Date.now(); }
+    else if (text && Date.now() - since > 3000) {
+      const codes = [...reply.querySelectorAll("pre, code")].map((c) => c.textContent || "").filter((x) => x.trim());
+      return { text, codes };
+    }
+    if (Date.now() - t0 > 300000) throw new Error("等待超时：Copilot 回复文字（5 分钟）");
+    await copSleep(400);
+  }
+}
 /** 当前对话里所有生成的图（“取当前会话的图”用） */
 const copChatImages = () => copGenImages();
 
@@ -394,6 +415,7 @@ const AITUTU_SITE = {
   clickSend: copClickSend,
   waitUserSend: copWaitUserSend,
   waitResult: copWaitResult,
+  waitText: copWaitText,
   grabImage: copGrabImage,
   limitRe: COP_LIMIT_RE,
   verifySent: copVerifySent,

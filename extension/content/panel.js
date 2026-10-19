@@ -9,7 +9,7 @@
 (() => {
   if (window.__aitutuPanel) return;
   window.__aitutuPanel = true;
-  const VERSION = "0.6.0";
+  const VERSION = "0.7.0";
   const SITE = AITUTU_SITE; // gemini.js 或 copilot.js 提供
   const AI = SITE.name;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -173,6 +173,7 @@
   <div class="panel">
     <div class="card">
       <div class="row"><h2>AI图图 · 电商作图 · ${AI}</h2><span class="muted" style="margin-left:auto">v${VERSION}</span></div>
+      <div class="row" style="margin-top:6px"><button id="studioBtn" title="在新标签页打开详情页工作室；勾选的结果（没勾就用产品图）会自动带过去当素材">做详情页 ↗</button><span class="muted">产品图 + AI 背景 + 自动排版，出整套详情页</span></div>
     </div>
 
     <div class="card">
@@ -1224,6 +1225,7 @@
 
   async function startBatch(list) {
     if (running) return;
+    if (window.__aitutuStudioBusy && window.__aitutuStudioBusy()) { setStatus("详情页工作室正在用这个页面做图，等它这一张做完再开始。", "warn"); return; }
     readSettings();
     saveSettings();
     if (!SITE.input()) { setStatus(`没找到 ${AI} 输入框：请先打开 ${SITE.home} 的对话页面。`, "bad"); return; }
@@ -1498,6 +1500,26 @@
   renderThumbs();
   renderJobs();
   restoreTab();
+  // ------------------------------------------------------------ 详情页工作室（0.7.0，Lee 2026-10-19）
+  window.__aitutuPanelBusy = () => running;
+  $("studioBtn").addEventListener("click", async () => {
+    const btn = $("studioBtn");
+    btn.disabled = true;
+    try {
+      const chosen = jobs.filter((j) => sel.has(j.id) && j.outBlob);
+      const images = [];
+      const toB64 = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.readAsDataURL(blob); });
+      if (chosen.length) {
+        for (const j of chosen) images.push({ b64: await toB64(j.outBlob), mime: j.outBlob.type || "image/jpeg", name: outName(j) });
+      } else {
+        for (const f of files) images.push({ b64: f.base64 || String(f.dataUrl || "").split(",")[1], mime: f.type || "image/jpeg", name: f.name });
+      }
+      chrome.runtime.sendMessage({ type: "aitutu-open-studio", images: images.filter((x) => x.b64) }, () => void chrome.runtime.lastError);
+      toast(images.length ? `已打开详情页工作室，带过去 ${images.length} 张图` : "已打开详情页工作室");
+    } finally {
+      btn.disabled = false;
+    }
+  });
   // ------------------------------------------------------------ 淘宝采集插件发来的图（0.5.1，Lee 2026-10-11）
   // 后台（background.js）收到淘宝插件的图片后转到这里，跟拖进来的图一样走 addFiles。
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

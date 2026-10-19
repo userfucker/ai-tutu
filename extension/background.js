@@ -111,3 +111,43 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
   wtDeliver(msg).then(sendResponse, (e) => sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }));
   return true;
 });
+
+// ------------------------------------------------------------ 详情页工作室（0.7.0，Lee 2026-10-19）
+// 面板上点“做详情页”：把图先存起来，打开工作室页面，工作室加载后来取。点工具栏上的插件图标也能打开。
+const STUDIO_URL = chrome.runtime.getURL("studio/studio.html");
+async function openStudio(hash) {
+  // 工作室已经开着：让它自己报标签页编号（这样不用申请“读取所有标签页”的权限）
+  const here = await new Promise((res) => {
+    try { chrome.runtime.sendMessage({ type: "aitutu-studio-where", pending: !!hash }, (r) => { void chrome.runtime.lastError; res(r && r.tabId ? r : null); }); } catch { res(null); }
+  });
+  if (here) {
+    await chrome.tabs.update(here.tabId, { active: true });
+    try { await chrome.windows.update(here.windowId, { focused: true }); } catch {}
+    return;
+  }
+  await chrome.tabs.create({ url: STUDIO_URL + (hash ? "#" + hash : "") });
+}
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (!msg) return false;
+  if (msg.type === "aitutu-open-studio") {
+    (async () => {
+      if (Array.isArray(msg.images) && msg.images.length) {
+        const old = (await tabStore("readonly", (s) => s.get("studio-pending"))) || [];
+        await tabStore("readwrite", (s) => s.put([...old, ...msg.images], "studio-pending"));
+      }
+      await openStudio(msg.images && msg.images.length ? "import" : "");
+      sendResponse({ ok: true });
+    })().catch((e) => sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }));
+    return true;
+  }
+  if (msg.type === "aitutu-studio-take-pending") {
+    (async () => {
+      const list = (await tabStore("readonly", (s) => s.get("studio-pending"))) || [];
+      await tabStore("readwrite", (s) => s.delete("studio-pending"));
+      sendResponse({ ok: true, images: list });
+    })().catch((e) => sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }));
+    return true;
+  }
+  return false;
+});
+chrome.action.onClicked.addListener(() => { openStudio("").catch(() => {}); });

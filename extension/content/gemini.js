@@ -240,6 +240,32 @@ async function gemWaitResult(base, signal) {
   }
 }
 
+/**
+ * 等一轮“文字回复”结束（详情页工作室用：写文案、列提纲、翻译）。
+ * 不在生成中、文字 2 秒没变，就算回复完了。codes = 回复里代码块的原文（JSON 一般在代码块里）。
+ */
+async function gemWaitText(base, signal) {
+  await gemWait(() => GEM.responses().length > base || gemIsStop(), { timeout: 60000, signal, what: "Gemini 开始回复" });
+  const t0 = Date.now();
+  let last = "", since = Date.now();
+  for (;;) {
+    if (signal && signal.aborted) throw new Error("已停止");
+    const alert = gemPageAlert();
+    if (alert) return { alert };
+    const list = GEM.responses();
+    const el = list[list.length - 1];
+    const box = el ? el.querySelector("message-content") || el : null;
+    const text = box ? (box.innerText || "").trim() : "";
+    if (gemIsStop() || text !== last || list.length <= base) { last = text; since = Date.now(); }
+    else if (text && Date.now() - since > 2000) {
+      const codes = [...box.querySelectorAll("pre, code-block code, code")].map((c) => c.textContent || "").filter((t) => t.trim());
+      return { text, codes };
+    }
+    if (Date.now() - t0 > 300000) throw new Error("等待超时：Gemini 回复文字（5 分钟）");
+    await gemSleep(400);
+  }
+}
+
 /** googleusercontent 的图地址结尾带尺寸参数（如 =s1024-rj），先试 =s0（原始尺寸），不行再用页面上的地址 */
 function gemFullSizeUrls(src) {
   const list = [];
@@ -314,6 +340,7 @@ const AITUTU_SITE = {
   clickSend: gemClickSend,
   waitUserSend: gemWaitUserSend,
   waitResult: gemWaitResult,
+  waitText: gemWaitText,
   grabImage: gemGrabImage,
   limitRe: GEM_LIMIT_RE,
   listChats: gemListChats,

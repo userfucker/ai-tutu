@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Gemini（模拟）</title>
+<style>body{font:14px sans-serif;margin:0;padding:10px} model-response{display:block;border:1px solid #ccc;margin:6px 0;padding:6px} generated-image img{max-width:200px} uploader-file-preview{display:inline-block;border:1px solid #999;padding:2px 6px;margin:2px}</style>
+</head>
+<body>
+<!-- 测试用的模拟 Gemini 页面：选择器和 content/gemini.js 里的 GEM 一致 -->
+<nav><a href="/app" id="newChat">发起新对话</a></nav>
+<div id="chat"></div>
+<div class="input-area">
+  <div id="attach"></div>
+  <rich-textarea><div class="ql-editor" contenteditable="true" role="textbox" aria-label="为 Gemini 输入提示"></div></rich-textarea>
+  <div class="send-button-container"><gem-icon-button class="send-button"><button aria-label="发送">发送</button></gem-icon-button></div>
+</div>
+<script>
+(() => {
+  const ed = document.querySelector(".ql-editor");
+  const btn = document.querySelector(".send-button button");
+  const chat = document.getElementById("chat");
+  const attach = document.getElementById("attach");
+  window.__mock = { prompts: [], files: [] };
+  document.getElementById("newChat").addEventListener("click", (e) => { e.preventDefault(); chat.innerHTML = ""; });
+  ed.addEventListener("paste", (e) => {
+    const files = [...(e.clipboardData && e.clipboardData.files) || []];
+    if (files.length) {
+      e.preventDefault();
+      for (const f of files) {
+        const p = document.createElement("uploader-file-preview");
+        p.innerHTML = `<span>${f.name}</span><span class="gem-attachment-close-button"><button aria-label="移除">x</button></span>`;
+        p.querySelector("button").onclick = () => p.remove();
+        p._file = f;
+        attach.appendChild(p);
+      }
+    }
+  });
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  function jsonFor(prompt) {
+    const q = (re) => re.test(prompt);
+    if (q(/规划一套详情页/)) {
+      return { screens: [
+        { template: "hero", purpose: "首屏", title: "通勤出差一包装下", sub: "防泼水面料 · 15.6寸电脑仓", main: 1, items: [{ title: "防泼水" }, { title: "大容量" }, { title: "轻便" }], bg: "soft beige studio, warm light" },
+        { template: "features3", purpose: "三大卖点", title: "三大核心卖点", sub: "", items: [{ title: "电脑独立仓", desc: "15.6寸电脑稳稳放", image: 2, icon: "box" }, { title: "防泼水", desc: "小雨不怕", image: 2, icon: "drop" }, { title: "透气背板", desc: "背久不闷汗", image: 0, icon: "leaf" }], bg: "soft grey" },
+        { template: "callout", purpose: "细节", title: "细节做工", sub: "看得见的品质", main: 1, items: [{ title: "加厚拉链", desc: "顺滑耐用", image: 2 }, { title: "加厚肩带", desc: "不勒肩", image: 2 }], bg: "clean" },
+        { template: "scene", purpose: "场景", title: "出差也轻松", sub: "机场、高铁都合适", main: 1, bg: "airport lounge, morning light" },
+        { template: "colors", purpose: "颜色", title: "颜色可选", items: [{ title: "灰色", image: 3 }], bg: "" },
+        { template: "params", purpose: "参数", title: "产品参数", main: 1, bg: "" },
+        { template: "size", purpose: "尺寸", title: "产品尺寸", note: "手工测量，有 1～2 cm 误差", main: 1, bg: "" },
+        { template: "service", purpose: "保障", title: "购物保障", items: [{ title: "品质保障", desc: "严格质检", icon: "shield" }, { title: "最快发货", desc: "当天发出", icon: "truck" }], bg: "" },
+      ] };
+    }
+    if (q(/按屏切开的参考图/)) {
+      const m = /这 (\d+) 张图/.exec(prompt), from = +(/第 (\d+)～/.exec(prompt) || [0, 1])[1];
+      const ids = ["hero", "features3", "scene", "params", "service"];
+      return { screens: Array.from({ length: +m[1] }, (_, i) => ({ i: from + i, purpose: "第" + (from + i) + "屏", template: ids[(from + i - 1) % ids.length], layout: "产品居中", colors: ["#f2ede6", "#222222"], style: "warm beige studio" })) };
+    }
+    if (q(/润色/)) { const n = +(/下面 (\d+) 个卖点/.exec(prompt) || [0, 1])[1]; return { points: Array.from({ length: n }, (_, i) => "润色后卖点" + (i + 1)) }; }
+    if (q(/补充/)) return { points: ["背久不累", "大容量分区收纳", "一秒找到钥匙"] };
+    if (q(/买家评价/)) return { concerns: [{ text: "担心肩带勒肩", count: 5 }, { text: "怕不防水", count: 3 }], points: ["加厚肩带不勒肩"] };
+    if (q(/翻译成/)) {
+      const to = (/翻译成(.+?)，/.exec(prompt) || [])[1] || "?";
+      const line = prompt.split("\n").find((l) => l.trim().startsWith("{"));
+      const src = JSON.parse(line);
+      const t = {};
+      for (const [k, v] of Object.entries(src)) t[k] = to === "Arabic" ? "عربي " + v : `[${to.slice(0, 2).toUpperCase()}] ${v}`;
+      return { t };
+    }
+    if (q(/重写下面这一屏/)) {
+      const line = prompt.split("\n").find((l) => l.trim().startsWith("{"));
+      const cur = JSON.parse(line);
+      for (const k of Object.keys(cur)) if (typeof cur[k] === "string") cur[k] += "（新）";
+      return cur;
+    }
+    return { ok: true };
+  }
+  function makeImage(prompt) {
+    const m = /aspect ratio (\d+):(\d+)/.exec(prompt) || [0, 1, 1];
+    const r = +m[1] / +m[2];
+    const W = r >= 1 ? 1024 : Math.round(1024 * r), H = r >= 1 ? Math.round(1024 / r) : 1024;
+    const c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    const g = c.getContext("2d");
+    if (/isolated on a pure white background/.test(prompt)) {
+      g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H);
+      g.fillStyle = "#2b6cb0"; g.fillRect(W * 0.3, H * 0.15, W * 0.4, H * 0.7);
+    } else {
+      const gr = g.createLinearGradient(0, 0, W, H);
+      gr.addColorStop(0, "#f3e9dc"); gr.addColorStop(1, "#c9b79c");
+      g.fillStyle = gr; g.fillRect(0, 0, W, H);
+      g.fillStyle = "rgba(255,255,255,.35)"; g.beginPath(); g.ellipse(W / 2, H * 0.8, W * 0.35, H * 0.06, 0, 0, 7); g.fill();
+    }
+    return new Promise((res) => c.toBlob((b) => res(URL.createObjectURL(b)), "image/jpeg", 0.9));
+  }
+  btn.addEventListener("click", async () => {
+    if (btn.getAttribute("aria-label") !== "发送") return;
+    const prompt = ed.innerText;
+    const files = [...attach.querySelectorAll("uploader-file-preview")].map((p) => p._file && p._file.name);
+    window.__mock.prompts.push(prompt);
+    window.__mock.files.push(files);
+    ed.innerHTML = "";
+    attach.innerHTML = "";
+    const userMsg = document.createElement("div");
+    userMsg.className = "user";
+    userMsg.textContent = prompt.slice(0, 60);
+    chat.appendChild(userMsg);
+    const resp = document.createElement("model-response");
+    resp.innerHTML = "<message-content></message-content>";
+    chat.appendChild(resp);
+    btn.setAttribute("aria-label", "停止回答");
+    await sleep(500);
+    const mc = resp.querySelector("message-content");
+    if (/JSON/.test(prompt)) {
+      // 像真的 Gemini 一样：说明文字 + 代码块（代码块上面有语言名和“复制”按钮文字）
+      const json = JSON.stringify(jsonFor(prompt), null, 2);
+      mc.innerHTML = `<p>好的，下面是结果：</p><code-block><div class="header">JSON <button>content_copy</button></div><pre><code></code></pre></code-block>`;
+      mc.querySelector("code").textContent = json;
+    } else {
+      const url = await makeImage(prompt);
+      mc.innerHTML = `<generated-image><single-image><img class="loaded"></single-image></generated-image>`;
+      const img = mc.querySelector("img");
+      await new Promise((r) => { img.onload = r; img.src = url; });
+    }
+    await sleep(200);
+    btn.setAttribute("aria-label", "发送");
+  });
+})();
+</script>
+</body>
+</html>
