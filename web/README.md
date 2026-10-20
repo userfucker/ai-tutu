@@ -12,93 +12,106 @@
 插件在“设置 → 连接工作台”里填：工作台的 IP、端口（默认 8766）、插件口令（工作台“AI 连接”页面上能看到）。
 一个插件同时只连一个工作台。
 
-## 部署（OpenWrt 上的 Docker：ubuntu 22.04，x86_64）
+## 部署（OpenWrt 上的 Docker：ubuntu 22.04）
 
-分两边做：**ubuntu 容器里**装和运行工作台；**OpenWrt 上**做端口转发和开机启动。
+实际部署过的环境：OpenWrt（x86_64）上的 docker 容器 `ubuntu22`（bridge 网络，容器 IP 172.17.0.2，只映射了 3000 端口），
+容器里用普通用户 `claudeuser`，已经装好 Node 22、pm2、git、build-essential、python3（同一个容器里还跑着 ai-dkqg、claude-webui）。
 
-### 1. 进容器（在 OpenWrt 上）
+### 1. 拉代码（容器里，claudeuser）
 
 ```bash
-docker ps                          # 找到 ubuntu22 那个容器的名字，下面用 <容器名> 代替
-docker exec -it <容器名> bash
+cd ~ && git clone --depth 1 https://github.com/userfucker/ai-tutu.git
 ```
 
-### 2. 装 Node.js 22、编译工具、pm2（在容器里）
+GitHub 拉不下来：在电脑上下载仓库 zip，传进容器解压成 `~/ai-tutu`。
+
+### 2. 装依赖（容器里）
 
 ```bash
-apt update && apt install -y curl git ca-certificates xz-utils build-essential python3
-# Node 22（用国内镜像下载）
-cd /opt && curl -fLO https://registry.npmmirror.com/-/binary/node/v22.11.0/node-v22.11.0-linux-x64.tar.xz
-tar -xJf node-v22.11.0-linux-x64.tar.xz && ln -sf /opt/node-v22.11.0-linux-x64/bin/* /usr/local/bin/
-node -v                            # 显示 v22.11.0 就对了
+cd ~/ai-tutu/web
 npm config set registry https://registry.npmmirror.com
-npm install -g pm2 && ln -sf /opt/node-v22.11.0-linux-x64/bin/pm2 /usr/local/bin/pm2
-```
-
-### 3. 拉代码、装依赖（在容器里）
-
-```bash
-cd /opt && git clone --depth 1 https://github.com/userfucker/ai-tutu.git
-cd /opt/ai-tutu/web
 npm_config_better_sqlite3_binary_host=https://registry.npmmirror.com/-/binary/better-sqlite3 npm install
 ```
 
-GitHub 拉不下来：在电脑上从 GitHub 下载仓库 zip，传到容器里解压到 `/opt/ai-tutu`。
-`npm install` 下载 better-sqlite3 预编译文件失败时会自己编译（上面装了 build-essential、python3，多等几分钟）。
-字体（`web/fonts`，约 29 MB）在仓库里，不用另外装。
+最后没有红色 `ERR!` 就是装好了（黄色 `WARN` 不要紧）。字体在仓库里（`web/fonts`），不用另外装。
 
-### 4. 启动（在容器里）
+### 3. 启动并保存（容器里）
 
 ```bash
-cd /opt/ai-tutu/web
+cd ~/ai-tutu/web
 pm2 start server/index.js --name aitutu-web
-pm2 save                           # 记住，容器重启后用 pm2 resurrect 恢复
-pm2 logs aitutu-web --lines 20     # 看到“插件口令 xxxxxxxx”就是启动好了，Ctrl+C 退出看日志
+pm2 save
+pm2 logs aitutu-web --lines 20      # 看到“插件口令 xxxxxxxx”就是启动好了，Ctrl+C 退出
+curl -s http://127.0.0.1:8766/api/auth/state    # 返回一行 JSON 就正常
 ```
 
-数据在 `web/data`（数据库、图片、导出的 zip）。端口默认 8766（环境变量 `PORT` 可以改）。
+数据在 `~/ai-tutu/web/data`（数据库、图片、导出的 zip）。端口默认 8766。
 
-### 5. 端口转发 + 开机启动（在 OpenWrt 上）
-
-容器是 bridge 网络、只映射了 3000 端口，所以和 ai-dkqg 一样在 OpenWrt 上用 socat 转发 8766：
+### 4. 端口转发（OpenWrt 上，root）
 
 ```bash
-opkg update && opkg install socat
+IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ubuntu22); echo $IP
+socat TCP-LISTEN:8766,fork,reuseaddr TCP:$IP:8766 &
+curl -s http://127.0.0.1:8766/api/auth/state    # 返回 {"setup":false,...} 就通了
 ```
 
-编辑 `/etc/rc.local`，在 `exit 0` 前面加（把 `<容器名>` 换成你的）：
+### 5. 开机自动启动（OpenWrt 上）
+
+`/etc/rc.local` 的内容（8765 是 ai-dkqg 用的转发，一起写进来）：
 
 ```sh
+#!/bin/sh
+# Put your custom commands here that should be executed once
+# the system init finished.
+ntfs-3g /dev/sdb5 /mnt/sdb5 &
+
+# AI图图 工作台：等 docker 起来 → 启动工作台 → 转发 8766 端口
 (
   sleep 30
-  docker exec -d <容器名> pm2 resurrect
-  IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' <容器名>)
+  docker start ubuntu22
+  sleep 5
+  docker exec -d -u claudeuser ubuntu22 bash -lic "pm2 resurrect"
+  IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ubuntu22)
   socat TCP-LISTEN:8766,fork,reuseaddr TCP:$IP:8766 &
+  socat TCP-LISTEN:8765,fork,reuseaddr TCP:$IP:8765 &
 ) &
+
+exit 0
 ```
 
-第一次不用重启路由器，直接执行一遍：
+`pm2 resurrect` 恢复的是最近一次 `pm2 save` 时的列表，所以 pm2 里加了、删了服务以后都要再 `pm2 save` 一次。
+
+检查（重启路由器 1 分钟后，在 OpenWrt 上）：
 
 ```bash
-IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' <容器名>); echo $IP
-socat TCP-LISTEN:8766,fork,reuseaddr TCP:$IP:8766 &
+docker exec -u claudeuser ubuntu22 bash -lic "pm2 ls"    # ai-dkqg、aitutu-web、claude-webui 都是 online
+ps | grep socat                                          # 8765、8766 都在
 ```
 
-电脑浏览器打开 `http://<路由器 IP>:8766`，第一次进去设置管理员密码。打不开就在 OpenWrt 防火墙里放行 LAN 访问 8766。
+（`bash: cannot set terminal process group`、`no job control in this shell` 这两行提示不影响。）
 
-### 6. 连插件
+### 6. 打开网页、连插件
 
-工作台左边“AI 连接”里有 IP、端口、口令。IP 填 **路由器的 IP**，端口 8766。
-AI图图、淘宝采集、ai-web 三个插件在各自的选项里填上，连上后“AI 连接”页面会显示出来。
+1. 电脑浏览器打开 `http://<路由器 IP>:8766`，第一次进去设置管理员密码。
+2. 左边“AI 连接”里看插件口令。
+3. AI图图（0.8.0 起）、淘宝采集（0.7.0 起）、ai-web 在各自的选项里填：**路由器 IP**、端口 `8766`、口令。
+   ai-web 一次只能连一个服务器：连工作台时 ai-dkqg 会议用不了，开会时改回去。
 
-### 7. 更新
+### 7. 更新（容器里）
 
 ```bash
-docker exec -it <容器名> bash
-cd /opt/ai-tutu && git pull && cd web && npm install && pm2 restart aitutu-web
+cd ~/ai-tutu && git pull && cd web && npm install && pm2 restart aitutu-web
 ```
 
 正在做的竞品分析、详情页全自动，重启后会接着做。
+
+### 出问题时
+
+| 现象 | 看什么 |
+| --- | --- |
+| 网页打不开 | OpenWrt 上 `ps \| grep socat` 有没有 8766；容器里 `pm2 ls` 里 aitutu-web 是不是 online |
+| aitutu-web 不是 online | 容器里 `pm2 logs aitutu-web --lines 50`，把报错发出来 |
+| 重启后容器 IP 变了 | rc.local 每次开机都重新查 IP，不用管；手动转发时用 `echo $IP` 看一下 |
 
 ## 详情页怎么用
 
