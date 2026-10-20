@@ -1,5 +1,6 @@
 /**
- * 详情页工作室 · 主程序：状态、顶部导航、我的项目、设置（AI / 平台 / 违禁词 / 品牌）、弹窗、保存、撤销。
+ * 详情页（网页版）· 主程序：状态、顶部导航、我的项目、设置（平台 / 违禁词 / 品牌）、弹窗、保存、撤销。
+ * 项目和图片存在工作台服务器上；AI 任务交给服务器排队（ai.js）；“一键全自动”在服务器上做（auto.js 是它的页面）。
  * 每一步的页面在 steps.js（①～⑤）、editor.js（⑥）、finish.js（⑦ 和批量）。
  */
 var APP = (globalThis.APP = {
@@ -88,7 +89,10 @@ var APP = (globalThis.APP = {
     if (!APP.project) return Promise.resolve();
     clearTimeout(saveTimer);
     const p = APP.project;
-    const go = () => ST.db.putProject(p).catch((e) => APP.toast("保存失败：" + e.message, true));
+    const go = () => ST.db.putProject(p).catch(async (e) => {
+      APP.toast("保存失败：" + e.message, true);
+      if (e.conflict && APP.project && APP.project.id === p.id) { const q = await ST.db.getProject(p.id); if (q) { APP.project = q; APP.render(); } }
+    });
     if (now) return go();
     saveTimer = setTimeout(go, 600);
     return Promise.resolve();
@@ -100,7 +104,8 @@ var APP = (globalThis.APP = {
     APP.undo = []; APP.redo = [];
     APP.settings.lastProject = id;
     APP.saveSettings();
-    APP.go(step || (p.screens.length ? "edit" : p.assets.length ? "info" : "assets"));
+    if (p.auto && (p.auto.status === "running" || p.auto.status === "exporting")) return APP.go("auto");
+    APP.go(step || (p.auto && p.auto.status === "review" ? "auto" : p.screens.length ? "edit" : p.assets.length ? "info" : "assets"));
   };
 
   // ------------------------------------------------------------ 撤销 / 重做（编辑和提纲用）
@@ -130,7 +135,7 @@ var APP = (globalThis.APP = {
   APP.doRedo = () => { if (!APP.redo.length) return APP.toast("没有可以重做的"); APP.undo.push(snap()); restore(APP.redo.pop()); };
 
   // ------------------------------------------------------------ 导航
-  const STEPS = [["setup", "新建项目"], ["assets", "素材"], ["info", "产品信息"], ["ref", "参考详情图"], ["outline", "提纲"], ["edit", "生成和编辑"], ["export", "检查和导出"]];
+  const STEPS = [["auto", "全自动"], ["setup", "新建项目"], ["assets", "素材"], ["info", "产品信息"], ["ref", "参考详情图"], ["outline", "提纲"], ["edit", "生成和编辑"], ["export", "检查和导出"]];
   APP.STEPS = STEPS;
   APP.go = (step) => {
     APP.step = step;
@@ -140,13 +145,13 @@ var APP = (globalThis.APP = {
   };
   APP.render = () => {
     const p = APP.project;
-    $("steps").innerHTML = p && APP.step !== "home" ? STEPS.map(([id, name], i) => `<button data-go="${id}" class="${APP.step === id ? "on" : ""}"><b>${"①②③④⑤⑥⑦"[i]}</b>${name}</button>`).join("") : "";
+    $("steps").innerHTML = p && APP.step !== "home" ? STEPS.map(([id, name], i) => `<button data-go="${id}" class="${APP.step === id ? "on" : ""}"><b>${i ? "①②③④⑤⑥⑦"[i - 1] : "⚡"}</b>${name}</button>`).join("") : "";
     $("projName").hidden = !p || APP.step === "home";
     if (p && document.activeElement !== $("projName")) $("projName").value = p.name;
     const view = APP.steps[APP.step] || APP.steps.home;
     $("main").className = view.wide ? "wide" : "";
     view.render($("main"));
-    document.title = p && APP.step !== "home" ? `${p.name} · 详情页工作室` : "详情页工作室 · AI图图";
+    document.title = p && APP.step !== "home" ? `${p.name} · 详情页` : "详情页 · AI图图 工作台";
   };
   $("projName").addEventListener("input", () => { if (APP.project) { APP.project.name = $("projName").value || "未命名"; APP.save(); } });
   document.addEventListener("click", (e) => {
@@ -168,26 +173,22 @@ var APP = (globalThis.APP = {
   APP.renderAi = () => {
     const st = ST.AI.status;
     const chip = $("aiChip");
-    const n = ST.AI.queue.length + (ST.AI.current ? 1 : 0);
+    const jobs = ST.AI.running;
     chip.className = "chip " + ({ busy: "busy", ok: "ok", warn: "warn", bad: "bad" }[st.kind] || "");
-    chip.querySelector("span").textContent = n ? `AI 任务 ${n}` : ST.AI.status.kind === "idle" ? `${ST.AI.SITES[ST.AI.S.site].name} 未连接` : `${ST.AI.SITES[ST.AI.S.site].name}`;
+    chip.querySelector("span").textContent = jobs.length ? `AI 任务 ${jobs.length}` : st.kind === "bad" ? "AI 未连接" : "AI";
     chip.title = st.msg;
     const dock = $("aiDock");
     if (dock.hidden) return;
-    const jobs = [...(ST.AI.current ? [ST.AI.current] : []), ...ST.AI.queue];
     const done = (APP.aiHistory || []).slice(-8).reverse();
-    dock.innerHTML = `<div class="dh"><b>AI 任务</b><span class="muted">${esc(ST.AI.SITES[ST.AI.S.site].name)} 网页版</span>
-      <span class="sp row"><button class="sm" data-act="aiFocus">看 AI 窗口</button>${ST.AI.paused ? '<button class="sm blue" data-act="aiResume">继续</button>' : ""}<button class="sm danger" data-act="aiStop" ${jobs.length ? "" : "disabled"}>全部停止</button><button class="sm ghost" data-act="aiDock">✕</button></span></div>
+    dock.innerHTML = `<div class="dh"><b>AI 任务</b><span class="muted">交给连上工作台的插件做</span>
+      <span class="sp row"><button class="sm" data-act="aiFocus">AI 连接</button><button class="sm danger" data-act="aiStop" ${jobs.length ? "" : "disabled"}>全部停止</button><button class="sm ghost" data-act="aiDock">✕</button></span></div>
       <div class="db"><div class="note ${st.kind === "bad" || st.kind === "warn" ? "warn" : ""}">${esc(st.msg)}</div>
       ${jobs.map((j) => `<div class="job ${j.status}"><b>${j.status === "run" ? "进行中" : "排队"}</b> ${esc(j.label)}${j.steps.length ? `<pre>${esc(j.steps.slice(-4).join("\n"))}</pre>` : ""}</div>`).join("")}
       ${done.length ? '<div class="muted">最近完成</div>' + done.map((j) => `<div class="job ${j.status}">${j.status === "ok" ? "✓" : "✕"} ${esc(j.label)}${j.error ? `<pre>${esc(j.error)}</pre>` : ""}</div>`).join("") : ""}
-      </div>`;
+      <div class="muted">所有任务（包括全自动的）在工作台的 <a href="/#/tasks" target="_blank">任务中心</a> 里看。</div></div>`;
   };
   APP.aiHistory = [];
-  let lastCur = null;
   ST.AI.onChange(() => {
-    if (lastCur && lastCur !== ST.AI.current && (lastCur.status === "ok" || lastCur.status === "fail")) APP.aiHistory.push(lastCur);
-    lastCur = ST.AI.current;
     APP.renderAi();
     if (APP.onAiChange) APP.onAiChange();
   });
@@ -199,7 +200,7 @@ var APP = (globalThis.APP = {
   };
   APP.aiImage = async (prompt, images, label) => {
     const r = await ST.AI.run("image", prompt, images || [], { label });
-    return ST.b64ToBlob(r.b64, r.mime || "image/png");
+    return r.blob || ST.b64ToBlob(r.b64, r.mime || "image/png");
   };
 
   // ------------------------------------------------------------ 全局按钮
@@ -216,18 +217,9 @@ var APP = (globalThis.APP = {
   APP.openSettings = async () => {
     const s = APP.settings;
     const html = `
-      <div class="pills" id="setTabs"><span class="pill on" data-tab="ai">AI</span><span class="pill" data-tab="pf">平台尺寸</span><span class="pill" data-tab="ban">违禁词</span><span class="pill" data-tab="brand">品牌</span></div>
-      <div data-pane="ai" style="margin-top:14px">
-        <div class="form">
-          <label class="f">用哪个 AI<select id="sSite"><option value="gemini">Gemini 网页版</option><option value="copilot">Copilot 网页版（只能用谷歌浏览器）</option></select></label>
-          <label class="f">Gemini 模型<select id="sModel"><option value="">不切换（用网页上选的）</option><option value="Flash">Flash</option><option value="Pro">Pro</option></select></label>
-          <label class="f">每个任务间隔（秒，随机）<span class="row nw"><input type="number" id="sGapMin" min="0" max="300" style="width:80px">～<input type="number" id="sGapMax" min="0" max="300" style="width:80px"></span></label>
-          <label class="f">画图失败自动重试（次）<input type="number" id="sRetries" min="0" max="3"></label>
-        </div>
-        <label class="row" style="margin-top:10px"><input type="checkbox" id="sNewChat"> 每个任务开新对话（推荐：免得上一个产品的内容干扰）</label>
-        <div class="note" style="margin-top:10px">工作室会在屏幕右边打开一个单独的 ${"Gemini / Copilot"} 小窗口来干活。做图期间不要最小化、不要完全挡住它（网页在看不见时会暂停）。第一次用请先在那个窗口里登录。</div>
-      </div>
-      <div data-pane="pf" hidden style="margin-top:14px">
+      <div class="pills" id="setTabs"><span class="pill on" data-tab="pf">平台尺寸</span><span class="pill" data-tab="ban">违禁词</span><span class="pill" data-tab="brand">品牌</span></div>
+      <div class="note" style="margin-top:10px">AI 用哪个网站、间隔多久，在工作台的 <a href="/#/connect" target="_blank">AI 连接</a> 里设置。</div>
+      <div data-pane="pf" style="margin-top:14px">
         <div class="note warn">标“待核对”的尺寸是常用值，还没对照平台官方后台核对过。上传前请以平台要求为准，可以在这里改。</div>
         <div style="overflow-x:auto;margin-top:10px"><table class="ptbl"><thead><tr><th>平台</th><th>宽（像素）</th><th>固定高</th><th>切片最高</th><th>单张最大 KB</th><th></th></tr></thead><tbody>
         ${ST.PLATFORMS.map((p0) => { const p = ST.platformOf(null, p0.id); return `<tr data-pf="${p.id}"><td>${esc(p.name)} ${p.verify ? '<span class="tag warn">待核对</span>' : ""}</td><td><input type="number" data-k="w" value="${p.w}"></td><td><input type="number" data-k="h" value="${p.h || ""}" placeholder="长图"></td><td><input type="number" data-k="sliceH" value="${p.sliceH || ""}"></td><td><input type="number" data-k="maxKB" value="${p.maxKB || ""}"></td><td><button class="sm" data-reset="${p.id}">恢复默认</button></td></tr>`; }).join("")}
@@ -244,12 +236,6 @@ var APP = (globalThis.APP = {
     const r = await APP.modal(html, {
       title: "设置", big: true,
       onOpen: (m) => {
-        m.querySelector("#sSite").value = s.site;
-        m.querySelector("#sModel").value = s.model || "";
-        m.querySelector("#sGapMin").value = s.gapMin;
-        m.querySelector("#sGapMax").value = s.gapMax;
-        m.querySelector("#sRetries").value = s.retries;
-        m.querySelector("#sNewChat").checked = !!s.newChat;
         m.querySelector("#sCustom").value = s.custom || "";
         m.querySelector("#setTabs").onclick = (e) => {
           const t = e.target.closest("[data-tab]");
@@ -267,12 +253,6 @@ var APP = (globalThis.APP = {
         APP.renderBrandPane(m.querySelector("#brandPane"));
       },
       check: (v, m) => {
-        s.site = m.querySelector("#sSite").value;
-        s.model = m.querySelector("#sModel").value;
-        s.gapMin = Math.max(0, +m.querySelector("#sGapMin").value || 0);
-        s.gapMax = Math.max(s.gapMin, +m.querySelector("#sGapMax").value || 0);
-        s.retries = ST.clamp(+m.querySelector("#sRetries").value || 0, 0, 3);
-        s.newChat = m.querySelector("#sNewChat").checked;
         s.custom = m.querySelector("#sCustom").value;
         const ov = {};
         m.querySelectorAll("tr[data-pf]").forEach((tr) => {
@@ -360,33 +340,34 @@ var APP = (globalThis.APP = {
   };
 
   // ------------------------------------------------------------ 首页：我的项目
+  APP.AUTO_NAMES = { running: "全自动进行中", exporting: "正在导出", review: "等你审核", approved: "已审核通过", failed: "全自动出错", stopped: "全自动已停止" };
   APP.steps.home = {
     async render(main) {
       const list = await ST.db.listProjects();
-      APP.homeSel = APP.homeSel || new Set();
-      const cards = await Promise.all(list.map(async (p) => {
-        const a = p.assets.find((x) => x.tag === "white") || p.assets[0];
-        const bgKey = (p.screens[0] && p.screens[0].bg && p.screens[0].bg.key) || "";
-        const thumb = (p.thumb && (await ST.urlOf(p.thumb))) || (a ? await ST.urlOf(a.cut || a.key) : bgKey ? await ST.urlOf(bgKey) : "");
+      APP.homeSel = new Set([...(APP.homeSel || [])].filter((id) => list.some((p) => p.id === id)));
+      const cards = list.map((p) => {
+        const thumb = p.thumb || p.firstAsset;
         const pf = ST.platformOf(p, p.platform);
+        const a = p.auto;
         return `<div class="proj"><input type="checkbox" class="ck" data-sel="${p.id}" ${APP.homeSel.has(p.id) ? "checked" : ""}>
-          <div class="thumb" data-act="openProj" data-id="${p.id}" style="background-image:url('${thumb}')"></div>
+          <div class="thumb" data-act="openProj" data-id="${p.id}" style="background-image:url('${thumb ? ST.urlFor(thumb) : ""}')"></div>
           <div class="body"><b title="${esc(p.name)}">${esc(p.name)}</b>
-          <span class="muted">${esc(pf.name)} · ${esc(ST.lang(p.lang).name)}${p.langs.length ? ` +${p.langs.length} 种语言` : ""} · ${p.screens.length} 屏</span>
-          <span class="muted">更新于 ${ST.bj(p.updated)}</span></div>
-          <div class="acts"><button class="sm primary" data-act="openProj" data-id="${p.id}">打开</button><button class="sm" data-act="copyProj" data-id="${p.id}" title="排版、背景、风格都保留，换新产品的素材和文案">复制成新产品</button><button class="sm" data-act="backupProj" data-id="${p.id}">备份</button><button class="sm danger" data-act="delProj" data-id="${p.id}">删除</button></div></div>`;
-      }));
+          <span class="muted">${esc(pf.name)} · ${esc(ST.lang(p.lang).name)}${(p.langs || []).length ? ` +${p.langs.length} 种语言` : ""} · ${p.screens} 屏</span>
+          <span class="muted">更新于 ${ST.bj(p.updated)}</span>
+          ${a ? `<span><span class="astat ${a.status}">${esc(APP.AUTO_NAMES[a.status] || a.status)}</span> <span class="muted">${esc(a.status === "running" ? a.msg || "" : "")}</span></span>` : ""}</div>
+          <div class="acts"><button class="sm primary" data-act="openProj" data-id="${p.id}">打开</button>
+          ${a && (a.status === "running" || a.status === "exporting") ? `<button class="sm" data-act="stopAuto" data-id="${p.id}">停止全自动</button>` : `<button class="sm blue" data-act="startAuto" data-id="${p.id}" title="服务器上自动做完：识别素材、抠图、卖点、提纲、背景、翻译、检查，导出后等你审核">一键全自动</button>`}
+          ${a && a.exportFile ? `<a class="sm btnlink" href="/api/projects/${p.id}/export">下载 zip</a>` : ""}
+          <button class="sm" data-act="copyProj" data-id="${p.id}" title="排版、背景、风格都保留，换新产品的素材和文案">复制成新产品</button><button class="sm danger" data-act="delProj" data-id="${p.id}">删除</button></div></div>`;
+      });
+      const n = APP.homeSel.size;
       main.innerHTML = `
-        <div class="head"><div><h1>我的项目</h1><div class="muted">项目保存在这台电脑的浏览器里；换电脑请用“备份”导出，再“导入备份”。</div></div>
-          <div class="sp"><button data-act="importProj">导入备份</button><button data-act="openMyTpls">我的模板（${APP.mytpls.length}）</button><button class="primary" data-act="newProj">＋ 新建项目</button></div></div>
-        ${list.length ? `<div class="row" style="margin-bottom:10px"><span class="muted">勾选多个项目可以批量处理：</span><button class="sm" data-act="batchRun" ${APP.homeSel.size ? "" : "disabled"}>依次生成缺的背景 + 翻译（${APP.homeSel.size}）</button><button class="sm" data-act="batchExport" ${APP.homeSel.size ? "" : "disabled"}>依次导出</button></div>
-          <div class="projgrid">${cards.join("")}</div>` : `<div class="empty">还没有项目。点右上角“新建项目”开始，或者在 Gemini 页面的 AI图图 面板上点“做详情页”。</div>`}
-        <input type="file" id="importInput" accept=".zip" hidden>`;
-      main.onchange = async (e) => {
+        <div class="head"><div><h1>我的项目</h1><div class="muted">项目存在这台工作台服务器上。“一键全自动”在服务器上做，关掉浏览器也不停，做完等你审核。</div></div>
+          <div class="sp"><button data-act="openMyTpls">我的模板（${APP.mytpls.length}）</button><button data-act="newProj">＋ 手动新建</button><button class="primary" data-act="batchNew">⚡ 一键全自动新建（可以多个）</button></div></div>
+        ${list.length ? `<div class="row" style="margin-bottom:10px"><span class="muted">勾选多个项目批量处理：</span><button class="sm" data-act="batchAuto" ${n ? "" : "disabled"}>一键全自动（${n}）</button><button class="sm" data-act="batchExport" ${n ? "" : "disabled"}>下载导出的 zip（${n}）</button></div>
+          <div class="projgrid">${cards.join("")}</div>` : `<div class="empty">还没有项目。点右上角“一键全自动新建”，把淘宝采集插件导出的 zip（或者一个装着产品图的文件夹）拖进去就行。</div>`}`;
+      main.onchange = (e) => {
         if (e.target.dataset.sel) { e.target.checked ? APP.homeSel.add(e.target.dataset.sel) : APP.homeSel.delete(e.target.dataset.sel); APP.render(); }
-        if (e.target.id === "importInput" && e.target.files[0]) {
-          try { const p = await ST.unpackProject(e.target.files[0]); APP.toast("已导入：" + p.name); APP.render(); } catch (err) { APP.toast(err.message, true); }
-        }
       };
     },
     act: {
@@ -400,12 +381,6 @@ var APP = (globalThis.APP = {
         if (APP.project && APP.project.id === p.id) APP.project = null;
         APP.render();
       },
-      backupProj: async (el) => {
-        const p = await ST.db.getProject(el.dataset.id);
-        APP.toast("正在打包…");
-        APP.download(await ST.packProject(p), `项目备份_${ST.safeName(p.name)}.aitutu.zip`);
-      },
-      importProj: () => document.getElementById("importInput").click(),
       copyProj: async (el) => {
         const src = await ST.db.getProject(el.dataset.id);
         const name = await APP.ask("新项目名称（排版、背景、风格都沿用，素材和文案换成新产品的）", src.name.replace(/（.*?）$/, "") + "（新产品）");
@@ -415,10 +390,59 @@ var APP = (globalThis.APP = {
         APP.project = p;
         APP.go("assets");
       },
+      startAuto: async (el) => { await APP.startAuto(el.dataset.id); APP.render(); },
+      stopAuto: async (el) => { await APP.api("POST", `/api/projects/${el.dataset.id}/auto/stop`); APP.toast("已停止"); APP.render(); },
       openMyTpls: () => APP.openMyTpls(),
-      batchRun: () => APP.batch([...APP.homeSel], "run"),
-      batchExport: () => APP.batch([...APP.homeSel], "export"),
+      batchNew: () => APP.openBatchNew(),
+      batchAuto: async () => {
+        const ids = [...APP.homeSel];
+        if (!(await APP.confirm(`${ids.length} 个项目都开始一键全自动？AI 任务会排队一个一个做，做完的等你审核。`, "开始"))) return;
+        for (const id of ids) await APP.startAuto(id, true).catch((e) => APP.toast(e.message, true));
+        APP.toast(`已开始 ${ids.length} 个`);
+        APP.render();
+      },
+      batchExport: async () => {
+        const list = (await ST.db.listProjects()).filter((p) => APP.homeSel.has(p.id));
+        const ok = list.filter((p) => p.auto && p.auto.exportFile);
+        if (!ok.length) return APP.toast("选中的项目还没有导出的 zip（一键全自动做完才有；手动做的到“⑦ 检查和导出”里导出）", true);
+        for (const p of ok) { const a = document.createElement("a"); a.href = `/api/projects/${p.id}/export`; a.download = ""; document.body.appendChild(a); a.click(); a.remove(); await ST.sleep(800); }
+        if (ok.length < list.length) APP.toast(`${list.length - ok.length} 个还没有导出的 zip，跳过了`, true);
+      },
     },
+  };
+
+  APP.api = async (method, url, body) => {
+    const r = await fetch(url, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined, credentials: "same-origin" });
+    let d = null;
+    try { d = await r.json(); } catch {}
+    if (!r.ok) throw new Error((d && d.error) || `出错了（${r.status}）`);
+    return d;
+  };
+  /** 开始全自动（当前打开的项目先存一下） */
+  APP.startAuto = async (id, quiet) => {
+    if (APP.project && APP.project.id === id) await APP.save(true);
+    await APP.api("POST", `/api/projects/${id}/auto`, {});
+    if (!quiet) APP.toast("已开始一键全自动：在服务器上做，关掉网页也不停");
+  };
+  /** 服务器推送的项目变化 */
+  let evTimer = 0;
+  APP.onProjectEvent = (s) => {
+    if (APP.project && s.id === APP.project.id) {
+      if (s.deleted) { APP.project = null; return APP.go("home"); }
+      // 全自动在做：项目内容由服务器改，跟着刷新
+      const a = s.auto || {};
+      const was = APP.project.auto && APP.project.auto.status;
+      if (a.status === "running" || a.status === "exporting" || (was && was !== a.status) || (APP.step === "auto" && s.rev !== APP.project.rev)) {
+        clearTimeout(evTimer);
+        evTimer = setTimeout(async () => {
+          const p = await ST.db.getProject(s.id);
+          if (!p || !APP.project || APP.project.id !== s.id) return;
+          APP.project = p;
+          if ((a.status === "running" || a.status === "exporting") && APP.step !== "auto") APP.step = "auto";
+          if (APP.step === "auto" || APP.step === "home") APP.render();
+        }, 400);
+      }
+    } else if (APP.step === "home") { clearTimeout(evTimer); evTimer = setTimeout(() => APP.step === "home" && APP.render(), 500); }
   };
 
   /** 复制排版到一个新项目：屏幕结构、背景图、调整、风格保留；素材、产品信息、文案清空 */

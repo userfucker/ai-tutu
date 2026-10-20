@@ -126,3 +126,10 @@ h3 { font-size: 14.5px; margin: 0 0 6px; }
 #modal .mf { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 9px 18px; border-radius: 10px; z-index: 300; max-width: 80vw; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
 #toast.bad { background: var(--bad); }
+
+/* 详情页概况 */
+a.btn { display: inline-block; text-decoration: none; border: 1px solid #d4d6dc; background: #fff; border-radius: 9px; padding: 6px 14px; color: inherit; }
+a.btn.primary { background: var(--ink, #18181b); color: #fff; border-color: transparent; }
+.tbl { width: 100%; border-collapse: collapse; }
+.tbl th, .tbl td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line, #e3e5ea); font-size: 13px; }
+.tbl th { color: var(--sub, #5f6370); font-weight: 500; }

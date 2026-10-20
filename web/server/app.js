@@ -206,6 +206,7 @@ app.get("*", (c) => {
   const p = decodeURIComponent(c.req.path);
   const f = p === "/" ? path.join(PUBLIC_DIR, "index.html") : inside(PUBLIC_DIR, p.slice(1));
   if (f && fs.existsSync(f) && fs.statSync(f).isFile()) return sendFile(c, f);
+  if (f && fs.existsSync(path.join(f, "index.html"))) return p.endsWith("/") ? sendFile(c, path.join(f, "index.html")) : c.redirect(p + "/");
   if (p.startsWith("/api/")) return c.json({ error: "没有这个接口" }, 404);
   return sendFile(c, path.join(PUBLIC_DIR, "index.html"));
 });

@@ -1,5 +1,5 @@
 /**
- * 详情页工作室 · ⑦ 检查和导出，以及首页的批量处理。
+ * 详情页 · ⑦ 检查和导出（在网页里导出，下载到这台电脑）。批量处理改成了首页的“一键全自动”（在服务器上做）。
  */
 (() => {
   const esc = ST.esc;
@@ -35,7 +35,7 @@
         </div>
         <div class="card"><div class="head"><h3>导出</h3></div>
           <div class="row"><label class="row"><input type="checkbox" data-xo="long" ${X.long ? "checked" : ""}> 整张长图</label><label class="row"><input type="checkbox" data-xo="slices" ${X.slices ? "checked" : ""}> 每屏切片（太高的自动切开）</label>
-            <label class="row"><input type="checkbox" data-xo="texts" ${X.texts ? "checked" : ""}> 文案 txt</label><label class="row"><input type="checkbox" data-xo="backup" ${X.backup ? "checked" : ""}> 项目备份（可以导入继续改）</label>
+            <label class="row"><input type="checkbox" data-xo="texts" ${X.texts ? "checked" : ""}> 文案 txt</label>
             <select id="xFormat"><option value="jpeg">JPG</option><option value="png">PNG</option></select></div>
           <div class="note" style="margin-top:10px">zip 里按“平台/语言”分文件夹。JPG 会自动降低质量，直到每张不超过平台的大小限制。导出 ${X.langs.length} 种语言 × ${X.pfs.length} 个平台 × ${p.screens.length} 屏。</div>
           <div class="row" style="margin-top:10px"><button class="primary" data-act="xExport" ${X.exporting || !p.screens.length || !X.langs.length || !X.pfs.length ? "disabled" : ""}>${X.exporting ? "导出中…" : "导出 zip"}</button><span class="muted">${esc(X.msg)}</span></div>
@@ -75,7 +75,7 @@
         const p = P();
         X.exporting = true; X.progress = 0; X.msg = ""; APP.render();
         try {
-          const r = await ST.exportZip(p, { langs: X.langs, platforms: X.pfs, long: X.long, slices: X.slices, texts: X.texts, project: X.backup, format: X.format, brand: APP.brandOf(),
+          const r = await ST.exportZip(p, { langs: X.langs, platforms: X.pfs, long: X.long, slices: X.slices, texts: X.texts, format: X.format, brand: APP.brandOf(),
             onProgress: (msg, v) => { X.msg = msg; X.progress = v; const bar = document.querySelector(".progress i"); if (bar) bar.style.width = Math.round(v * 100) + "%"; const m = document.querySelector('[data-act="xExport"] + .muted'); if (m) m.textContent = msg; } });
           APP.download(r.blob, `详情页_${ST.safeName(p.name, 30)}_${ST.stamp()}.zip`);
           X.msg = `导出完成：${r.count} 个文件${r.notes.length ? `，${r.notes.length} 张超过大小限制（见 zip 里的“注意.txt”）` : ""}`;
@@ -86,35 +86,4 @@
     },
   };
 
-  /** 首页批量：mode = run（生成缺的背景 + 翻译）/ export（按默认设置导出） */
-  APP.batch = async (ids, mode) => {
-    if (!ids.length) return;
-    if (!(await APP.confirm(mode === "run" ? `依次处理 ${ids.length} 个项目：生成缺的 AI 背景、翻译缺的文字。AI 任务比较多，会花一些时间，做的时候别关这个页面。` : `依次导出 ${ids.length} 个项目（所有语言、所有平台，长图 + 切片 + 文案，JPG）。`, "开始"))) return;
-    let n = 0;
-    for (const id of ids) {
-      n++;
-      const p = await ST.db.getProject(id);
-      if (!p) continue;
-      APP.project = p;
-      APP.undo = []; APP.redo = [];
-      APP.toast(`第 ${n}/${ids.length} 个：${p.name}`);
-      try {
-        if (mode === "run") {
-          if (!p.screens.length) { APP.toast(`“${p.name}”还没有屏幕，跳过`, true); continue; }
-          await APP.genAllBg();
-          await APP.translateAll();
-          await APP.save(true);
-        } else {
-          const r = await ST.exportZip(p, { langs: [p.lang, ...p.langs], platforms: p.platforms, long: true, slices: true, texts: true, format: "jpeg", brand: APP.brandOf(p) });
-          APP.download(r.blob, `详情页_${ST.safeName(p.name, 30)}_${ST.stamp()}.zip`);
-        }
-      } catch (e) {
-        APP.toast(`“${p.name}”出错：${e.message}`, true);
-        if (e.result && (e.result.cancelled || e.result.stop)) break;
-      }
-    }
-    APP.project = null;
-    APP.toast("批量处理结束");
-    APP.go("home");
-  };
 })();

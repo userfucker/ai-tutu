@@ -51,12 +51,14 @@ export async function importZip(buf, o = {}) {
   const dj = files.find((f) => /(^|\/)data\.json$/.test(f.name));
   let data = null;
   try { data = dj ? JSON.parse(await dj.blob.text()) : null; } catch {}
-  const root = dj ? dj.name.replace(/data\.json$/, "") : "";
+  // 没有 data.json（自己打包的文件夹）：所有文件都在同一个文件夹里就把它当根目录
+  const top = files.length && files.every((f) => f.name.includes("/") && f.name.split("/")[0] === files[0].name.split("/")[0]) ? files[0].name.split("/")[0] + "/" : "";
+  const root = dj ? dj.name.replace(/data\.json$/, "") : top;
   const rel = (f) => f.name.slice(root.length);
   const imgs = files.filter((f) => f.name.startsWith(root) && ST.isImageName(f.name)).sort((a, b) => a.name.localeCompare(b.name, "zh", { numeric: true }));
   const inDir = (re) => imgs.filter((f) => re.test(rel(f)));
   const title = data && data.item && data.item.title;
-  const p = newProject({ ...o, name: o.name || (title ? title.slice(0, 30) : "") || undefined });
+  const p = newProject({ ...o, name: o.name || (title ? title.slice(0, 30) : "") || (root ? root.replace(/\/$/, "").split("/").pop() : "") || undefined });
   const known = /^(主图|3比4主图|SKU图|我选的图片|详情图[^/]*)\//;
   const main = inDir(/^主图\//), main34 = inDir(/^3比4主图\//), picked = inDir(/^我选的图片\//), sku = inDir(/^SKU图\//);
   const desc = inDir(/^详情图[^/]*\//);

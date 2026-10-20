@@ -229,3 +229,4 @@ input[type=range] { width: 100%; }
 .dropbig.drop-on { border-color: var(--accent); background: var(--accent-soft); }
 .flist { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow: auto; }
 .flist div { display: flex; gap: 8px; align-items: center; }
+.btnlink { display: inline-block; text-decoration: none; border: 1px solid #d4d6dc; background: #fff; border-radius: 7px; padding: 2px 8px; font-size: 12px; color: inherit; }

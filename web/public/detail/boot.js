@@ -1,39 +1,21 @@
 /**
- * 详情页工作室 · 启动：读设置，打开上次的项目，接收面板带过来的图片。
+ * 详情页 · 启动：读设置，打开上次的项目（或者网址里 #p=项目编号 指定的），接收服务器推送的项目变化。
  */
 (async () => {
   await APP.loadSettings();
   APP.renderAi();
 
-  /** 面板上点“做详情页”带过来的图 */
-  async function takePending() {
-    const r = await new Promise((res) => chrome.runtime.sendMessage({ type: "aitutu-studio-take-pending" }, (x) => { void chrome.runtime.lastError; res(x); }));
-    const list = (r && r.images) || [];
-    if (!list.length) return;
-    const files = list.map((im) => new File([ST.b64ToBlob(im.b64, im.mime || "image/jpeg")], im.name || "图片.jpg", { type: im.mime || "image/jpeg" }));
-    if (!APP.project) {
-      APP.project = APP.newProject();
-      await APP.save(true);
-    }
-    const n = await APP.addAssetFiles(files);
-    APP.toast(`收到面板带过来的 ${n} 张图，已加到“② 素材”`);
-    APP.go(APP.project.screens.length ? "assets" : APP.project.assets.length > n ? "assets" : "setup");
-  }
-  chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
-    if (msg && msg.type === "aitutu-studio-where") {
-      chrome.tabs.getCurrent((t) => {
-        sendResponse(t ? { tabId: t.id, windowId: t.windowId } : null);
-        if (t && msg.pending) setTimeout(takePending, 300);
-      });
-      return true;
-    }
-    return false;
-  });
+  // 服务器推送：项目变了（全自动的进度、别处的修改）
+  try {
+    const es = new EventSource("/api/events");
+    es.addEventListener("project", (e) => { try { APP.onProjectEvent(JSON.parse(e.data)); } catch (err) { console.error(err); } });
+  } catch {}
 
+  const m = /#p=([\w-]+)/.exec(location.hash);
+  if (m) { history.replaceState(null, "", location.pathname); return APP.open(m[1]); }
   let step = "home";
   try { step = localStorage.getItem("studioStep") || "home"; } catch {}
-  const last = APP.settings.lastProject && (await ST.db.getProject(APP.settings.lastProject));
-  if (last && step !== "home") { APP.project = last; APP.step = step; APP.render(); }
+  const last = APP.settings.lastProject && step !== "home" && (await ST.db.getProject(APP.settings.lastProject));
+  if (last) APP.open(last.id, step);
   else APP.go("home");
-  if (location.hash === "#import") { history.replaceState(null, "", location.pathname); await takePending(); }
-})().catch((e) => { console.error(e); document.getElementById("main").innerHTML = `<div class="note warn">工作室启动出错：${ST.esc(e.message)}</div>`; });
+})().catch((e) => { console.error(e); document.getElementById("main").innerHTML = `<div class="note warn">详情页启动出错：${ST.esc(e.message)}</div>`; });

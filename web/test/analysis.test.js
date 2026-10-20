@@ -28,7 +28,7 @@ before(async () => {
   let out = "";
   srv.stdout.on("data", (d) => (out += d));
   srv.stderr.on("data", (d) => process.stderr.write(d));
-  for (let i = 0; i < 50 && !/插件口令 (\w+)/.test(out); i++) await sleep(100);
+  for (let i = 0; i < 150 && !/插件口令 (\w+)/.test(out); i++) await sleep(100);
   token = /插件口令 (\w+)/.exec(out)[1];
 });
 after(() => { plugins.forEach((p) => p.close()); srv.kill(); fs.rmSync(dataDir, { recursive: true, force: true }); });
