@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "AI图图 · 电商作图助手（Gemini / Copilot）",
-  "version": "0.7.0",
-  "description": "在 Gemini / Copilot 网页版里批量做抠白底图 / 产品精修，还能做整套详情页（详情页工作室：产品图 + AI 背景 + 自动排版，多语言多平台）。Copilot 请用谷歌浏览器（Edge 不允许插件进 Copilot）。",
+  "version": "0.8.0",
+  "description": "在 Gemini / Copilot 网页版里批量做抠白底图 / 产品精修；也可以连接 AI图图 工作台（网页版），替工作台在 Gemini / Copilot 里写文字、看图、画图。Copilot 请用谷歌浏览器（Edge 不允许插件进 Copilot）。",
   "permissions": [
     "storage",
-    "unlimitedStorage"
+    "alarms"
   ],
   "content_scripts": [
     {
@@ -29,7 +29,7 @@
         "content/common.js",
         "content/gemini.js",
         "content/panel.js",
-        "content/studio-runner.js"
+        "content/workbench-runner.js"
       ],
       "run_at": "document_idle"
     },
@@ -44,7 +44,7 @@
         "content/common.js",
         "content/copilot.js",
         "content/panel.js",
-        "content/studio-runner.js"
+        "content/workbench-runner.js"
       ],
       "run_at": "document_idle"
     }
@@ -63,7 +63,8 @@
     "https://*.bing.com/*",
     "https://*.microsoft.com/*"
   ],
-  "action": {
-    "default_title": "AI图图 · 打开详情页工作室"
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
   }
 }

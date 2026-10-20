@@ -112,42 +112,139 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
-// ------------------------------------------------------------ 详情页工作室（0.7.0，Lee 2026-10-19）
-// 面板上点“做详情页”：把图先存起来，打开工作室页面，工作室加载后来取。点工具栏上的插件图标也能打开。
-const STUDIO_URL = chrome.runtime.getURL("studio/studio.html");
-async function openStudio(hash) {
-  // 工作室已经开着：让它自己报标签页编号（这样不用申请“读取所有标签页”的权限）
-  const here = await new Promise((res) => {
-    try { chrome.runtime.sendMessage({ type: "aitutu-studio-where", pending: !!hash }, (r) => { void chrome.runtime.lastError; res(r && r.tabId ? r : null); }); } catch { res(null); }
-  });
-  if (here) {
-    await chrome.tabs.update(here.tabId, { active: true });
-    try { await chrome.windows.update(here.windowId, { focused: true }); } catch {}
-    return;
-  }
-  await chrome.tabs.create({ url: STUDIO_URL + (hash ? "#" + hash : "") });
+// ------------------------------------------------------------ 连接 AI图图 工作台（网页版，0.8.0，Lee 2026-10-20）
+// 工作台把“写文字 / 看图 / 画图”的任务发过来，这里转给 Gemini / Copilot 页面里的 content/workbench-runner.js 去做。
+// 协议和 ai-web 插件一样（WebSocket：hello / cmd / result / progress），hello 里带 app: "aitutu"。
+// 每个网站用一个单独的窗口（和别的标签页放一起时，切到后台会被浏览器暂停）。在插件“选项”里填工作台 IP、端口、口令。
+const AWB = { ws: null, state: "off", error: "", retry: 0, timer: null, ping: null, tabs: {}, jobs: new Map() };
+const AWB_VERSION = chrome.runtime.getManifest().version;
+async function awbConf() {
+  const v = await chrome.storage.local.get("aitutu_wb");
+  return { enabled: false, host: "", port: 8766, token: "", name: "", ...(v.aitutu_wb || {}) };
 }
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (!msg) return false;
-  if (msg.type === "aitutu-open-studio") {
-    (async () => {
-      if (Array.isArray(msg.images) && msg.images.length) {
-        const old = (await tabStore("readonly", (s) => s.get("studio-pending"))) || [];
-        await tabStore("readwrite", (s) => s.put([...old, ...msg.images], "studio-pending"));
-      }
-      await openStudio(msg.images && msg.images.length ? "import" : "");
-      sendResponse({ ok: true });
-    })().catch((e) => sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }));
-    return true;
+function awbSetState(state, error = "") {
+  AWB.state = state;
+  AWB.error = error;
+  chrome.storage.local.set({ aitutu_wb_state: { state, error, t: Date.now() } });
+}
+const awbSend = (m) => { try { if (AWB.ws && AWB.ws.readyState === 1) AWB.ws.send(JSON.stringify(m)); } catch {} };
+const awbMatch = (site, url) => WT_SITES[site].patterns.some((p) => new RegExp("^" + p.replace(/[.]/g, "\\.").replace(/\*/g, ".*") + "$").test(url || ""));
+async function awbTabOf(site) {
+  const id = AWB.tabs[site];
+  if (!id) return null;
+  const t = await chrome.tabs.get(id).catch(() => null);
+  return t && awbMatch(site, t.url) ? t : null;
+}
+async function awbSites() {
+  const out = [];
+  for (const site of ["gemini", "copilot"]) {
+    const t = await awbTabOf(site);
+    let ready = false;
+    if (t) { const r = await chrome.tabs.sendMessage(t.id, { type: "aitutu-wb-ping" }).catch(() => null); ready = !!(r && r.ready); }
+    out.push({ site, name: site === "gemini" ? "Gemini" : "Copilot", open: !!t, ready });
   }
-  if (msg.type === "aitutu-studio-take-pending") {
-    (async () => {
-      const list = (await tabStore("readonly", (s) => s.get("studio-pending"))) || [];
-      await tabStore("readwrite", (s) => s.delete("studio-pending"));
-      sendResponse({ ok: true, images: list });
-    })().catch((e) => sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }));
+  return out;
+}
+async function awbConnect() {
+  const c = await awbConf();
+  clearTimeout(AWB.timer);
+  if (!c.enabled || !c.host || !c.token) { awbClose(); awbSetState("off", c.enabled ? "还没填 IP 和口令" : ""); return; }
+  if (AWB.ws && (AWB.ws.readyState === 0 || AWB.ws.readyState === 1)) return;
+  let ws;
+  try { ws = new WebSocket(`ws://${c.host}:${c.port || 8766}/ext`); } catch (e) { awbSetState("error", String(e.message || e)); return awbRetry(); }
+  AWB.ws = ws;
+  awbSetState("connecting");
+  ws.onopen = async () => ws.send(JSON.stringify({ type: "hello", app: "aitutu", role: "extension", token: c.token, name: c.name || "AI图图", version: AWB_VERSION, sites: await awbSites() }));
+  ws.onmessage = (ev) => {
+    let m;
+    try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.type === "welcome") { AWB.retry = 0; awbSetState("on"); clearInterval(AWB.ping); AWB.ping = setInterval(() => awbSend({ type: "ping", t: Date.now() }), 20000); return; }
+    if (m.type === "error") { awbSetState("error", m.error || "工作台拒绝连接"); if (m.fatal) AWB.retry = 99; return; }
+    if (m.type === "ping") { awbSend({ type: "pong", t: m.t }); return; }
+    if (m.type === "cmd") awbHandle(m);
+  };
+  ws.onclose = () => {
+    clearInterval(AWB.ping);
+    if (AWB.ws === ws) AWB.ws = null;
+    if (AWB.state !== "error") awbSetState("off", "连接断开，稍后自动重连");
+    awbRetry();
+  };
+  ws.onerror = () => {};
+}
+function awbRetry() {
+  if (AWB.retry >= 99) return;
+  const sec = Math.min(30, 2 ** AWB.retry++);
+  clearTimeout(AWB.timer);
+  AWB.timer = setTimeout(awbConnect, sec * 1000);
+}
+function awbClose() { clearInterval(AWB.ping); clearTimeout(AWB.timer); if (AWB.ws) { const w = AWB.ws; AWB.ws = null; try { w.close(); } catch {} } }
+
+/** 找到（或新开）这个网站的单独窗口，等页面和插件准备好 */
+async function awbEnsure(site, progress) {
+  let t = await awbTabOf(site);
+  if (!t) {
+    // 已经开着这个网站、而且那个窗口里只有它一个标签页：直接用
+    const tabs = await chrome.tabs.query({ url: WT_SITES[site].patterns });
+    for (const x of tabs) { const w = await chrome.windows.get(x.windowId, { populate: true }).catch(() => null); if (w && w.tabs.length === 1) { t = x; break; } }
+    if (!t) {
+      progress(`打开 ${site === "gemini" ? "Gemini" : "Copilot"}（单独的窗口）`);
+      const w = await chrome.windows.create({ url: "about:blank", focused: false, width: 1000, height: 900 });
+      t = w.tabs[0];
+      await chrome.tabs.update(t.id, { url: WT_SITES[site].open });
+    }
+    AWB.tabs[site] = t.id;
+    chrome.storage.session && chrome.storage.session.set({ aitutu_wb_tabs: AWB.tabs });
+  }
+  let r = null;
+  for (let i = 0; i < 90; i++) {
+    r = await chrome.tabs.sendMessage(t.id, { type: "aitutu-wb-ping" }).catch(() => null);
+    if (r && r.ready) return t;
+    if (i === 10 && !r) { await chrome.tabs.reload(t.id).catch(() => {}); } // 页面是插件更新前打开的：刷新一下
+    await new Promise((res) => setTimeout(res, 1000));
+  }
+  throw Object.assign(new Error(r ? `${site === "gemini" ? "Gemini" : "Copilot"} 页面上没找到输入框：请在那个窗口里登录，打开对话页面` : "AI 页面没有响应，请刷新那个窗口"), { stop: true });
+}
+
+async function awbHandle(m) {
+  const reply = (ok, data) => awbSend({ type: "result", id: m.id, site: m.site, cmd: m.cmd, ok, data });
+  const progress = (msg) => awbSend({ type: "progress", id: m.id, site: m.site, msg });
+  try {
+    if (m.cmd === "status") return reply(true, { version: AWB_VERSION, sites: await awbSites() });
+    if (!WT_SITES[m.site]) return reply(false, { error: "不支持的网站：" + m.site });
+    if (m.cmd === "open") { await awbEnsure(m.site, progress); awbSend({ type: "event", event: "sites", sites: await awbSites() }); return reply(true, {}); }
+    if (m.cmd === "stop") { const t = await awbTabOf(m.site); if (t) await chrome.tabs.sendMessage(t.id, { type: "aitutu-wb-stop" }).catch(() => {}); return reply(true, {}); }
+    if (m.cmd !== "run") return reply(false, { error: "不支持的命令：" + m.cmd });
+    const t = await awbEnsure(m.site, progress);
+    AWB.jobs.set(m.id, progress);
+    const r = await chrome.tabs.sendMessage(t.id, { type: "aitutu-wb-run", job: { id: m.id, ...m.args } }).catch((e) => ({ ok: false, error: "AI 页面断开了：" + (e && e.message) }));
+    AWB.jobs.delete(m.id);
+    awbSend({ type: "event", event: "sites", sites: await awbSites() });
+    if (r && r.ok) return reply(true, { text: r.text || "", codes: r.codes || [], b64: r.b64, mime: r.mime, model: r.model || "" });
+    return reply(false, { error: (r && r.error) || "失败", limit: !!(r && r.limit), refused: !!(r && r.refused) });
+  } catch (e) {
+    AWB.jobs.delete(m.id);
+    reply(false, { error: String((e && e.message) || e) });
+  }
+}
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.type === "aitutu-wb-progress" && AWB.jobs.has(msg.jobId)) AWB.jobs.get(msg.jobId)(msg.msg);
+  return false;
+});
+chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
+  if (msg && msg.type === "aitutu-wb-test") {
+    const ws = new WebSocket(`ws://${msg.host}:${msg.port || 8766}/ext`);
+    const done = (r) => { try { ws.close(); } catch {} sendResponse(r); };
+    const timer = setTimeout(() => done({ ok: false, error: "连不上（检查 IP、端口，工作台有没有启动）" }), 6000);
+    ws.onopen = () => ws.send(JSON.stringify({ type: "hello", app: "aitutu", token: msg.token, test: true, name: "test", version: AWB_VERSION, sites: [] }));
+    ws.onmessage = (ev) => { const m = JSON.parse(ev.data); clearTimeout(timer); done(m.type === "welcome" ? { ok: true, server: m.server } : { ok: false, error: m.error || "工作台拒绝连接" }); };
+    ws.onerror = () => { clearTimeout(timer); done({ ok: false, error: "连不上（检查 IP、端口，工作台有没有启动）" }); };
     return true;
   }
   return false;
 });
-chrome.action.onClicked.addListener(() => { openStudio("").catch(() => {}); });
+chrome.storage.onChanged.addListener((ch) => { if (ch.aitutu_wb) { AWB.retry = 0; awbClose(); awbConnect(); } });
+chrome.runtime.onStartup.addListener(awbConnect);
+chrome.runtime.onInstalled.addListener(awbConnect);
+chrome.alarms.create("aitutu-wb", { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((a) => { if (a.name === "aitutu-wb") awbConnect(); });
+(chrome.storage.session ? chrome.storage.session.get("aitutu_wb_tabs") : Promise.resolve({})).then((v) => { if (v && v.aitutu_wb_tabs) AWB.tabs = v.aitutu_wb_tabs; }).finally(awbConnect);

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>AI图图 · 选项</title>
+<style>
+  body{font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:#18181b;margin:16px;min-width:440px}
+  h3{margin:0 0 6px}
+  .hint{color:#71717a;font-size:12px}
+  .row{display:flex;gap:8px;align-items:center;margin:7px 0}
+  .row span{width:72px;color:#555}
+  .row input[type=text],.row input[type=number]{flex:1;border:1px solid #d4d4d8;border-radius:8px;padding:5px 8px;font:inherit}
+  button{border:1px solid #d4d4d8;background:#fff;border-radius:8px;padding:5px 12px;cursor:pointer;font:inherit}
+  button.pri{background:#18181b;color:#fff;border-color:#18181b}
+  .on{color:#1f8a4c}.bad{color:#c2362f}
+</style></head>
+<body>
+<h3>连接 AI图图 工作台（网页版）</h3>
+<div class="hint">连上以后，工作台的“写文字 / 看图 / 画图”任务会交给这个浏览器里的 Gemini / Copilot 去做（各开一个单独的窗口，别最小化）。IP、端口、口令在工作台网页的“AI 连接”里看。右侧面板的抠图、精修照常能用；面板在做图时，工作台的任务会等它做完。</div>
+<label class="row"><input type="checkbox" id="on"> 连接工作台</label>
+<div class="row"><span>工作台 IP</span><input type="text" id="host" placeholder="例如 192.168.2.1"></div>
+<div class="row"><span>端口</span><input type="number" id="port" placeholder="8766"></div>
+<div class="row"><span>口令</span><input type="text" id="token" placeholder="工作台“AI 连接”里的插件口令"></div>
+<div class="row"><span>这台电脑</span><input type="text" id="name" placeholder="给这台电脑起个名字"></div>
+<div class="row"><button class="pri" id="save">保存并连接</button><button id="test">测试连接</button><span id="state"></span></div>
+<script src="options.js"></script>
+</body></html>

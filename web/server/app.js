@@ -7,7 +7,7 @@ import { bridge, SITE_NAMES, APP_NAMES } from "./bridge.js";
 import * as queue from "./queue.js";
 import { addClient } from "./events.js";
 import { kvGet, kvSet } from "./db.js";
-import { PUBLIC_DIR, FONT_DIR, REPO_DIR, DATA_DIR, VERSION } from "./config.js";
+import { PUBLIC_DIR, FONT_DIR, REPO_DIR, DATA_DIR, FILES_DIR, VERSION } from "./config.js";
 import * as analysis from "./analysis/pipeline.js";
 
 export const app = new Hono();
@@ -92,6 +92,24 @@ app.put("/api/settings/:key", async (c) => { const { value } = await c.req.json(
 
 // ------------------------------------------------------------ 任务
 app.get("/api/tasks", (c) => c.json({ tasks: queue.list({ status: c.req.query("status") || undefined, ownerType: c.req.query("ownerType") || undefined, ownerId: c.req.query("ownerId") || undefined, limit: c.req.query("limit") || 300 }), counts: queue.counts() }));
+// 手动发一个任务（测试插件、临时问 AI 用）。images: [{ b64, mime, name }]
+app.post("/api/tasks", async (c) => {
+  const b = await c.req.json();
+  if (!["text", "vision", "image"].includes(b.kind)) return c.json({ error: "kind 只能是 text / vision / image" }, 400);
+  if (!String(b.prompt || "").trim()) return c.json({ error: "没有提示词" }, 400);
+  const images = [];
+  fs.mkdirSync(path.join(FILES_DIR, "manual"), { recursive: true });
+  for (const [i, im] of (b.images || []).entries()) {
+    const ext = /png/.test(im.mime || "") ? "png" : "jpg";
+    const rel = `manual/${Date.now()}_${i}.${ext}`;
+    fs.writeFileSync(path.join(FILES_DIR, rel), Buffer.from(im.b64 || "", "base64"));
+    images.push({ file: rel, name: im.name || `图片${i + 1}.${ext}` });
+  }
+  const row = queue.enqueue({ kind: b.kind === "vision" ? "text" : b.kind, label: b.label || "手动任务", ownerType: "manual", ownerId: "manual", payload: { prompt: b.prompt, material: b.material || undefined, images, sites: b.sites || undefined } });
+  return c.json({ ok: true, id: row.id });
+});
+app.get("/api/tasks/:id/result", (c) => c.json({ task: queue.get(Number(c.req.param("id"))), result: queue.rawResult(Number(c.req.param("id"))) }));
+app.get("/api/files/*", (c) => { const f = inside(FILES_DIR, decodeURIComponent(c.req.path.slice(11))); return f ? sendFile(c, f) : c.text("404", 404); });
 app.post("/api/tasks/:id/cancel", (c) => c.json({ ok: queue.cancel(Number(c.req.param("id"))) }));
 app.post("/api/tasks/:id/retry", (c) => c.json({ ok: queue.retry(Number(c.req.param("id"))) }));
 app.post("/api/tasks/:id/bump", (c) => { queue.bump(Number(c.req.param("id"))); return c.json({ ok: true }); });
