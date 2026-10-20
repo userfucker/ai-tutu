@@ -272,6 +272,9 @@ ST.screensFromOutline = (project, data) => {
   const assetAt = (n) => { const a = project.assets[(Number(n) || 0) - 1]; return a ? a.id : ""; };
   const list = (data && data.screens) || [];
   const out = [];
+  // AI 没写项目的屏（比如首屏的小标签）用已确认的卖点补上，免得出现空的框
+  const pts = (project.points || []).filter((x) => x.on && x.text).map((x) => x.text);
+  let pi = 0;
   list.forEach((s, idx) => {
     const id = ST.TPL[s.template] ? s.template : "features3";
     const t = ST.TPL[id];
@@ -283,7 +286,7 @@ ST.screensFromOutline = (project, data) => {
       const n = Math.max(t.items.min, Math.min(t.items.max, items.length || t.items.def));
       sc.items = Array.from({ length: n }, (_, i) => {
         const it = items[i] || {};
-        return { id: ST.uid("i"), title: v(it.title), desc: v(it.desc), asset: t.items.asset ? assetAt(it.image) : "", icon: ST.ICONS[it.icon] ? it.icon : "" };
+        return { id: ST.uid("i"), title: v(it.title || (items.length ? "" : pts[pi++] || "")), desc: v(it.desc), asset: t.items.asset ? assetAt(it.image) : "", icon: ST.ICONS[it.icon] ? it.icon : "" };
       });
     }
     if (s.main) sc.slots.main = assetAt(s.main);

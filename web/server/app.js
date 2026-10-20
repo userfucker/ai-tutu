@@ -9,6 +9,9 @@ import { addClient } from "./events.js";
 import { kvGet, kvSet } from "./db.js";
 import { PUBLIC_DIR, FONT_DIR, REPO_DIR, DATA_DIR, FILES_DIR, VERSION } from "./config.js";
 import * as analysis from "./analysis/pipeline.js";
+import * as dstore from "./detail/store.js";
+import * as auto from "./detail/auto.js";
+import * as importer from "./detail/importer.js";
 
 export const app = new Hono();
 
@@ -105,7 +108,7 @@ app.post("/api/tasks", async (c) => {
     fs.writeFileSync(path.join(FILES_DIR, rel), Buffer.from(im.b64 || "", "base64"));
     images.push({ file: rel, name: im.name || `图片${i + 1}.${ext}` });
   }
-  const row = queue.enqueue({ kind: b.kind === "vision" ? "text" : b.kind, label: b.label || "手动任务", ownerType: "manual", ownerId: "manual", payload: { prompt: b.prompt, material: b.material || undefined, images, sites: b.sites || undefined } });
+  const row = queue.enqueue({ kind: b.kind === "vision" ? "text" : b.kind, label: b.label || "手动任务", ownerType: b.ownerType === "project" ? "project" : "manual", ownerId: b.ownerType === "project" ? String(b.ownerId || "") : "manual", payload: { prompt: b.prompt, material: b.material || undefined, images, sites: b.sites || undefined } });
   return c.json({ ok: true, id: row.id });
 });
 app.get("/api/tasks/:id/result", (c) => c.json({ task: queue.get(Number(c.req.param("id"))), result: queue.rawResult(Number(c.req.param("id"))) }));
@@ -140,6 +143,61 @@ app.get("/api/analyses/:id/report", (c) => {
   const dl = c.req.query("download") ? { "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(an.name + "_竞品分析报告.html")}` } : {};
   return sendFile(c, analysis.reportPath(an.id), dl);
 });
+
+// ------------------------------------------------------------ 详情页：项目、图片、设置
+app.get("/api/projects", (c) => c.json({ list: dstore.listProjects() }));
+app.get("/api/projects/:id", (c) => { const p = dstore.getProject(c.req.param("id")); return p ? c.json({ project: p }) : c.json({ error: "项目不存在" }, 404); });
+app.put("/api/projects/:id", async (c) => {
+  const { project, rev } = await c.req.json();
+  if (!project || project.id !== c.req.param("id")) return c.json({ error: "数据不对" }, 400);
+  const cur = dstore.getProject(project.id);
+  if (cur && cur.auto && (cur.auto.status === "running" || cur.auto.status === "exporting")) return c.json({ error: "全自动正在做这个项目，等它做完再改", conflict: true }, 409);
+  if (cur) project.auto = cur.auto; // 全自动的状态由服务器管
+  const r = dstore.putProject(project, rev);
+  if (r === null) return c.json({ error: "项目在别处被改过了，请重新打开", conflict: true }, 409);
+  return c.json({ ok: true, rev: r });
+});
+app.delete("/api/projects/:id", (c) => { auto.stop(c.req.param("id")); queue.cancelOwner("project", c.req.param("id")); dstore.deleteProject(c.req.param("id")); return c.json({ ok: true }); });
+app.post("/api/projects/:id/auto", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  try { auto.start(c.req.param("id"), b || {}); return c.json({ ok: true }); } catch (e) { return c.json({ error: e.message }, 400); }
+});
+app.post("/api/projects/:id/auto/stop", (c) => { auto.stop(c.req.param("id")); return c.json({ ok: true }); });
+app.post("/api/projects/:id/auto/approve", async (c) => {
+  try { await auto.approve(c.req.param("id")); return c.json({ ok: true }); } catch (e) { return c.json({ error: e.message }, 400); }
+});
+// 新建项目：上传淘宝采集的 zip（或者图片打包的 zip），?auto=1 建好马上开始全自动。设置放在 ?o= 里（JSON）
+app.post("/api/projects/import", async (c) => {
+  const buf = Buffer.from(await c.req.arrayBuffer());
+  if (buf.length > 500 * 1024 * 1024) return c.json({ error: "zip 太大（超过 500 MB）" }, 400);
+  let o = {};
+  try { o = JSON.parse(c.req.query("o") || "{}"); } catch {}
+  try {
+    const p = await importer.importZip(buf, o);
+    if (c.req.query("auto")) auto.start(p.id);
+    return c.json({ ok: true, id: p.id, name: p.name, assets: p.assets.length });
+  } catch (e) { return c.json({ error: "导入失败：" + e.message }, 400); }
+});
+app.get("/api/projects/:id/export", (c) => {
+  const p = dstore.getProject(c.req.param("id"));
+  if (!p || !p.auto || !p.auto.exportFile) return c.text("还没有导出文件", 404);
+  return sendFile(c, path.join(FILES_DIR, p.auto.exportFile), { "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(`详情页_${p.name}.zip`)}` });
+});
+app.get("/api/blobs", (c) => c.json({ keys: dstore.blobKeys(c.req.query("prefix") || "") }));
+app.get("/api/blobs/:key", (c) => {
+  const b = dstore.getBlob(c.req.param("key"));
+  if (!b) return c.text("没有这张图", 404);
+  return new Response(b.buf, { headers: { "Content-Type": b.type, "Cache-Control": "no-cache" } });
+});
+app.put("/api/blobs/:key", async (c) => {
+  const buf = Buffer.from(await c.req.arrayBuffer());
+  if (buf.length > 60 * 1024 * 1024) return c.json({ error: "图片太大（超过 60 MB）" }, 400);
+  dstore.putBlob(c.req.param("key"), buf, c.req.header("content-type"));
+  return c.json({ ok: true });
+});
+app.delete("/api/blobs/:key", (c) => { dstore.delBlob(c.req.param("key")); return c.json({ ok: true }); });
+app.get("/api/meta/:key", (c) => c.json({ value: dstore.getMeta(c.req.param("key"), null) }));
+app.put("/api/meta/:key", async (c) => { const { value } = await c.req.json(); dstore.setMeta(c.req.param("key"), value); return c.json({ ok: true }); });
 
 // ------------------------------------------------------------ 静态文件（网页、字体、和插件共用的图片处理代码）
 app.get("/fonts/*", (c) => { const f = inside(FONT_DIR, c.req.path.slice(7)); return f ? sendFile(c, f) : c.text("404", 404); });

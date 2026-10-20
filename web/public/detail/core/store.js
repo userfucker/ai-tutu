@@ -1,77 +1,63 @@
 /**
- * 详情页工作室 · 本机存储（浏览器 IndexedDB）
- *  projects：项目（文字、排版、设置，不含图片）
- *  blobs：图片，键名“项目编号:xxx”，删项目时一起删；品牌 logo 用“brand:xxx”
- *  meta：品牌、我的模板、设置
- * 以后做网页版，换成存服务器，接口保持一样。
+ * 详情页 · 存取（网页版）：项目、图片、设置都存在工作台服务器上。
+ * 接口和插件版（IndexedDB）一样：ST.db.getProject / putProject / listProjects / putBlob / getBlob …
+ * 项目保存时带上版本号（rev），服务器上的版本对不上（别处改过、全自动在做）就会拒绝。
  */
 var ST = globalThis.ST || (globalThis.ST = {});
 
 ST.db = (() => {
-  let dbp = null;
-  const open = () => (dbp = dbp || new Promise((resolve, reject) => {
-    const req = indexedDB.open("aitutu-studio", 1);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      db.createObjectStore("projects");
-      db.createObjectStore("blobs");
-      db.createObjectStore("meta");
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  }));
-  const tx = async (store, mode, fn) => {
-    const db = await open();
-    return new Promise((resolve, reject) => {
-      const t = db.transaction(store, mode);
-      let out;
-      const r = fn(t.objectStore(store));
-      if (r && "onsuccess" in r) r.onsuccess = () => (out = r.result);
-      t.oncomplete = () => resolve(out);
-      t.onerror = () => reject(t.error);
-      t.onabort = () => reject(t.error || new Error("存储失败（可能是磁盘空间不够）"));
-    });
+  const revs = new Map(); // 项目编号 → 服务器上的版本号
+  const j = async (method, url, body) => {
+    const r = await fetch(url, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined, credentials: "same-origin" });
+    let d = null;
+    try { d = await r.json(); } catch {}
+    if (r.status === 401) { location.href = "/"; throw new Error("请先登录"); }
+    if (!r.ok) throw Object.assign(new Error((d && d.error) || `出错了（${r.status}）`), { conflict: !!(d && d.conflict), status: r.status });
+    return d;
   };
+  const bk = (key) => "/api/blobs/" + encodeURIComponent(key);
   return {
-    getProject: (id) => tx("projects", "readonly", (s) => s.get(id)),
-    putProject: (p) => { p.updated = Date.now(); return tx("projects", "readwrite", (s) => s.put(p, p.id)); },
-    listProjects: async () => {
-      const all = (await tx("projects", "readonly", (s) => s.getAll())) || [];
-      return all.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+    getProject: async (id) => {
+      try { const d = await j("GET", "/api/projects/" + encodeURIComponent(id)); revs.set(id, d.project.rev || 0); return d.project; }
+      catch (e) { if (e.status === 404) return null; throw e; }
     },
-    deleteProject: async (id) => {
-      await tx("projects", "readwrite", (s) => s.delete(id));
-      await tx("blobs", "readwrite", (s) => s.delete(IDBKeyRange.bound(id + ":", id + ":￿")));
+    putProject: async (p) => {
+      const d = await j("PUT", "/api/projects/" + encodeURIComponent(p.id), { project: p, rev: revs.has(p.id) ? revs.get(p.id) : null });
+      revs.set(p.id, d.rev);
+      p.rev = d.rev;
+      return d.rev;
     },
-    putBlob: (key, blob) => tx("blobs", "readwrite", (s) => s.put(blob, key)),
-    getBlob: (key) => (key ? tx("blobs", "readonly", (s) => s.get(key)) : Promise.resolve(null)),
-    delBlob: (key) => tx("blobs", "readwrite", (s) => s.delete(key)),
-    blobKeys: (prefix) => tx("blobs", "readonly", (s) => s.getAllKeys(IDBKeyRange.bound(prefix, prefix + "￿"))),
-    getMeta: async (k, def) => { const v = await tx("meta", "readonly", (s) => s.get(k)); return v === undefined ? def : v; },
-    setMeta: (k, v) => tx("meta", "readwrite", (s) => s.put(v, k)),
+    listProjects: async () => (await j("GET", "/api/projects")).list,
+    deleteProject: (id) => j("DELETE", "/api/projects/" + encodeURIComponent(id)),
+    putBlob: async (key, blob) => {
+      const r = await fetch(bk(key), { method: "PUT", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: blob, credentials: "same-origin" });
+      if (!r.ok) throw new Error("图片上传失败（" + r.status + "）");
+      ST.blobVer[key] = Date.now();
+    },
+    getBlob: async (key) => {
+      if (!key) return null;
+      const r = await fetch(bk(key) + "?v=" + (ST.blobVer[key] || 0), { credentials: "same-origin" });
+      return r.ok ? await r.blob() : null;
+    },
+    delBlob: (key) => fetch(bk(key), { method: "DELETE", credentials: "same-origin" }),
+    blobKeys: async (prefix) => (await j("GET", "/api/blobs?prefix=" + encodeURIComponent(prefix))).keys,
+    getMeta: async (k, def) => { const d = await j("GET", "/api/meta/" + encodeURIComponent(k)); return d.value === null || d.value === undefined ? def : d.value; },
+    setMeta: (k, v) => j("PUT", "/api/meta/" + encodeURIComponent(k), { value: v }),
+    rev: (id) => revs.get(id),
+    setRev: (id, r) => revs.set(id, r),
   };
 })();
 
-// 图片缓存：同一个键只读一次、只解码一次
-ST.imgCache = new Map(); // key → Promise<HTMLImageElement|null>
-ST.urlCache = new Map(); // key → objectURL
+// 图片：直接用服务器地址（同源，可以画到画布上导出）；改过的图换一个 ?v= 避免读到旧的
+ST.blobVer = {};
+ST.imgCache = new Map();
+ST.urlFor = (key) => (key ? "/api/blobs/" + encodeURIComponent(key) + "?v=" + (ST.blobVer[key] || 0) : "");
 ST.imgOf = (key) => {
   if (!key) return Promise.resolve(null);
-  if (!ST.imgCache.has(key)) {
-    ST.imgCache.set(key, ST.db.getBlob(key).then(async (b) => {
-      if (!b) return null;
-      const url = URL.createObjectURL(b);
-      ST.urlCache.set(key, url);
-      const img = await ST.loadImage(url);
-      return img;
-    }).catch(() => null));
-  }
-  return ST.imgCache.get(key);
+  const ck = key + "|" + (ST.blobVer[key] || 0);
+  if (!ST.imgCache.has(ck)) ST.imgCache.set(ck, ST.loadImage(ST.urlFor(key)).catch(() => null));
+  return ST.imgCache.get(ck);
 };
-ST.urlOf = async (key) => { await ST.imgOf(key); return ST.urlCache.get(key) || ""; };
-ST.forget = (key) => {
-  ST.imgCache.delete(key);
-  const u = ST.urlCache.get(key);
-  if (u) { URL.revokeObjectURL(u); ST.urlCache.delete(key); }
-};
+ST.urlOf = async (key) => ST.urlFor(key);
+ST.forget = (key) => { for (const k of [...ST.imgCache.keys()]) if (k.startsWith(key + "|")) ST.imgCache.delete(k); };
 ST.saveImage = async (key, blob) => { ST.forget(key); await ST.db.putBlob(key, blob); return key; };

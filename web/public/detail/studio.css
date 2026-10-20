@@ -211,3 +211,21 @@ input[type=range] { width: 100%; }
 
 #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 9px 18px; border-radius: 10px; z-index: 300; max-width: 80vw; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
 #toast.bad { background: var(--bad); }
+
+/* 网页版：回工作台、全自动 */
+.backwb { text-decoration: none; color: var(--sub); white-space: nowrap; padding: 4px 8px; border-radius: 8px; }
+.backwb:hover { background: rgba(0,0,0,.05); }
+.astat { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 12px; background: var(--soft); color: var(--sub); }
+.astat.running, .astat.exporting { background: var(--accent-soft); color: var(--accent); }
+.astat.review { background: var(--warn-soft); color: var(--warn); }
+.astat.approved { background: var(--ok-soft); color: var(--ok); }
+.astat.failed { background: var(--bad-soft); color: var(--bad); }
+.asteps { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; margin: 10px 0; }
+.asteps div { border: 1px solid var(--line); border-radius: 9px; padding: 6px 9px; background: #fff; color: var(--mute); }
+.asteps div.done { color: var(--ok); border-color: #bfe3cc; }
+.asteps div.on { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.alog { max-height: 320px; overflow: auto; background: var(--soft); border-radius: 9px; padding: 8px 10px; font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; }
+.dropbig { border: 2px dashed #c9ccd3; border-radius: 12px; padding: 22px; text-align: center; color: var(--sub); background: #fff; }
+.dropbig.drop-on { border-color: var(--accent); background: var(--accent-soft); }
+.flist { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow: auto; }
+.flist div { display: flex; gap: 8px; align-items: center; }

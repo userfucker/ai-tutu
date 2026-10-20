@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>详情页 · AI图图 工作台</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<link rel="stylesheet" href="studio.css">
+</head>
+<body>
+<header id="top">
+  <a class="ghost backwb" href="/" title="回到工作台（竞品分析、任务中心、AI 连接）">← 工作台</a>
+  <div class="brandmark" data-act="home" title="回到我的项目">详情页</div>
+  <input id="projName" placeholder="项目名称" hidden>
+  <nav id="steps"></nav>
+  <div class="topright">
+    <button class="chip" id="aiChip" data-act="aiDock" title="AI 任务"><i></i><span>AI</span></button>
+    <button class="ghost" data-act="settings">设置</button>
+  </div>
+</header>
+<main id="main"></main>
+<aside id="aiDock" hidden></aside>
+<div id="modalWrap" hidden><div id="modal"></div></div>
+<div id="toast" hidden></div>
+
+<script src="/lib/imagekit.js"></script>
+<script src="core/data.js"></script>
+<script src="core/util.js"></script>
+<script src="core/store.js"></script>
+<script src="core/text.js"></script>
+<script src="core/icons.js"></script>
+<script src="core/templates.js"></script>
+<script src="core/render.js"></script>
+<script src="core/prompts.js"></script>
+<script src="core/check.js"></script>
+<script src="core/export.js"></script>
+<script src="core/refsplit.js"></script>
+<script src="ai.js"></script>
+<script src="app.js"></script>
+<script src="steps.js"></script>
+<script src="editor.js"></script>
+<script src="finish.js"></script>
+<script src="auto.js"></script>
+<script src="boot.js"></script>
+</body>
+</html>
