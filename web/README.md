@@ -14,62 +14,87 @@
 
 ## 部署（OpenWrt 上的 Docker：ubuntu 22.04，x86_64）
 
-下面的命令在 **ubuntu 容器里** 执行（`docker exec -it <容器名> bash`）。
+分两边做：**ubuntu 容器里**装和运行工作台；**OpenWrt 上**做端口转发和开机启动。
 
-### 1. 装 Node.js 22 和 pm2
-
-```bash
-apt update && apt install -y curl git ca-certificates
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-apt install -y nodejs
-npm install -g pm2
-node -v   # v22.x
-```
-
-### 2. 拉代码、装依赖
+### 1. 进容器（在 OpenWrt 上）
 
 ```bash
-cd /opt
-git clone https://github.com/userfucker/ai-tutu.git
-cd ai-tutu/web
-npm install            # 会下载 better-sqlite3、@napi-rs/canvas 的预编译文件（x86_64 Linux 有现成的）
+docker ps                          # 找到 ubuntu22 那个容器的名字，下面用 <容器名> 代替
+docker exec -it <容器名> bash
 ```
 
-字体（`web/fonts`，约 29 MB）已经在仓库里，不用另外装。
+### 2. 装 Node.js 22、编译工具、pm2（在容器里）
 
-### 3. 启动（开机自动启动）
+```bash
+apt update && apt install -y curl git ca-certificates xz-utils build-essential python3
+# Node 22（用国内镜像下载）
+cd /opt && curl -fLO https://registry.npmmirror.com/-/binary/node/v22.11.0/node-v22.11.0-linux-x64.tar.xz
+tar -xJf node-v22.11.0-linux-x64.tar.xz && ln -sf /opt/node-v22.11.0-linux-x64/bin/* /usr/local/bin/
+node -v                            # 显示 v22.11.0 就对了
+npm config set registry https://registry.npmmirror.com
+npm install -g pm2 && ln -sf /opt/node-v22.11.0-linux-x64/bin/pm2 /usr/local/bin/pm2
+```
+
+### 3. 拉代码、装依赖（在容器里）
+
+```bash
+cd /opt && git clone --depth 1 https://github.com/userfucker/ai-tutu.git
+cd /opt/ai-tutu/web
+npm_config_better_sqlite3_binary_host=https://registry.npmmirror.com/-/binary/better-sqlite3 npm install
+```
+
+GitHub 拉不下来：在电脑上从 GitHub 下载仓库 zip，传到容器里解压到 `/opt/ai-tutu`。
+`npm install` 下载 better-sqlite3 预编译文件失败时会自己编译（上面装了 build-essential、python3，多等几分钟）。
+字体（`web/fonts`，约 29 MB）在仓库里，不用另外装。
+
+### 4. 启动（在容器里）
 
 ```bash
 cd /opt/ai-tutu/web
 pm2 start server/index.js --name aitutu-web
-pm2 save
-pm2 startup            # 按它打印的提示执行一行命令
-pm2 logs aitutu-web    # 看日志：会打印网页地址和“插件口令”
+pm2 save                           # 记住，容器重启后用 pm2 resurrect 恢复
+pm2 logs aitutu-web --lines 20     # 看到“插件口令 xxxxxxxx”就是启动好了，Ctrl+C 退出看日志
 ```
 
-数据放在 `web/data`（数据库、图片、导出的 zip）。想放别处：`DATA_DIR=/data/aitutu pm2 start server/index.js --name aitutu-web`。
-端口默认 8766，改端口用环境变量 `PORT`。
+数据在 `web/data`（数据库、图片、导出的 zip）。端口默认 8766（环境变量 `PORT` 可以改）。
 
-### 4. 让局域网能访问（端口转发）
+### 5. 端口转发 + 开机启动（在 OpenWrt 上）
 
-容器是 bridge 网络、只映射了 3000 端口时，和 ai-dkqg 一样在 **OpenWrt 上** 用 socat 转发：
+容器是 bridge 网络、只映射了 3000 端口，所以和 ai-dkqg 一样在 OpenWrt 上用 socat 转发 8766：
 
 ```bash
-# 查容器 IP
-docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' <容器名>
-# 转发（把 172.17.0.2 换成上面查到的 IP）
 opkg update && opkg install socat
-socat TCP-LISTEN:8766,fork,reuseaddr TCP:172.17.0.2:8766 &
 ```
 
-开机自动转发：把上面那行 socat 加到 OpenWrt 的 `/etc/rc.local`（`exit 0` 之前）。
-如果防火墙拦了，在 OpenWrt 防火墙里放行 LAN → 8766。
+编辑 `/etc/rc.local`，在 `exit 0` 前面加（把 `<容器名>` 换成你的）：
 
-然后在电脑浏览器打开 `http://<OpenWrt 的 IP>:8766`，第一次进去设置管理员密码。
+```sh
+(
+  sleep 30
+  docker exec -d <容器名> pm2 resurrect
+  IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' <容器名>)
+  socat TCP-LISTEN:8766,fork,reuseaddr TCP:$IP:8766 &
+) &
+```
 
-### 5. 更新
+第一次不用重启路由器，直接执行一遍：
 
 ```bash
+IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' <容器名>); echo $IP
+socat TCP-LISTEN:8766,fork,reuseaddr TCP:$IP:8766 &
+```
+
+电脑浏览器打开 `http://<路由器 IP>:8766`，第一次进去设置管理员密码。打不开就在 OpenWrt 防火墙里放行 LAN 访问 8766。
+
+### 6. 连插件
+
+工作台左边“AI 连接”里有 IP、端口、口令。IP 填 **路由器的 IP**，端口 8766。
+AI图图、淘宝采集、ai-web 三个插件在各自的选项里填上，连上后“AI 连接”页面会显示出来。
+
+### 7. 更新
+
+```bash
+docker exec -it <容器名> bash
 cd /opt/ai-tutu && git pull && cd web && npm install && pm2 restart aitutu-web
 ```
 
