@@ -65,11 +65,14 @@ export function fakeAnswer(prompt, material) {
   } else if (/合并成一个归类名/.test(prompt)) {
     const v = JSON.parse(material);
     out = Object.fromEntries(Object.entries(v).map(([k, o]) => [k, Object.fromEntries(Object.keys(o).map((t) => [t, t === "保温差" ? "保温效果差" : t]))]));
+  } else if (/从上到下按顺序切开/.test(prompt)) {
+    out = { selling: ["316 不锈钢内胆", "保温 24 小时", "一键开盖不漏水"], structure: ["第 1 屏：首屏海报", "第 2 屏：保温测试"], params: ["容量：500ml"], claims: ["保温 24 小时"], promises: ["一年换新"], audience: "上班族", scenes: "办公室、通勤", style: "白底简约" };
   } else if (/竞品分析结论/.test(prompt)) {
     const st = JSON.parse(material);
     out = { summary: `共分析 ${st.length} 个商品，买家最在意保温和漏水。`, products: st.map((s) => ({ key: s.key, positioning: "中端保温杯", strengths: ["保温好"], weaknesses: ["杯盖漏水"] })),
       needs: ["上班用", "送礼"], pains: [{ point: "杯盖漏水", evidence: "竞品 1 有 20% 的评价提到", opportunity: "做双层密封盖" }],
-      compare: { better: ["更轻"], worse: ["价格高"], gaps: ["漏水"] }, suggestions: { product: ["加密封圈"], detail: ["首屏放倒置不漏水的图"], points: ["倒置不漏"], faq: ["会漏水吗"], price: ["主推 500ml"] }, risks: ["夸大保温时间"] };
+      compare: { better: ["更轻"], worse: ["价格高"], gaps: ["漏水"] }, suggestions: { product: ["加密封圈"], detail: ["首屏放倒置不漏水的图"], points: ["倒置不漏"], faq: ["会漏水吗"], price: ["主推 500ml"] }, risks: ["夸大保温时间"],
+      detail: { products: st.filter((x) => x.详情页).map((x) => ({ key: x.key, accepted: ["316 不锈钢内胆，满意点里做工好 30%"], doubted: ["详情页说保温 24 小时，评价里 20% 说保温差"], missing: ["买家问会不会漏水，详情页没讲"] })), ours: ["首屏写清楚倒置不漏"] } };
   } else out = { ok: true };
   return "好的，结果如下：\n```json\n" + JSON.stringify(out) + "\n```";
 }

@@ -21,10 +21,11 @@ export const DEFAULT_ROLES = {
   text: ["deepseek", "kimi", "doubao", "glm"], // 写文字默认用国内模型；Gemini / Copilot 可以在“AI 分工”里勾上（Lee 2026-10-21）
   vision: ["gemini", "copilot"],
   image: ["gemini", "copilot"],
+  read: ["kimi", "doubao", "glm", "deepseek", "gemini", "copilot"], // 看详情图：国产优先（要 ai-web 1.4.0 以上才能发图片），不行再用 Gemini / Copilot
   collect: ["taobao"],
 };
-export const ROLE_NAMES = { text: "写文字（文案、翻译、评价分析、报告）", vision: "看图（认图、分析参考图、验图）", image: "画图（背景、抠图）", collect: "采集商品数据" };
-const DEFAULT_GAPS = { text: [2, 6], vision: [6, 15], image: [8, 20], collect: [5, 12] };
+export const ROLE_NAMES = { text: "写文字（文案、翻译、评价分析、报告）", vision: "看图（认图、分析参考图、验图）", image: "画图（背景、抠图）", read: "看详情图（读详情页图片里的字）", collect: "采集商品数据" };
+const DEFAULT_GAPS = { text: [2, 6], vision: [6, 15], image: [8, 20], read: [6, 15], collect: [5, 12] };
 const LIMIT_RE = /限流|额度|频繁|上限|繁忙|拥挤|busy|too many|rate limit|quota|稍后再试|try again later/i;
 const COOLDOWN_MS = 10 * 60 * 1000;
 
@@ -43,7 +44,7 @@ if (kvGet("rolesVer") !== 2) {
   if (old) { delete old.text; for (const k of Object.keys(old)) old[k] = (old[k] || []).filter((s) => s !== "qwen"); kvSet("aiRoles", old); }
   kvSet("rolesVer", 2);
 }
-const gaps = () => (process.env.QUEUE_FAST ? { text: [0, 0], vision: [0, 0], image: [0, 0], collect: [0, 0] } : { ...DEFAULT_GAPS, ...(kvGet("gaps") || {}) });
+const gaps = () => (process.env.QUEUE_FAST ? { text: [0, 0], vision: [0, 0], image: [0, 0], read: [0, 0], collect: [0, 0] } : { ...DEFAULT_GAPS, ...(kvGet("gaps") || {}) });
 
 const Q = {
   insert: db.prepare(`INSERT INTO tasks (key, kind, label, owner_type, owner_id, payload, status, priority, max_attempts, created)
@@ -52,6 +53,7 @@ const Q = {
   progress: db.prepare("UPDATE tasks SET progress = ? WHERE id = ?"),
   byId: db.prepare("SELECT * FROM tasks WHERE id = ?"),
   queued: db.prepare("SELECT * FROM tasks WHERE status = 'queued' ORDER BY priority DESC, id ASC LIMIT 200"),
+  setPayload: db.prepare("UPDATE tasks SET payload = ? WHERE id = ?"),
   update: db.prepare(`UPDATE tasks SET status=@status, site=@site, worker=@worker, result=@result, error=@error, progress=@progress,
     attempts=@attempts, not_before=@not_before, started=@started, finished=@finished WHERE id=@id`),
 };
@@ -75,7 +77,9 @@ export function enqueue(spec) {
     if (old) {
       if (old.status === "failed" || old.status === "cancelled") {
         if (!spec.retryFailed) return old;
-        Object.assign(old, { status: "queued", error: null, attempts: 0, not_before: 0, result: null, progress: null });
+        // 重新排队：用这次的内容（比如图片换了新的临时文件）
+        Object.assign(old, { status: "queued", error: null, attempts: 0, not_before: 0, result: null, progress: null, payload: JSON.stringify(spec.payload || {}) });
+        Q.setPayload.run(old.payload, old.id);
         save(old);
         tick();
       }
@@ -176,12 +180,15 @@ export function tick() {
       for (const row of Q.queued.all()) {
         if (row.not_before && row.not_before > now) continue;
         const payload = parse(row.payload) || {};
-        const role = row.kind === "text" && payload.images && payload.images.length ? "vision" : row.kind;
-        const order = payload.sites && payload.sites.length ? payload.sites : roles()[role] || [];
+        const role = payload.role || (row.kind === "text" && payload.images && payload.images.length ? "vision" : row.kind);
+        let order = payload.sites && payload.sites.length ? payload.sites : roles()[role] || [];
+        // 这个任务在某个网站失败过：先换别的网站；都失败过了再从头来
+        const bad = badSites.get(row.id);
+        if (bad && order.some((x) => !bad.has(x) && bridge.connsFor(x).length)) order = order.filter((x) => !bad.has(x));
         let pick = null;
         for (const site of order) {
-          if (role !== "text" && ["deepseek", "glm", "kimi", "doubao"].includes(site)) continue; // ai-web 只能写文字
           for (const c of bridge.connsFor(site)) {
+            if (c.app === "aiweb" && role !== "text" && !(role === "read" && verAtLeast(c.version, "1.4.0"))) continue; // ai-web 只能写文字；1.4.0 起能发图片看详情图
             const s = st(c.id, site);
             if (!s.busy && now >= s.cooldownUntil && now >= s.nextAt) { pick = { conn: c, site }; break; }
           }
@@ -193,6 +200,8 @@ export function tick() {
   } finally { ticking = false; }
 }
 setInterval(tick, 2000).unref();
+const badSites = new Map(); // 任务编号 → 失败过的网站
+const verAtLeast = (v, want) => { const a = String(v || "0").split(".").map(Number), b = want.split(".").map(Number); for (let i = 0; i < 3; i++) { if ((a[i] || 0) !== b[i]) return (a[i] || 0) > b[i]; } return true; };
 bridge.on("status", () => setImmediate(tick));
 
 function readImages(list) {
@@ -234,8 +243,8 @@ async function run(row, payload, conn, site) {
         const o = await bridge.call(conn.id, site, "open", { timeoutMs: 90000 }, { timeout: 120000 });
         if (!o.ok) throw Object.assign(new Error(o.data.error || "网站打不开"), { data: o.data });
       }
-      const files = payload.material ? [{ name: payload.materialName || "材料.txt", content: payload.material }] : undefined;
-      r = await bridge.call(conn.id, site, "ask", { text: payload.prompt, files, newChat: payload.newChat !== false, timeoutMs: 600000 }, { timeout: 660000, onProgress });
+      const files = [...(payload.material ? [{ name: payload.materialName || "材料.txt", content: payload.material }] : []), ...readImages(payload.images)];
+      r = await bridge.call(conn.id, site, "ask", { text: payload.prompt, files: files.length ? files : undefined, newChat: payload.newChat !== false, timeoutMs: 600000 }, { timeout: 660000, onProgress });
       if (r.ok && (r.data.error || !r.data.answer)) r = { ok: false, data: { error: r.data.error || "AI 没有回复内容" } };
       if (r.ok) r = { ok: true, result: { text: r.data.answer, codes: [], site } };
     } else if (conn.app === "aitutu") {
@@ -269,9 +278,11 @@ async function run(row, payload, conn, site) {
   if (cur && cur.status === "cancelled") { setImmediate(tick); return; }
   if (r.ok) {
     Object.assign(row, { status: "done", result: JSON.stringify(r.result), finished: now, progress: null, error: null });
+    badSites.delete(row.id);
     save(row);
   } else {
     const err = String((r.data && r.data.error) || "失败");
+    if (!r.data.disconnected) { if (!badSites.has(row.id)) badSites.set(row.id, new Set()); badSites.get(row.id).add(site); }
     const limit = LIMIT_RE.test(err) || r.data.limit;
     if (limit) { s.cooldownUntil = now + COOLDOWN_MS; s.why = err; }
     if (r.data.disconnected) row.attempts = Math.max(0, row.attempts - 1); // 插件断了不算次数

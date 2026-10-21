@@ -7,7 +7,7 @@ const CSS = `
 :root{--ink:#1b1f27;--sub:#5d6472;--mute:#8a909c;--line:#e3e6ec;--soft:#f5f6f8;--bg:#fafbfc;--accent:#2f5fd0;--good:#1f8a4c;--goodsoft:#e4f4ea;--bad:#c2362f;--badsoft:#fbe8e6;--warn:#a86400;--warnsoft:#fdf2df;--ours:#7a3fd1;--ourssoft:#f1e9fc}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 -apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif}
-.wrap{max-width:1080px;margin:0 auto;padding:32px 20px 80px}
+.wrap{max-width:1440px;margin:0 auto;padding:32px 28px 80px}
 h1{font-size:28px;line-height:1.3;margin:0 0 6px}
 h2{font-size:21px;margin:44px 0 14px;padding-top:12px;border-top:2px solid var(--ink)}
 h3{font-size:16px;margin:22px 0 8px}
@@ -29,6 +29,11 @@ th{background:var(--soft);font-weight:600;color:var(--sub);font-size:13px}
 .bar .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bar .b{height:10px;border-radius:5px;background:var(--soft);overflow:hidden}
 .bar .b i{display:block;height:100%;border-radius:5px}
+.sku{display:grid;grid-template-columns:minmax(0,1fr) 5.5em minmax(60px,30%) 4em;gap:8px;align-items:center;font-size:13.5px;padding:3px 0;border-bottom:1px dashed var(--line)}
+.sku .p{color:var(--ink);font-variant-numeric:tabular-nums;text-align:right}
+.sku .b{height:10px;border-radius:5px;background:var(--soft);overflow:hidden}.sku .b i{display:block;height:100%;border-radius:5px;background:var(--accent)}
+.sku .n{text-align:right;color:var(--sub);font-variant-numeric:tabular-nums}
+.desc li{margin:3px 0}
 .bar .n{text-align:right;color:var(--sub);font-variant-numeric:tabular-nums}
 .good .b i{background:var(--good)}.bad .b i{background:var(--bad)}.neu .b i{background:var(--accent)}
 details{margin:2px 0 6px 0}
@@ -56,6 +61,26 @@ const ul = (list) => (list && list.length ? `<ul class="list">${list.map((x) => 
 const roleTag = (s) => (s.role === "ours" ? '<span class="tag ours">我们</span>' : '<span class="tag">竞品</span>');
 const shortTitle = (s) => esc((s.title || s.url || s.key).slice(0, 36));
 
+/** 规格分布：规格名完整显示（可以换行），后面是价格 */
+const skuBars = (list) => (list && list.length
+  ? list.slice(0, 10).map((x) => `<div class="sku"><span>${esc(x.name)}</span><span class="p">${esc(x.price || "")}</span><span class="b"><i style="width:${Math.min(100, x.pct)}%"></i></span><span class="n">${x.pct}%</span></div>`).join("")
+  : '<div class="meta">没有</div>');
+/** 每个商品的详情页（AI 从详情图里读出来的） */
+const descBlock = (d) => (d ? `<h3>详情页讲了什么（AI 读详情图，${d.images || "?"} 张${d.cut ? "，太长只读了前面一部分" : ""}）</h3>
+  <div class="grid"><div><b>主打卖点</b>${ul(d.selling)}</div><div><b>具体的宣传</b>${ul(d.claims)}${d.promises && d.promises.length ? `<b>售后和保障</b>${ul(d.promises)}` : ""}</div></div>
+  ${[["人群", d.audience], ["场景", d.scenes], ["风格", d.style]].filter(([, v]) => v).map(([k, v]) => `<div class="meta"><b>${k}：</b>${esc(v)}</div>`).join("")}
+  ${d.structure && d.structure.length ? `<details><summary>详情页一屏一屏的结构（${d.structure.length} 屏）</summary><ul class="list desc">${d.structure.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details>` : ""}` : "");
+/** 详情页和评价对照 */
+const detailSection = (d, names) => {
+  if (!d || (!(d.products || []).length && !(d.ours || []).length)) return "";
+  const nm = (k) => { const s = names[k]; return s ? `${s.role === "ours" ? '<span class="tag ours">我们</span>' : '<span class="tag">竞品</span>'}${esc((s.title || k).slice(0, 36))}` : esc(k); };
+  return `<h2>详情页 vs 评价</h2>
+  ${(d.products || []).map((p) => `<div class="card"><h3 style="margin-top:0">${nm(p.key)}</h3><div class="grid">
+    <div><b style="color:var(--good)">详情页主打、买家也认可</b>${ul(p.accepted)}</div><div><b style="color:var(--bad)">详情页说了、评价里有人说不符</b>${ul(p.doubted)}</div></div>
+    <b>买家在意、详情页没讲</b>${ul(p.missing)}</div>`).join("")}
+  ${(d.ours || []).length ? `<div class="card"><h3 style="margin-top:0">我们的详情页怎么改</h3>${ul(d.ours)}</div>` : ""}`;
+};
+
 export function renderReport(an, stats, w) {
   const names = Object.fromEntries(stats.map((s) => [s.key, s]));
   const w2 = w || {};
@@ -65,7 +90,7 @@ export function renderReport(an, stats, w) {
     if (s.manual && !s.analyzed) {
       const m = s.manual;
       return `<div class="card"><h3>${roleTag(s)} ${esc(m.name || "我们的产品")}（没有评价数据，按我们填写的信息）</h3>
-        <table>${[["价格", m.price], ["卖点", m.points], ["参数", m.params], ["说明", m.notes]].filter(([, v]) => v).map(([k, v]) => `<tr><th style="width:7em">${k}</th><td>${esc(v)}</td></tr>`).join("")}</table></div>`;
+        <table>${[["价格", m.price], ["卖点", m.points], ["参数", m.params], ["说明", m.notes]].filter(([, v]) => v).map(([k, v]) => `<tr><th style="width:7em">${k}</th><td>${esc(v)}</td></tr>`).join("")}</table>${descBlock(s.desc)}</div>`;
     }
     return `<div class="card">
       <div class="head">${s.image ? `<img src="${esc(s.image)}" alt="">` : ""}<div><h3 style="margin-top:0">${roleTag(s)} ${esc(s.title)}</h3>
@@ -77,8 +102,9 @@ export function renderReport(an, stats, w) {
       <div class="grid" style="margin-top:10px"><div><h3>买家满意的地方</h3>${bars(s.good, "good")}</div><div><h3>买家不满意的地方</h3>${bars(s.bad, "bad")}</div></div>
       <div class="grid"><div><h3>用途和需求</h3>${bars(s.need, "neu", 8)}</div><div><h3>买家身份</h3>${bars(s.who, "neu", 8)}</div></div>
       ${s.recent.length ? `<h3>最近 30 天冒出来的问题</h3>${s.recent.map((x) => `<span class="tag bad">${esc(x.name)}：最近 ${x.recentPct}%，之前 ${x.beforePct}%</span>`).join("")}` : ""}
-      <div class="grid"><div><h3>评价里的规格分布</h3>${bars(s.sku.map((x) => ({ ...x, quotes: [] })), "neu", 8)}</div>
+      <div class="grid"><div><h3>评价里的规格分布（规格 · 价格 · 占比）</h3>${skuBars(s.sku)}</div>
       <div><h3>问大家（${esc(s.qa.total || 0)} 个问题，分析 ${s.qa.analyzed} 个）</h3>${s.qa.topics.length ? s.qa.topics.map((t) => `<div class="bar neu"><span class="t">${esc(t.name)}${t.worry ? " ⚠" : ""}</span><span class="b"><i style="width:${Math.min(100, (t.count / (s.qa.topics[0].count || 1)) * 100)}%"></i></span><span class="n">${t.count} 次</span></div>`).join("") : '<div class="meta">没有</div>'}</div></div>
+      ${descBlock(s.desc)}
       ${s.platformTags.length ? `<h3>淘宝的印象标签</h3>${s.platformTags.map((t) => `<span class="tag">${esc(t.title)}${t.count ? " " + esc(t.count) : ""}</span>`).join("")}` : ""}
     </div>`;
   };
@@ -102,6 +128,7 @@ ${w2.suggestions ? `<h2>优化建议</h2><div class="grid">
 <div class="card"><h3 style="margin-top:0">产品改进</h3>${ul(sug.product)}</div><div class="card"><h3 style="margin-top:0">详情页和主图</h3>${ul(sug.detail)}</div>
 <div class="card"><h3 style="margin-top:0">建议主打的卖点</h3>${ul(sug.points)}</div><div class="card"><h3 style="margin-top:0">详情页里要提前回答的问题</h3>${ul(sug.faq)}</div>
 <div class="card"><h3 style="margin-top:0">价格和规格</h3>${ul(sug.price)}</div><div class="card"><h3 style="margin-top:0">要注意的风险</h3>${ul(w2.risks)}</div></div>` : ""}
+${detailSection(w2.detail, names)}
 <h2>每个商品的详细情况</h2>
 ${stats.map(prodBlock).join("")}
 <h2>说明</h2>
@@ -109,6 +136,7 @@ ${stats.map(prodBlock).join("")}
 <p>· 评价按时间从新到旧采集，每个商品最多 ${an.options.rates} 条；淘宝折叠的评价、默认好评、空评价不计入。报告是样本统计，不是全部评价。</p>
 <p>· 每条评价由 AI 打标签（满意点、不满意点、用途、人群），意思相近的标签再由 AI 合并；百分比 = 提到这一点的评价条数 ÷ 分析的评价条数，由程序统计。</p>
 <p>· 结论和建议由 AI 根据统计数据写成，请结合评价原话核对后再用。</p>
+<p>· 详情页：把详情图拼起来切成几张 JPG，交给 AI 读出卖点和宣传，再和评价、问大家对照；AI 读图可能漏字或看错，重要的地方请对照原详情页。</p>
 ${stats.filter((s) => s.analyzed === 0 && !s.manual).map((s) => `<p>· ${esc(names[s.key] ? shortTitle(s) : s.key)}：没有拿到可分析的评价。</p>`).join("")}
 </div>
 </div></body></html>`;

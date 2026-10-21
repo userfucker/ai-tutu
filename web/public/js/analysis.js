@@ -3,11 +3,12 @@
  */
 (() => {
   const esc = W.esc;
-  const STAGES = [["collect", "采集"], ["tag", "分析评价"], ["vocab", "合并标签"], ["stats", "统计"], ["write", "写结论"], ["report", "出报告"]];
-  const STAGE_TEXT = { collect: "采集中", tag: "分析评价中", vocab: "合并标签", stats: "统计中", write: "写结论", report: "出报告", done: "已完成", failed: "失败", stopped: "已停止" };
+  const STAGES = [["collect", "采集"], ["tag", "分析评价和详情页"], ["vocab", "合并标签"], ["stats", "统计"], ["write", "写结论"], ["report", "出报告"]];
+  const STAGE_TEXT = { collect: "采集中", tag: "分析评价和详情页", vocab: "合并标签", stats: "统计中", write: "写结论", report: "出报告", done: "已完成", failed: "失败", stopped: "已停止" };
   const P_STATUS = { waiting: ["排队", ""], collecting: ["采集中", "blue"], collected: ["已采集", "ok"], failed: ["没采到", "bad"], manual: ["手动填写", "ours"] };
   const stageTag = (s) => `<span class="tag ${s === "done" ? "ok" : s === "failed" ? "bad" : s === "stopped" ? "warn" : "blue"}">${STAGE_TEXT[s] || s}</span>`;
   let rateOptions = [100, 200, 300, 500, 800, 1000];
+  let batchOptions = [50, 100, 200];
   let cache = { list: null, detail: null };
 
   function stagesHtml(a) {
@@ -23,6 +24,7 @@
       if (params[0]) return renderDetail(main, params[0]);
       const r = await W.api("GET", "/api/analyses");
       rateOptions = r.rateOptions || rateOptions;
+      batchOptions = r.batchOptions || batchOptions;
       cache.list = r.list;
       main.innerHTML = `<div class="head"><div><h1>竞品分析</h1><div class="muted">贴上淘宝 / 天猫的商品链接，插件自动采集商品信息、评价和问大家，AI 分析买家的需求和不满，出一份 HTML 报告。</div></div>
         <div class="sp"><button class="primary" data-act="new">＋ 新建分析</button></div></div>
@@ -41,11 +43,15 @@
         const v = (id) => (m.querySelector("#" + id) || {}).value || "";
         const mode = m.querySelector("input[name=ours]:checked").value;
         const body = {
-          name: v("aName").trim(), links: v("aLinks"), rates: +v("aRates"), qa: m.querySelector("#aQa").checked,
+          name: v("aName").trim(), links: v("aLinks"), rates: +v("aRates"), qa: m.querySelector("#aQa").checked, batch: +v("aBatch"), desc: m.querySelector("#aDesc").checked,
           oursUrl: mode === "link" ? v("oUrl") : "",
           oursManual: mode === "manual" ? { name: v("oName"), price: v("oPrice"), points: v("oPoints"), params: v("oParams"), notes: v("oNotes") } : null,
+          oursDesc: [],
         };
         el.disabled = true;
+        // 我们的详情页图片（手动填写时可以上传）：按文件名排序
+        const files = mode === "manual" ? [...(m.querySelector("#oDesc").files || [])].sort((a, b) => a.name.localeCompare(b.name, "zh", { numeric: true })).slice(0, 40) : [];
+        for (const f of files) body.oursDesc.push({ name: f.name, mime: f.type, b64: await new Promise((res) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.readAsDataURL(f); }) });
         try {
           const r = await W.api("POST", "/api/analyses", body);
           W.toast("已开始：插件会一个一个采集");
@@ -58,7 +64,7 @@
       retryTask: async (el) => { await W.api("POST", `/api/tasks/${el.dataset.id}/retry`); W.toast("已重新排队"); },
       dupe: async () => {
         const a = cache.detail;
-        sessionStorage.setItem("aitutuDupe", JSON.stringify({ name: a.name + "（重新分析）", links: a.products.filter((p) => p.role === "rival").map((p) => p.url).join("\n"), oursUrl: (a.products.find((p) => p.role === "ours" && p.url) || {}).url || "", rates: a.options.rates }));
+        sessionStorage.setItem("aitutuDupe", JSON.stringify({ name: a.name + "（重新分析）", links: a.products.filter((p) => p.role === "rival").map((p) => p.url).join("\n"), oursUrl: (a.products.find((p) => p.role === "ours" && p.url) || {}).url || "", rates: a.options.rates, batch: a.options.batch, desc: a.options.desc }));
         W.go("#/analysis/new");
       },
     },
@@ -72,7 +78,9 @@
         <label class="f wide">名称（可以不填）<input id="aName" value="${esc(pre.name || "")}" placeholder="例如：保温杯竞品 10 月"></label>
         <label class="f wide">竞品链接（一行一个）<textarea id="aLinks" rows="6" placeholder="https://item.taobao.com/item.htm?id=...&#10;https://detail.tmall.com/item.htm?id=...">${esc(pre.links || "")}</textarea></label>
         <label class="f">每个商品采集多少条评价（按时间，最新的优先）<select id="aRates">${rateOptions.map((n) => `<option value="${n}" ${n === (pre.rates || 300) ? "selected" : ""}>${n} 条</option>`).join("")}</select></label>
-        <label class="f">问大家<span class="row" style="color:var(--ink)"><label class="row"><input type="checkbox" id="aQa" checked> 也采集“问大家”（最多 200 个问题）</label></span></label>
+        <label class="f">评价打标签每轮几条（越多轮数越少，但 AI 一次要处理的越多）<select id="aBatch">${batchOptions.map((n) => `<option value="${n}" ${n === (pre.batch || 100) ? "selected" : ""}>每轮 ${n} 条</option>`).join("")}</select></label>
+        <label class="f">问大家<span class="row" style="color:var(--ink)"><label class="row"><input type="checkbox" id="aQa" checked> 也采集“问大家”（全部采集）</label></span></label>
+        <label class="f wide">详情页<span class="row" style="color:var(--ink)"><label class="row"><input type="checkbox" id="aDesc" ${pre.desc === false ? "" : "checked"}> 读详情页：采集详情图，拼成几张图交给“看详情图”的 AI，和评价对照着分析</label></span></label>
       </div></div>
       <div class="card"><h3>我们的产品（用来对比）</h3>
         <div class="pills" id="oursMode" style="margin:6px 0 12px">
@@ -84,10 +92,11 @@
           <label class="f">产品名称<input id="oName"></label><label class="f">价格<input id="oPrice" placeholder="例如 59 元"></label>
           <label class="f wide">卖点<textarea id="oPoints" rows="2" placeholder="我们主打的卖点"></textarea></label>
           <label class="f wide">参数<textarea id="oParams" rows="2" placeholder="材质、容量、尺寸、重量……"></textarea></label>
-          <label class="f wide">其他说明<textarea id="oNotes" rows="2" placeholder="和竞品的区别、我们已知的问题……"></textarea></label></div></div>
+          <label class="f wide">其他说明<textarea id="oNotes" rows="2" placeholder="和竞品的区别、我们已知的问题……"></textarea></label>
+          <label class="f wide">我们的详情页图片（可以多选，按文件名排顺序；不传就不分析我们的详情页）<input type="file" id="oDesc" accept="image/*" multiple></label></div></div>
         <div data-mode="none" hidden class="muted">只分析竞品，报告里不写“我们 vs 竞品”。</div>
       </div>
-      <div class="row" style="margin-top:14px"><button class="primary" data-act="submit">开始分析</button><span class="muted">采集交给淘宝采集插件，分析评价交给 ai-web（DeepSeek / Kimi 等），做的时候可以关掉这个网页。</span></div>`;
+      <div class="row" style="margin-top:14px"><button class="primary" data-act="submit">开始分析</button><span class="muted">采集交给淘宝采集插件，分析评价交给 ai-web（DeepSeek / Kimi 等），读详情页按“AI 连接”里“看详情图”的顺序（国产优先），做的时候可以关掉这个网页。</span></div>`;
     main.querySelector("#oursMode").onchange = (e) => {
       const v = e.target.value;
       main.querySelectorAll("#oursMode .pill").forEach((p) => p.classList.toggle("on", p.querySelector("input").checked));
@@ -114,19 +123,25 @@
         ${a.stage !== "collect" && !hasText() ? '<div class="note warn" style="margin-top:10px">没有能写文字的 AI 连着（ai-web 或 AI图图），分析任务在排队等着。</div>' : ""}
         ${tasks.some((t) => t.status === "running" && /滑块|登录/.test(t.progress || "")) ? '<div class="note bad" style="margin-top:10px">淘宝要求登录或滑块验证：请到弹出的淘宝窗口里操作，完成后自动接着采。</div>' : ""}</div>` : ""}
       ${a.error ? `<div class="note bad" style="margin-top:12px">${esc(a.error)}</div>` : ""}
-      <div class="card" style="margin-top:14px"><h3>商品（每个最多 ${a.options.rates} 条评价${a.options.qa ? "，加问大家" : ""}）</h3><div class="prods">
+      <details class="card" style="margin-top:14px" ${done ? "" : "open"}><summary><b>商品（每个最多 ${a.options.rates} 条评价${a.options.qa ? "，加问大家" : ""}${a.options.desc ? "，读详情页" : ""}）</b> <span class="muted">${a.products.length} 个${done ? "，点开看" : ""}</span></summary><div class="prods" style="margin-top:8px">
         ${a.products.map((p) => {
           let st = p.status;
           if (st === "waiting") { const ct = tasks.find((t) => (t.key || "").endsWith(`:collect:${p.key}`)); if (ct && ct.status === "running") st = "collecting"; }
           const [t, c] = P_STATUS[st] || [st, ""];
           const ctask = st === "collecting" ? tasks.find((t) => (t.key || "").endsWith(`:collect:${p.key}`)) : null; return `<div class="prod"><span class="tag ${p.role === "ours" ? "ours" : ""}">${p.role === "ours" ? "我们" : "竞品 " + p.key.slice(1)}</span>
           <div style="min-width:0"><div class="t" title="${esc(p.title || p.url)}">${esc(p.title || p.url)}</div>${ctask && ctask.progress ? `<div class="muted">${esc(ctask.progress)}</div>` : ""}${p.url ? `<a class="muted" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url.slice(0, 70))}</a>` : ""}${p.error ? `<div class="muted" style="color:var(--bad)">${esc(p.error)}</div>` : ""}</div>
-          <div class="row"><span class="tag ${c}">${t}</span>${p.counts ? `<span class="muted">评价 ${p.counts.rates} · 问大家 ${p.counts.qa}</span>` : ""}</div></div>`; }).join("")}</div></div>
-      ${done ? `<div style="margin-top:14px"><iframe class="report" src="/api/analyses/${a.id}/report"></iframe></div>` : ""}
-      <details class="card" style="margin-top:14px" ${fails.length ? "open" : ""}><summary><b>任务记录</b> <span class="muted">${tasks.length} 个${fails.length ? `，${fails.length} 个失败` : ""}</span></summary>
+          <div class="row"><span class="tag ${c}">${t}</span>${p.counts ? `<span class="muted">评价 ${p.counts.rates} · 问大家 ${p.counts.qa}</span>` : ""}</div></div>`; }).join("")}</div></details>
+      ${done ? `<div style="margin-top:14px"><iframe class="report" id="reportFrame" scrolling="no" src="/api/analyses/${a.id}/report"></iframe></div>` : ""}
+      <details class="card" style="margin-top:14px" open><summary><b>任务记录</b> <span class="muted">${tasks.length} 个${fails.length ? `，${fails.length} 个失败` : ""}</span></summary>
         <div class="tasklog tscroll" style="margin-top:8px"><table class="table"><thead><tr><th>任务</th><th>状态</th><th>交给</th><th>说明</th><th></th></tr></thead><tbody>
         ${tasks.map((t) => `<tr><td>${esc(t.label)}</td><td>${W.taskTag(t)}</td><td>${esc(t.siteName || "")}</td><td class="muted">${esc((t.status === "failed" ? t.error : t.progress) || "")}</td><td>${t.status === "failed" ? `<button class="sm" data-act="retryTask" data-id="${t.id}">重试</button>` : ""}</td></tr>`).join("")}
         </tbody></table></div></details>`;
+    // 报告按内容的高度完全展开，整页一起滚动（不在小框里滚）
+    const fr = main.querySelector("#reportFrame");
+    if (fr) {
+      const fit = () => { try { const d = fr.contentDocument; if (d && d.body) fr.style.height = Math.max(400, d.documentElement.scrollHeight) + "px"; } catch {} };
+      fr.onload = () => { fit(); try { new ResizeObserver(fit).observe(fr.contentDocument.body); fr.contentDocument.addEventListener("toggle", fit, true); } catch {} setTimeout(fit, 500); };
+    }
   }
 
   W.taskTag = (t) => {

@@ -116,3 +116,53 @@ test("没有插件时任务排队等着，插件连上后接着做", async () =>
   }
   assert.equal(a.stage, "done");
 });
+
+test("读详情页：详情图拼切成 JPG，国产 AI 失败了换下一个；我们上传的详情页也读；打标签每轮 50 条", async () => {
+  plugins.forEach((p) => p.close());
+  plugins.length = 0;
+  await sleep(200);
+  // 本地放几张详情图（假装是淘宝 CDN）
+  const { createCanvas } = await import("@napi-rs/canvas");
+  const png = (color, h) => { const c = createCanvas(790, h); const g = c.getContext("2d"); g.fillStyle = color; g.fillRect(0, 0, 790, h); g.fillStyle = "#222"; g.font = "40px sans-serif"; for (let y = 60; y < h; y += 120) g.fillText("保温 24 小时 不漏水", 60, y); return c.toBuffer("image/png"); };
+  const imgs = { "/d1.png": png("#f0e0d0", 1800), "/d2.png": png("#d0e0f0", 2600), "/d3.png": png("#e0f0d0", 1500) };
+  const http = await import("node:http");
+  const cdn = http.createServer((req, res) => { const b = imgs[req.url]; if (!b) { res.statusCode = 404; return res.end(); } res.setHeader("Content-Type", "image/png"); res.end(b); });
+  await new Promise((r) => cdn.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${cdn.address().port}`;
+  const url = `ws://127.0.0.1:${PORT}/ext`;
+  const seen = [];
+  // 假 ai-web 1.4.0：Kimi 放不上图片（失败），DeepSeek 能读图
+  plugins.push(await connect(url, { token, name: "测试电脑", version: "1.4.0", sites: [{ site: "kimi", open: true, ready: true }, { site: "deepseek", open: true, ready: true }] }, async (m) => {
+    if (m.cmd !== "ask") return { ok: true };
+    const files = m.args.files || [];
+    const pics = files.filter((f) => f.b64);
+    seen.push({ site: m.site, pics: pics.length, sizes: pics.map((f) => Buffer.from(f.b64, "base64").length) });
+    if (pics.length && m.site === "kimi") return { error: "附件放不上去（试了：paste、input、drop）" };
+    const txt = files.find((f) => f.content);
+    return { answer: fakeAnswer(m.args.text, txt && txt.content) };
+  }));
+  plugins.push(await connect(url, { token, app: "taobao", name: "测试电脑", version: "0.7.2", sites: [{ site: "taobao", open: true, ready: true }] }, async (m) => {
+    const item = fakeItem("555", 100, 0.3);
+    if (m.args.desc) item.item.descImages = [`${base}/d1.png`, `${base}/d2.png`, `//127.0.0.1:1/没有这张.jpg`, `${base}/d3.png`];
+    return item;
+  }));
+  const ours = [{ name: "a.png", mime: "image/png", b64: png("#ffffff", 1200).toString("base64") }];
+  const r = await api("POST", "/api/analyses", { name: "读详情页", links: "https://item.taobao.com/item.htm?id=555", rates: 100, batch: 50, oursManual: { name: "我们的杯子", price: "59" }, oursDesc: ours });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  let a;
+  for (let i = 0; i < 300; i++) { a = (await api("GET", `/api/analyses/${r.body.id}`)).body.analysis; if (["done", "failed"].includes(a.stage)) break; await sleep(150); }
+  cdn.close();
+  assert.equal(a.stage, "done", JSON.stringify(a));
+  assert.equal(a.options.batch, 50);
+  const tasks = (await api("GET", `/api/tasks?ownerType=analysis&ownerId=${r.body.id}`)).body.tasks;
+  assert.equal(tasks.filter((t) => /评价打标签/.test(t.label)).length, 2, "100 条评价，每轮 50 条 = 2 轮");
+  const reads = seen.filter((x) => x.pics);
+  assert.ok(reads.some((x) => x.site === "kimi") && reads.some((x) => x.site === "deepseek"), "Kimi 失败后换 DeepSeek：" + JSON.stringify(reads.map((x) => x.site)));
+  const big = reads.find((x) => x.site === "deepseek" && x.pics >= 3);
+  assert.ok(big, "竞品详情页：3 张图拼起来 5900 像素高，切成 4 段左右：" + JSON.stringify(reads));
+  assert.ok(big.sizes.every((n) => n < 400 * 1024), "每段 JPG 不超过 400 KB：" + big.sizes);
+  const desc = JSON.parse(fs.readFileSync(path.join(dataDir, "analysis", r.body.id, "desc.json"), "utf8"));
+  assert.ok(desc.p1 && desc.p1.selling && desc.ours && desc.ours.selling, "竞品和我们的详情页都读了：" + JSON.stringify(desc));
+  const rep = (await api("GET", `/api/analyses/${r.body.id}/report`)).body;
+  for (const s of ["详情页 vs 评价", "详情页讲了什么", "保温 24 小时", "我们的详情页怎么改", "¥59.00"]) assert.ok(rep.includes(s), "报告里应该有：" + s);
+});

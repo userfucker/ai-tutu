@@ -69,7 +69,7 @@
       },
     },
   };
-  const CAN = { text: ["deepseek", "kimi", "doubao", "glm", "gemini", "copilot"], vision: ["gemini", "copilot"], image: ["gemini", "copilot"], collect: ["taobao"] };
+  const CAN = { text: ["deepseek", "kimi", "doubao", "glm", "gemini", "copilot"], vision: ["gemini", "copilot"], image: ["gemini", "copilot"], read: ["kimi", "doubao", "glm", "deepseek", "gemini", "copilot"], collect: ["taobao"] };
   function roleHtml(role, name, s) {
     const cur = s.roles[role] || [];
     const all = [...cur, ...CAN[role].filter((x) => !cur.includes(x))];

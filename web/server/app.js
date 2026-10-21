@@ -123,14 +123,16 @@ app.post("/api/tasks/:id/retry", (c) => c.json({ ok: queue.retry(Number(c.req.pa
 app.post("/api/tasks/:id/bump", (c) => { queue.bump(Number(c.req.param("id"))); return c.json({ ok: true }); });
 
 // ------------------------------------------------------------ 竞品分析
-app.get("/api/analyses", (c) => c.json({ list: analysis.listAll(), rateOptions: analysis.RATE_OPTIONS }));
+app.get("/api/analyses", (c) => c.json({ list: analysis.listAll(), rateOptions: analysis.RATE_OPTIONS, batchOptions: analysis.BATCH_OPTIONS }));
 app.post("/api/analyses", async (c) => {
   const b = await c.req.json();
   const rivals = analysis.parseLinks(b.links);
   const oursUrl = analysis.parseLinks(b.oursUrl || "")[0] || "";
   const manual = b.oursManual && Object.values(b.oursManual).some((v) => String(v || "").trim()) ? b.oursManual : null;
   if (!rivals.length && !oursUrl) return c.json({ error: "没有找到淘宝 / 天猫的商品链接（一行一个）" }, 400);
-  const an = analysis.create({ name: b.name, rivals, ours: oursUrl ? { url: oursUrl } : manual ? { manual } : null, rates: b.rates, qa: b.qa });
+  const oursDesc = Array.isArray(b.oursDesc) ? b.oursDesc.filter((x) => x && x.b64) : [];
+  const ours = oursUrl ? { url: oursUrl } : manual ? { manual } : oursDesc.length ? { manual: { name: "我们的产品" } } : null;
+  const an = analysis.create({ name: b.name, rivals, ours, rates: b.rates, qa: b.qa, batch: b.batch, desc: b.desc, oursDesc: oursUrl ? [] : oursDesc });
   return c.json({ ok: true, id: an.id });
 });
 app.get("/api/analyses/:id", (c) => {

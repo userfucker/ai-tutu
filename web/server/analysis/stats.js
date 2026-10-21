@@ -67,7 +67,7 @@ export function productStats(p, raw, tags, vocab) {
   // 规格分布（评价里的 sku 字段）
   const skuMap = new Map();
   for (const r of rates) { const k = (r.sku || "").replace(/\s+/g, " ").trim(); if (k) skuMap.set(k, (skuMap.get(k) || 0) + 1); }
-  const sku = [...skuMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count, pct: pct(count, rates.length) }));
+  const sku = [...skuMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count, pct: pct(count, rates.length), price: skuPrice(raw && raw.item, name) }));
   // 时间范围、最近 30 天的问题
   const dates = rates.map((r) => parseDate(r.date)).filter(Boolean).sort((a, b) => a - b);
   const latest = dates.length ? dates[dates.length - 1] : 0;
@@ -119,6 +119,19 @@ export function productStats(p, raw, tags, vocab) {
   };
 }
 
+/** 评价里的规格（如“颜色分类:白色;容量:500ml”）对应商品规格表里的价格：规格值都对得上才算 */
+function skuPrice(item, rateSku) {
+  const vals = String(rateSku || "").split(/[;；]/).map((x) => x.split(/[:：]/).pop().trim()).filter(Boolean);
+  if (!vals.length || !item || !Array.isArray(item.skus)) return "";
+  const norm = (x) => String(x).replace(/\s+/g, "");
+  const hit = item.skus.find((k) => { const parts = String(k.name || "").split(" / ").map(norm); return vals.every((v) => parts.includes(norm(v))); })
+    || item.skus.find((k) => vals.every((v) => norm(k.name || "").includes(norm(v))))
+    // 评价里的规格名比商品规格表里的长（多了说明文字）：规格表里每一项都出现在评价的规格里就算
+    || item.skus.find((k) => { const parts = String(k.name || "").split(/\s*\/\s*|\s+/).map(norm).filter(Boolean); return parts.length && parts.every((x) => norm(rateSku).includes(x)); });
+  const p = hit && String(hit.price || "").trim();
+  return p ? (/^[\d.]+/.test(p) ? "¥" + p : p) : "";
+}
+
 /** 给 AI 写结论用的精简版（去掉引用原文，控制长度） */
 export function compactForWriting(all) {
   return all.map((s) => ({
@@ -126,9 +139,10 @@ export function compactForWriting(all) {
     满意率: s.sentiment.posPct, 不满意率: s.sentiment.negPct,
     满意点: s.good.map((x) => `${x.name} ${x.pct}%`), 不满意点: s.bad.map((x) => `${x.name} ${x.pct}%`),
     用途需求: s.need.map((x) => `${x.name} ${x.pct}%`), 人群: s.who.map((x) => `${x.name} ${x.pct}%`),
-    规格分布: s.sku.slice(0, 6).map((x) => `${x.name} ${x.pct}%`), 最近新增问题: s.recent.map((x) => `${x.name} 最近30天${x.recentPct}% 之前${x.beforePct}%`),
+    规格分布: s.sku.slice(0, 6).map((x) => `${x.name}${x.price ? `（${x.price}）` : ""} ${x.pct}%`), 最近新增问题: s.recent.map((x) => `${x.name} 最近30天${x.recentPct}% 之前${x.beforePct}%`),
     问大家主题: s.qa.topics.map((x) => `${x.name} ${x.count}次${x.worry ? `（${x.worry}次是担心）` : ""}`),
     参数: s.params.map((x) => `${x.name}:${x.value}`).slice(0, 10), 规格: s.skuProps, 平台印象标签: s.platformTags.map((t) => `${t.title}${t.count ? "(" + t.count + ")" : ""}`),
     manual: s.manual || undefined,
+    详情页: s.desc ? { 卖点: s.desc.selling, 结构: (s.desc.structure || []).slice(0, 15), 宣传: s.desc.claims, 承诺: s.desc.promises, 参数: (s.desc.params || []).slice(0, 12), 人群: s.desc.audience, 场景: s.desc.scenes, 风格: s.desc.style } : undefined,
   }));
 }
