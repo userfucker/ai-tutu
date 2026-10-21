@@ -207,7 +207,25 @@ async function pipeline(id) {
     prog(`AI 分析评价：${doneJobs}/${jobs.length} 批`, doneJobs, jobs.length);
   }));
   if (stopped(id)) return;
-  const descs = await descJob;
+  // 读详情页的任务一直派不出去（没有能看详情图的 AI 连着）：评价分析完以后最多再等 5 分钟，然后跳过，不让报告卡住
+  let waitedSince = Date.now(), descDone = false;
+  descJob.finally(() => (descDone = true));
+  while (!descDone) {
+    await new Promise((r) => setTimeout(r, process.env.QUEUE_FAST ? 300 : 5000));
+    if (stopped(id)) return;
+    const dt = queue.list({ ownerType: "analysis", ownerId: id, limit: 2000 }).filter((t) => (t.key || "").startsWith(`an:${id}:desc:`));
+    // 只有“派不出去”（说明是“等待：没有能做的 AI…”）才计时；正在做、失败后等着重试都不算
+    if (!dt.some((t) => t.status === "queued" && /^等待：/.test(t.progress || ""))) waitedSince = Date.now();
+    else if (Date.now() - waitedSince > (process.env.QUEUE_FAST ? 3000 : 5 * 60000)) {
+      descSkipped.add(id);
+      for (const t of dt) if (t.status === "queued") queue.cancel(t.id);
+      prog("没有能看详情图的 AI，跳过读详情页", 0, 1);
+      break;
+    }
+    if (!descDone) prog(dt.some((t) => t.status === "running") ? "AI 正在读详情页" : `等 AI 读详情页：${dt.find((t) => t.status === "queued")?.progress || "排队中"}`, 0, 1);
+  }
+  const descAll = await descJob;
+  const descs = Object.fromEntries(Object.entries(descAll).filter(([, v]) => !v.error));
   if (stopped(id)) return;
 
   // 3. 合并同义标签
@@ -245,6 +263,7 @@ async function pipeline(id) {
     const raw = p.status === "collected" ? readJson(path.join(dir, `raw_${p.key}.json`), {}) : { item: { title: p.title } };
     const st = productStats(p, raw, byProd[p.key] || { rates: [], qa: [] }, vocab);
     if (descs[p.key]) st.desc = descs[p.key];
+    else if (descAll[p.key] && descAll[p.key].error) st.descError = descAll[p.key].error;
     return st;
   });
   writeJson(path.join(dir, "stats.json"), stats);
@@ -293,7 +312,7 @@ async function readDescs(an, dir) {
       if (!sources.length) return;
       const ddir = descDir(an.id);
       const built = await buildDescImages(sources, ddir, p.key);
-      if (!built.files.length) { out[p.key] = { error: "详情图下载不下来" }; return; }
+      if (!built.files.length) { out[p.key] = { error: built.gifs && !built.failed ? "详情图都是 GIF 动图，跳过了" : "详情图下载不下来" }; return; }
       const images = built.files.map((f, i) => ({ file: `desc/${an.id}/${f}`, name: `详情页第${i + 1}段.jpg`, mime: "image/jpeg" }));
       let v = null;
       for (let attempt = 0; attempt < 2 && !v; attempt++) {
@@ -305,11 +324,12 @@ async function readDescs(an, dir) {
       out[p.key] = { ...v, images: built.files.length, height: built.height, cut: built.cut };
     } catch (e) {
       if (stopped(an.id)) return;
-      out[p.key] = { error: `读详情页没成功：${e.message}` };
+      out[p.key] = { error: descSkipped.has(an.id) ? "等了 5 分钟没有能看详情图的 AI，跳过了（在“AI 连接”里看看 ai-web 1.4.0 或 AI图图 有没有连上）" : `读详情页没成功：${e.message}` };
     } finally { writeJson(file, out); }
   }));
-  return Object.fromEntries(Object.entries(out).filter(([, v]) => !v.error));
+  return out;
 }
+const descSkipped = new Set();
 
 const arr2 = (v) => (Array.isArray(v) ? v : v ? [v] : []).map((x) => String(x).trim()).filter((x) => x && x.length <= 20).slice(0, 6);
 

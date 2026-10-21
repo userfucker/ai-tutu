@@ -166,3 +166,33 @@ test("读详情页：详情图拼切成 JPG，国产 AI 失败了换下一个；
   const rep = (await api("GET", `/api/analyses/${r.body.id}/report`)).body;
   for (const s of ["详情页 vs 评价", "详情页讲了什么", "保温 24 小时", "我们的详情页怎么改", "¥59.00"]) assert.ok(rep.includes(s), "报告里应该有：" + s);
 });
+
+test("没有能看详情图的 AI：任务说明里写清楚原因，等一会儿就跳过，报告照样出来", async () => {
+  plugins.forEach((p) => p.close());
+  plugins.length = 0;
+  await sleep(200);
+  const url = `ws://127.0.0.1:${PORT}/ext`;
+  // 只有老版本的 ai-web（1.3.0，发不了图片），没有 AI图图
+  plugins.push(await connect(url, { token, name: "测试电脑", version: "1.3.0", sites: [{ site: "deepseek", open: true, ready: true }] }, async (m) => (m.cmd === "ask" ? { answer: fakeAnswer(m.args.text, (m.args.files || []).find((f) => f.content)?.content) } : { ok: true })));
+  plugins.push(await connect(url, { token, app: "taobao", name: "测试电脑", sites: [{ site: "taobao", open: true, ready: true }] }, async () => {
+    const it = fakeItem("666", 100);
+    it.item.descImages = ["data:,x"]; // 有详情图网址（下载不下来也没关系，这里看排队）
+    return it;
+  }));
+  // 给它一张能用的图：我们上传的详情页
+  const { createCanvas } = await import("@napi-rs/canvas");
+  const c = createCanvas(750, 900); c.getContext("2d").fillRect(0, 0, 10, 10);
+  const r = await api("POST", "/api/analyses", { links: "https://item.taobao.com/item.htm?id=666", rates: 100, oursManual: { name: "我们" }, oursDesc: [{ name: "a.png", mime: "image/png", b64: c.toBuffer("image/png").toString("base64") }] });
+  let a, why = "";
+  for (let i = 0; i < 300; i++) {
+    a = (await api("GET", `/api/analyses/${r.body.id}`)).body.analysis;
+    const t = (await api("GET", `/api/tasks?ownerType=analysis&ownerId=${r.body.id}`)).body.tasks.find((x) => /读详情页/.test(x.label));
+    if (t && /^等待：/.test(t.progress || "")) why = t.progress;
+    if (["done", "failed"].includes(a.stage)) break;
+    await sleep(150);
+  }
+  assert.equal(a.stage, "done", JSON.stringify(a));
+  assert.match(why, /1\.4\.0/, "说明里写了要升级 ai-web：" + why);
+  const rep = (await api("GET", `/api/analyses/${r.body.id}/report`)).body;
+  assert.ok(rep.includes("没有能看详情图的 AI，跳过了"), "报告说明里写了跳过的原因");
+});

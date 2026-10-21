@@ -195,12 +195,37 @@ export function tick() {
           if (pick) break;
         }
         if (pick) run(row, payload, pick.conn, pick.site);
+        else waitWhy(row, role, order);
       }
     } while (again);
   } finally { ticking = false; }
 }
 setInterval(tick, 2000).unref();
 const badSites = new Map(); // 任务编号 → 失败过的网站
+/** 任务派不出去时，在“说明”里写清楚为什么（没有能做的 AI 连着），别让人干等 */
+const HOW = {
+  text: "让 ai-web 连到工作台（在 ai-web 的服务器下拉框里选工作台），或者在“AI 连接 → AI 分工”里给写文字勾上 Gemini / Copilot",
+  read: "ai-web 升级到 1.4.0 并连到工作台，或者让 AI图图 插件连上工作台（用 Gemini / Copilot）",
+  vision: "让 AI图图 插件连上工作台（Gemini / Copilot）", image: "让 AI图图 插件连上工作台（Gemini / Copilot）",
+  collect: "让淘宝采集插件连上工作台（插件选项里填地址和口令）",
+};
+/** 这个任务还有没失败过、而且连着的网站可以换 */
+function hasOther(row, site) {
+  const p = parse(row.payload) || {};
+  const role = p.role || (row.kind === "text" && p.images && p.images.length ? "vision" : row.kind);
+  const order = p.sites && p.sites.length ? p.sites : roles()[role] || [];
+  const bad = badSites.get(row.id) || new Set([site]);
+  return order.some((x) => x !== site && !bad.has(x) && bridge.connsFor(x).length);
+}
+function waitWhy(row, role, order) {
+  let msg = "";
+  const conns = order.flatMap((site) => bridge.connsFor(site).map((c) => ({ c, site })));
+  if (!order.length) msg = `等待：“AI 分工”里“${ROLE_NAMES[role] || role}”一个网站都没勾`;
+  else if (!conns.length) msg = `等待：现在没有连着能做“${(ROLE_NAMES[role] || role).replace(/（.*$/, "")}”的 AI。${HOW[role] || ""}`;
+  else if (role === "read" && conns.every(({ c }) => c.app === "aiweb" && !verAtLeast(c.version, "1.4.0"))) msg = `等待：ai-web 是 ${conns[0].c.version} 版，发不了图片，要升级到 1.4.0；或者让 AI图图 插件连上工作台`;
+  else if (role !== "text" && conns.every(({ c }) => c.app === "aiweb") && role !== "read") msg = `等待：ai-web 只能写文字。${HOW[role] || ""}`;
+  if (msg && row.progress !== msg) { row.progress = msg; Q.progress.run(msg, row.id); broadcast("task", view(row)); }
+}
 const verAtLeast = (v, want) => { const a = String(v || "0").split(".").map(Number), b = want.split(".").map(Number); for (let i = 0; i < 3; i++) { if ((a[i] || 0) !== b[i]) return (a[i] || 0) > b[i]; } return true; };
 bridge.on("status", () => setImmediate(tick));
 
@@ -289,7 +314,7 @@ async function run(row, payload, conn, site) {
     const giveUp = row.attempts >= (row.max_attempts || 3) && !r.data.disconnected;
     Object.assign(row, giveUp
       ? { status: "failed", error: err, finished: now, progress: null }
-      : { status: "queued", error: err, not_before: now + (limit ? 5000 : 15000), progress: `上次失败：${err.slice(0, 60)}，稍后重试` });
+      : { status: "queued", error: err, not_before: now + (limit ? 5000 : hasOther(row, site) ? 2000 : 15000), progress: `上次失败：${err.slice(0, 60)}，${hasOther(row, site) ? "换别的网站" : "稍后重试"}` });
     save(row);
   }
   if (row.status === "done" || row.status === "failed") emitter.emit(`end:${row.id}`);

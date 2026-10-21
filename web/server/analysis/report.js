@@ -7,7 +7,7 @@ const CSS = `
 :root{--ink:#1b1f27;--sub:#5d6472;--mute:#8a909c;--line:#e3e6ec;--soft:#f5f6f8;--bg:#fafbfc;--accent:#2f5fd0;--good:#1f8a4c;--goodsoft:#e4f4ea;--bad:#c2362f;--badsoft:#fbe8e6;--warn:#a86400;--warnsoft:#fdf2df;--ours:#7a3fd1;--ourssoft:#f1e9fc}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 -apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif}
-.wrap{max-width:1440px;margin:0 auto;padding:32px 28px 80px}
+.wrap{margin:0;padding:28px 32px 80px}
 h1{font-size:28px;line-height:1.3;margin:0 0 6px}
 h2{font-size:21px;margin:44px 0 14px;padding-top:12px;border-top:2px solid var(--ink)}
 h3{font-size:16px;margin:22px 0 8px}
@@ -137,6 +137,7 @@ ${stats.map(prodBlock).join("")}
 <p>· 每条评价由 AI 打标签（满意点、不满意点、用途、人群），意思相近的标签再由 AI 合并；百分比 = 提到这一点的评价条数 ÷ 分析的评价条数，由程序统计。</p>
 <p>· 结论和建议由 AI 根据统计数据写成，请结合评价原话核对后再用。</p>
 <p>· 详情页：把详情图拼起来切成几张 JPG，交给 AI 读出卖点和宣传，再和评价、问大家对照；AI 读图可能漏字或看错，重要的地方请对照原详情页。</p>
+${stats.filter((s) => s.descError).map((s) => `<p>· ${shortTitle(s)}：${esc(s.descError)}</p>`).join("")}
 ${stats.filter((s) => s.analyzed === 0 && !s.manual).map((s) => `<p>· ${esc(names[s.key] ? shortTitle(s) : s.key)}：没有拿到可分析的评价。</p>`).join("")}
 </div>
 </div></body></html>`;

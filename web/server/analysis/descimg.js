@@ -44,23 +44,27 @@ function quietest(g, from, to) {
  * sources = 图片网址或 Buffer 的数组；outDir 里写 <prefix>_1.jpg … 返回 { files: [文件名], width, height, used, failed, cut }
  */
 export async function buildDescImages(sources, outDir, prefix) {
-  const list = sources.slice(0, MAX_IMGS);
+  // GIF 动图跳过：一般是装饰动画，读不出字，有的还特别大
+  const isGifUrl = (s) => !Buffer.isBuffer(s) && /\.gif(\?|_|$)/i.test(String(s));
+  let gifs = sources.filter(isGifUrl).length;
+  const list = sources.filter((s) => !isGifUrl(s)).slice(0, MAX_IMGS);
   const bufs = [];
   for (let i = 0; i < list.length; i += 4) {
     const part = await Promise.all(list.slice(i, i + 4).map((s) => (Buffer.isBuffer(s) ? s : download(String(s)))));
     bufs.push(...part);
   }
   const imgs = [];
-  let failed = sources.length > MAX_IMGS ? sources.length - MAX_IMGS : 0;
+  let failed = Math.max(0, sources.length - gifs - MAX_IMGS);
   for (const b of bufs) {
     if (!b) { failed++; continue; }
+    if (b.subarray(0, 4).toString("latin1") === "GIF8") { gifs++; continue; }
     try {
       const im = await loadImage(b);
       if (im.width < 200 || im.height < 40) continue; // 小图标、分隔线
       imgs.push(im);
     } catch { failed++; }
   }
-  if (!imgs.length) return { files: [], width: 0, height: 0, used: 0, failed, cut: false };
+  if (!imgs.length) return { files: [], width: 0, height: 0, used: 0, failed, gifs, cut: false };
   let H = imgs.reduce((a, im) => a + Math.round(im.height * (W / im.width)), 0);
   const cut = H > MAX_H;
   H = Math.min(H, MAX_H);
@@ -92,5 +96,5 @@ export async function buildDescImages(sources, outDir, prefix) {
     fs.writeFileSync(path.join(outDir, name), s.toBuffer("image/jpeg", 70));
     files.push(name);
   }
-  return { files, width: W, height: H, used: imgs.length, failed, cut };
+  return { files, width: W, height: H, used: imgs.length, failed, gifs, cut };
 }

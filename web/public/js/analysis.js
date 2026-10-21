@@ -61,6 +61,7 @@
       stop: async () => { if (await W.confirm("停止这个分析？已经做完的部分会保留，之后可以“重新开始”接着做。", "停止")) { await W.api("POST", `/api/analyses/${W.params[0]}/stop`); W.render(); } },
       restart: async () => { await W.api("POST", `/api/analyses/${W.params[0]}/restart`); W.toast("接着做：没做完和失败的部分会重新排队"); W.render(); },
       del: async () => { if (await W.confirm("删除这个分析和报告？不能恢复。", "删除", true)) { await W.api("DELETE", `/api/analyses/${W.params[0]}`); W.go("#/analysis"); } },
+      rewrite: async () => { await W.api("POST", `/api/analyses/${W.params[0]}/rewrite`); W.toast("报告已按新样式重新生成"); W.render(); },
       retryTask: async (el) => { await W.api("POST", `/api/tasks/${el.dataset.id}/retry`); W.toast("已重新排队"); },
       dupe: async () => {
         const a = cache.detail;
@@ -114,13 +115,14 @@
     const waiting = tasks.filter((t) => t.status === "queued");
     main.innerHTML = `<div class="head"><div class="grow"><div class="row"><a href="#/analysis">竞品分析</a><span class="muted">›</span></div><h1>${esc(a.name)}</h1>
         <div class="row">${stagesHtml(a)}${stageTag(a.stage)}</div></div>
-        <div class="sp">${done ? `<a href="/api/analyses/${a.id}/report?download=1"><button class="primary">下载 HTML 报告</button></a><a href="/api/analyses/${a.id}/report" target="_blank"><button>新窗口打开</button></a>` : ""}
+        <div class="sp">${done ? `<a href="/api/analyses/${a.id}/report?download=1"><button class="primary">下载 HTML 报告</button></a><a href="/api/analyses/${a.id}/report" target="_blank"><button>新窗口打开</button></a><button data-act="rewrite" title="用已经分析好的数据，按新的页面样式重新生成报告（不重新采集、不重新问 AI）">重新生成报告</button>` : ""}
           ${active ? '<button data-act="stop">停止</button>' : ""}${a.stage === "failed" || a.stage === "stopped" ? '<button class="blue" data-act="restart">重新开始</button>' : ""}
           <button data-act="dupe">再分析一次</button><button class="danger" data-act="del">删除</button></div></div>
       ${active ? `<div class="card"><div class="row"><b>${esc(a.progress && a.progress.msg || "")}</b><span class="sp muted">${waiting.length ? `排队 ${waiting.length} 个任务` : ""}</span></div>
         <div class="progress" style="margin-top:8px"><i style="width:${a.progress && a.progress.total ? Math.round((a.progress.done / a.progress.total) * 100) : 4}%"></i></div>
         ${a.stage === "collect" && !hasTaobao() ? '<div class="note warn" style="margin-top:10px">淘宝采集插件没连上，采集任务在排队等着。请打开插件“选项”，填工作台地址和口令。</div>' : ""}
         ${a.stage !== "collect" && !hasText() ? '<div class="note warn" style="margin-top:10px">没有能写文字的 AI 连着（ai-web 或 AI图图），分析任务在排队等着。</div>' : ""}
+        ${[...new Set(waiting.map((t) => t.progress || "").filter((m) => /^等待：/.test(m)))].map((m) => `<div class="note warn" style="margin-top:10px">${esc(m)}</div>`).join("")}
         ${tasks.some((t) => t.status === "running" && /滑块|登录/.test(t.progress || "")) ? '<div class="note bad" style="margin-top:10px">淘宝要求登录或滑块验证：请到弹出的淘宝窗口里操作，完成后自动接着采。</div>' : ""}</div>` : ""}
       ${a.error ? `<div class="note bad" style="margin-top:12px">${esc(a.error)}</div>` : ""}
       <details class="card" style="margin-top:14px" ${done ? "" : "open"}><summary><b>商品（每个最多 ${a.options.rates} 条评价${a.options.qa ? "，加问大家" : ""}${a.options.desc ? "，读详情页" : ""}）</b> <span class="muted">${a.products.length} 个${done ? "，点开看" : ""}</span></summary><div class="prods" style="margin-top:8px">
