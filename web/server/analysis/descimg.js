@@ -11,7 +11,7 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 const W = 750;
 const SEG = 1600, MAX_SEG = 10, MAX_H = 30000, MAX_IMGS = 40;
 
-/** 下载一张详情图（淘宝 CDN），失败返回 null */
+/** 下载一张详情图（淘宝 CDN），失败返回 null，原因记在 download.last */
 async function download(url) {
   const u = url.startsWith("//") ? "https:" + url : url;
   try {
@@ -19,9 +19,9 @@ async function download(url) {
     const t = setTimeout(() => ctl.abort(), 20000);
     const r = await fetch(u, { signal: ctl.signal, headers: { Referer: "https://item.taobao.com/", "User-Agent": "Mozilla/5.0" } });
     clearTimeout(t);
-    if (!r.ok) return null;
+    if (!r.ok) { download.last = `HTTP ${r.status}`; return null; }
     return Buffer.from(await r.arrayBuffer());
-  } catch { return null; }
+  } catch (e) { download.last = e.name === "AbortError" ? "20 秒没下载完" : String(e.cause && e.cause.code || e.message || e); return null; }
 }
 
 /** 一行像素“忙不忙”（颜色变化多 = 有字或图）。切线找最不忙的那一行 */
@@ -54,17 +54,18 @@ export async function buildDescImages(sources, outDir, prefix) {
     bufs.push(...part);
   }
   const imgs = [];
-  let failed = Math.max(0, sources.length - gifs - MAX_IMGS);
+  let failed = 0, bad = 0, small = 0;
   for (const b of bufs) {
     if (!b) { failed++; continue; }
     if (b.subarray(0, 4).toString("latin1") === "GIF8") { gifs++; continue; }
     try {
       const im = await loadImage(b);
-      if (im.width < 200 || im.height < 40) continue; // 小图标、分隔线
+      if (im.width < 200 || im.height < 40) { small++; continue; } // 小图标、分隔线
       imgs.push(im);
-    } catch { failed++; }
+    } catch { bad++; }
   }
-  if (!imgs.length) return { files: [], width: 0, height: 0, used: 0, failed, gifs, cut: false };
+  const why = { total: sources.length, gifs, failed, bad, small, skipped: Math.max(0, sources.length - gifs - MAX_IMGS), lastError: failed ? download.last || "" : "" };
+  if (!imgs.length) return { files: [], width: 0, height: 0, used: 0, failed, gifs, cut: false, why };
   let H = imgs.reduce((a, im) => a + Math.round(im.height * (W / im.width)), 0);
   const cut = H > MAX_H;
   H = Math.min(H, MAX_H);
@@ -96,5 +97,5 @@ export async function buildDescImages(sources, outDir, prefix) {
     fs.writeFileSync(path.join(outDir, name), s.toBuffer("image/jpeg", 70));
     files.push(name);
   }
-  return { files, width: W, height: H, used: imgs.length, failed, gifs, cut };
+  return { files, width: W, height: H, used: imgs.length, failed, gifs, cut, why };
 }

@@ -36,7 +36,7 @@ export function save(an) {
 }
 export function summary(an) {
   return { id: an.id, name: an.name, stage: an.stage, progress: an.progress, created: an.created, updated: an.updated, error: an.error || "",
-    products: an.products.map((p) => ({ key: p.key, role: p.role, url: p.url, title: p.title, status: p.status, error: p.error || "", counts: p.counts || null })),
+    products: an.products.map((p) => ({ key: p.key, role: p.role, url: p.url, title: p.title, status: p.status, error: p.error || "", counts: p.counts || null, descState: p.descState || null })),
     hasReport: !!an.reportFile, options: an.options };
 }
 export function listAll() { return S.all.all().map((r) => summary(JSON.parse(r.data))); }
@@ -157,7 +157,7 @@ async function pipeline(id) {
       }
     }
     const raw = readJson(rawFile, {});
-    setProduct(id, p.key, { status: "collected", title: (raw.item && raw.item.title) || p.url, counts: { rates: (raw.rates && raw.rates.list || []).length, qa: (raw.qa && raw.qa.list || []).length } });
+    setProduct(id, p.key, { status: "collected", title: (raw.item && raw.item.title) || p.url, counts: { rates: (raw.rates && raw.rates.list || []).length, qa: (raw.qa && raw.qa.list || []).length, desc: ((raw.item && raw.item.descImages) || []).length } });
     got++;
     prog(`采集商品数据：${got}/${toCollect.length}`, got, toCollect.length);
   }));
@@ -309,10 +309,14 @@ async function readDescs(an, dir) {
         const raw = readJson(path.join(dir, `raw_${p.key}.json`), {});
         sources = (raw.item && raw.item.descImages) || [];
       }
-      if (!sources.length) return;
+      if (!sources.length) { if (p.status === "collected") out[p.key] = { error: "没采到详情图（淘宝采集插件没拿到这个商品的详情页图片）" }; return; }
       const ddir = descDir(an.id);
       const built = await buildDescImages(sources, ddir, p.key);
-      if (!built.files.length) { out[p.key] = { error: built.gifs && !built.failed ? "详情图都是 GIF 动图，跳过了" : "详情图下载不下来" }; return; }
+      if (!built.files.length) {
+        const w = built.why;
+        out[p.key] = { error: `详情图 ${w.total} 张都用不了：${[w.gifs && `GIF 动图 ${w.gifs} 张（跳过）`, w.failed && `下载失败 ${w.failed} 张（${w.lastError || "原因不明"}）`, w.bad && `打不开 ${w.bad} 张`, w.small && `太小 ${w.small} 张`].filter(Boolean).join("，")}` };
+        return;
+      }
       const images = built.files.map((f, i) => ({ file: `desc/${an.id}/${f}`, name: `详情页第${i + 1}段.jpg`, mime: "image/jpeg" }));
       let v = null;
       for (let attempt = 0; attempt < 2 && !v; attempt++) {
@@ -321,11 +325,15 @@ async function readDescs(an, dir) {
         try { const x = extractJson(r.text, r.codes); if (x && typeof x === "object" && !Array.isArray(x) && (x.selling || x.structure)) v = x; } catch {}
       }
       if (!v) throw new Error("AI 没按格式回复");
-      out[p.key] = { ...v, images: built.files.length, height: built.height, cut: built.cut };
+      out[p.key] = { ...v, images: built.files.length, height: built.height, cut: built.cut, why: built.why };
     } catch (e) {
       if (stopped(an.id)) return;
       out[p.key] = { error: descSkipped.has(an.id) ? "等了 5 分钟没有能看详情图的 AI，跳过了（在“AI 连接”里看看 ai-web 1.4.0 或 AI图图 有没有连上）" : `读详情页没成功：${e.message}` };
-    } finally { writeJson(file, out); }
+    } finally {
+      writeJson(file, out);
+      const d = out[p.key];
+      if (d) setProduct(an.id, p.key, { descState: d.error ? { error: d.error } : { images: d.images } });
+    }
   }));
   return out;
 }
