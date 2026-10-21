@@ -208,13 +208,21 @@ async function run(row, payload, conn, site) {
   s.busy = true;
   Object.assign(row, { status: "running", site, worker: `${conn.id}|${site}`, started: Date.now(), progress: "开始", attempts: (row.attempts || 0) + 1, error: null });
   save(row);
-  let lastProg = 0;
+  // 进度最多一秒存一次；要紧的（滑块、验证、登录）马上存，其他的一秒内来了好几条就存最后一条
+  let lastProg = 0, pending = null, progTimer = null;
+  const flush = () => {
+    progTimer = null;
+    if (!pending || row.status !== "running") return;
+    lastProg = Date.now();
+    row.progress = pending; Q.progress.run(pending, row.id); broadcast("task", view(row));
+    pending = null;
+  };
   const onProgress = (m) => {
-    const now = Date.now();
-    if (now - lastProg < 1000) return;
-    lastProg = now;
     const text = m.msg || (m.answer ? `正在回复：${String(m.answer).slice(-80)}` : "");
-    if (text) { row.progress = text; Q.progress.run(text, row.id); broadcast("task", view(row)); }
+    if (!text) return;
+    pending = text;
+    if (/滑块|验证|登录/.test(text) || Date.now() - lastProg >= 1000) { clearTimeout(progTimer); flush(); }
+    else if (!progTimer) progTimer = setTimeout(flush, 1000 - (Date.now() - lastProg));
   };
   let r;
   try {
