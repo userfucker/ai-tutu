@@ -79,7 +79,7 @@ function disk() {
 }
 app.get("/api/status", (c) => c.json({
   version: VERSION, workers: bridge.status(), siteStates: queue.siteStates(), counts: queue.counts(), extToken: auth.extToken(),
-  roles: queue.roles(), roleNames: queue.ROLE_NAMES, siteNames: SITE_NAMES, appNames: APP_NAMES, disk: disk(),
+  roles: queue.roles(), roleNames: queue.ROLE_NAMES, modules: queue.MODULES, follows: queue.follows(), siteNames: SITE_NAMES, appNames: APP_NAMES, disk: disk(),
 }));
 app.post("/api/ext-token/reset", (c) => c.json({ token: auth.resetExtToken() }));
 app.put("/api/ext-token", async (c) => {
@@ -90,7 +90,8 @@ app.delete("/api/roles", (c) => { kvSet("aiRoles", null); queue.tick(); return c
 app.put("/api/roles", async (c) => {
   const { roles } = await c.req.json();
   const clean = {};
-  for (const [k, v] of Object.entries(roles || {})) if (queue.DEFAULT_ROLES[k] && Array.isArray(v)) clean[k] = v.filter((s) => SITE_NAMES[s]);
+  // 模块没传（选了“跟着走”）就不存，用它跟的那一类
+  for (const [k, v] of Object.entries(roles || {})) if ((queue.DEFAULT_ROLES[k] || queue.MODULES[k]) && Array.isArray(v)) clean[k] = v.filter((s) => SITE_NAMES[s]);
   kvSet("aiRoles", clean);
   queue.tick();
   return c.json({ ok: true, roles: queue.roles() });

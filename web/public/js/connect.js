@@ -37,6 +37,9 @@
         </div>
         <div class="card"><div class="row"><h3>AI 分工</h3><span class="muted">每种任务按顺序找空闲的网站；排前面的忙、额度用完、没连上，就换下一个。取消勾选就不用这个网站。</span></div>
           <div class="roles" id="roles" style="margin-top:8px">${Object.entries(s.roleNames).map(([role, name]) => roleHtml(role, name, s)).join("")}</div>
+          ${[...new Set(Object.values(s.modules || {}).map((m) => m.group))].map((g) => `<h3 style="margin-top:18px">${esc(g)}（每一步单独指定用哪些 AI）</h3>
+            <div class="muted">勾着“跟……一样”的，就用上面那一类的设置；去掉勾就可以单独选网站和顺序。</div>
+            <div class="roles" style="margin-top:8px">${Object.entries(s.modules).filter(([, m]) => m.group === g).map(([role, m]) => roleHtml(role, m.name, s, m)).join("")}</div>`).join("")}
           <div class="row" style="margin-top:10px"><button class="primary" data-act="saveRoles">保存分工</button><button data-act="resetRoles">恢复默认</button><span class="muted">写文字的任务可以同时交给好几个网站，分析评价会快很多。</span></div></div>`;
     },
     act: {
@@ -48,7 +51,7 @@
         W.render();
       },
       resetRoles: async () => {
-        if (!(await W.confirm("AI 分工恢复成默认？写文字：DeepSeek、Kimi、豆包、智谱；看图、画图：Gemini、Copilot。"))) return;
+        if (!(await W.confirm("AI 分工恢复成默认？写文字：DeepSeek、Kimi、豆包、智谱；看图、画图：Gemini、Copilot；看详情图：国产优先；竞品分析的每一步都跟着上面走。"))) return;
         await W.api("DELETE", "/api/roles");
         W.toast("已恢复默认");
         W.render();
@@ -62,7 +65,10 @@
       down: (el) => { const it = el.closest(".it"); if (it.nextElementSibling) it.parentNode.insertBefore(it.nextElementSibling, it); },
       saveRoles: async () => {
         const roles = {};
-        document.querySelectorAll("#roles .role").forEach((r) => { roles[r.dataset.role] = [...r.querySelectorAll(".it")].filter((it) => it.querySelector("input").checked).map((it) => it.dataset.site); });
+        document.querySelectorAll(".roles .role").forEach((r) => {
+          if (r.querySelector(".follow input") && r.querySelector(".follow input").checked) return; // 跟着走：不单独存
+          roles[r.dataset.role] = [...r.querySelectorAll(".it")].filter((it) => it.querySelector("input").checked).map((it) => it.dataset.site);
+        });
         await W.api("PUT", "/api/roles", { roles });
         W.toast("分工已保存");
         W.render();
@@ -70,11 +76,16 @@
     },
   };
   const CAN = { text: ["deepseek", "kimi", "doubao", "glm", "gemini", "copilot"], vision: ["gemini", "copilot"], image: ["gemini", "copilot"], read: ["kimi", "doubao", "glm", "deepseek", "gemini", "copilot"], collect: ["taobao"] };
-  function roleHtml(role, name, s) {
+  function roleHtml(role, name, s, mod) {
     const cur = s.roles[role] || [];
-    const all = [...cur, ...CAN[role].filter((x) => !cur.includes(x))];
+    const can = CAN[mod ? mod.follow : role] || [];
+    const all = [...cur, ...can.filter((x) => !cur.includes(x))];
     const online = new Set(s.workers.flatMap((w) => w.sites.map((x) => x.site)));
-    return `<div class="role" data-role="${role}"><b>${esc(name)}</b><div class="lst">${all.map((site) => `<div class="it ${cur.includes(site) ? "" : "off"}" data-site="${site}">
+    const fol = mod && s.follows && s.follows[role];
+    const folName = mod ? String(s.roleNames[mod.follow] || mod.follow).replace(/（.*$/, "") : "";
+    return `<div class="role ${fol ? "following" : ""}" data-role="${role}"><b>${esc(name)}</b>
+      ${mod ? `<label class="row follow" style="margin-top:4px"><input type="checkbox" ${fol ? "checked" : ""} onchange="this.closest('.role').classList.toggle('following', this.checked)"> 跟“${esc(folName)}”一样</label>` : ""}
+      <div class="lst">${all.map((site) => `<div class="it ${cur.includes(site) ? "" : "off"}" data-site="${site}">
       <input type="checkbox" ${cur.includes(site) ? "checked" : ""} onchange="this.parentNode.classList.toggle('off', !this.checked)"><span class="grow"><span class="dot ${online.has(site) ? "ok" : ""}"></span>${esc(s.siteNames[site] || site)}</span>
       <button class="sm ghost" data-act="up">↑</button><button class="sm ghost" data-act="down">↓</button></div>`).join("")}</div></div>`;
   }

@@ -121,10 +121,10 @@ const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true })
 const stopped = (id) => { const a = load(id); return !a || a.stage === "stopped"; };
 
 /** 文字任务 + 解析 JSON；解析失败换个 key 再问一次 */
-async function askJson(an, key, label, prompt, material, check) {
+async function askJson(an, key, label, prompt, material, check, role) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const k = attempt ? `${key}:again` : key;
-    const r = await queue.ensure({ key: k, kind: "text", label, ownerType: "analysis", ownerId: an.id, payload: { prompt, material } });
+    const r = await queue.ensure({ key: k, kind: "text", label, ownerType: "analysis", ownerId: an.id, payload: { prompt, material, role } });
     try {
       const v = extractJson(r.text, r.codes);
       if (!check || check(v)) return v;
@@ -190,7 +190,7 @@ async function pipeline(id) {
       const label = `${isRate ? "评价打标签" : "问大家归类"}：${j.p.role === "ours" ? "我们的" : "竞品 " + j.p.key.slice(1)} 第 ${j.n + 1} 批（${j.batch.length} 条）`;
       try {
         const arr = await askJson(an, `an:${id}:${j.type}:${j.p.key}:${bTag}${j.n}`, label, isRate ? tagPrompt() : qaPrompt(), isRate ? rateMaterial(j.batch) : qaMaterial(j.batch),
-          (v) => Array.isArray(v) && v.length >= Math.max(Math.min(3, j.batch.length) * 0.5, j.batch.length * 0.6)); // 漏太多（少于六成）就再问一次
+          (v) => Array.isArray(v) && v.length >= Math.max(Math.min(3, j.batch.length) * 0.5, j.batch.length * 0.6), isRate ? "an_rates" : "an_qa"); // 漏太多（少于六成）就再问一次
         tags[slot] = arr.map((x) => {
           const k = Number(x.i) - 1;
           const src = j.batch[k];
@@ -249,7 +249,7 @@ async function pipeline(id) {
   let vocab = { good: {}, bad: {}, need: {}, who: {}, qa: {} };
   if (Object.values(vocabInput).some((o) => Object.keys(o).length)) {
     try {
-      const v = await askJson(an, `an:${id}:vocab`, "合并同义标签", vocabPrompt(), JSON.stringify(vocabInput), (x) => x && typeof x === "object" && !Array.isArray(x));
+      const v = await askJson(an, `an:${id}:vocab`, "合并同义标签", vocabPrompt(), JSON.stringify(vocabInput), (x) => x && typeof x === "object" && !Array.isArray(x), "an_vocab");
       for (const k of Object.keys(vocab)) if (v[k] && typeof v[k] === "object") vocab[k] = v[k];
     } catch { /* 合并失败就按原标签统计 */ }
   }
@@ -274,7 +274,7 @@ async function pipeline(id) {
   const ours = an.products.find((p) => p.role === "ours");
   let written = null;
   try {
-    written = await askJson(an, `an:${id}:write`, "写结论和建议", writePrompt(!!ours, !!(ours && ours.manual)), JSON.stringify(compactForWriting(stats)), (x) => x && typeof x === "object" && x.summary);
+    written = await askJson(an, `an:${id}:write`, "写结论和建议", writePrompt(!!ours, !!(ours && ours.manual)), JSON.stringify(compactForWriting(stats)), (x) => x && typeof x === "object" && x.summary, "an_write");
   } catch (e) {
     written = { summary: `（AI 没写出结论：${e.message}。下面的统计数据仍然可用。）` };
   }
@@ -321,7 +321,7 @@ async function readDescs(an, dir) {
       let v = null;
       for (let attempt = 0; attempt < 2 && !v; attempt++) {
         const r = await queue.ensure({ key: `an:${an.id}:desc:${p.key}${attempt ? ":again" : ""}`, kind: "text", label: `读详情页：${who}（${images.length} 张图）`, ownerType: "analysis", ownerId: an.id,
-          maxAttempts: 6, payload: { role: "read", prompt: descPrompt(images.length), images } });
+          maxAttempts: 6, payload: { role: "an_desc", prompt: descPrompt(images.length), images } });
         try { const x = extractJson(r.text, r.codes); if (x && typeof x === "object" && !Array.isArray(x) && (x.selling || x.structure)) v = x; } catch {}
       }
       if (!v) throw new Error("AI 没按格式回复");

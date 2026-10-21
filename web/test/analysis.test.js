@@ -196,3 +196,39 @@ test("没有能看详情图的 AI：任务说明里写清楚原因，等一会�
   const rep = (await api("GET", `/api/analyses/${r.body.id}/report`)).body;
   assert.ok(rep.includes("没有能看详情图的 AI，跳过了"), "报告说明里写了跳过的原因");
 });
+
+test("分模块指定 AI：问大家只给 Kimi，评价只给 DeepSeek，设置保存下来", async () => {
+  plugins.forEach((p) => p.close());
+  plugins.length = 0;
+  await sleep(200);
+  const url = `ws://127.0.0.1:${PORT}/ext`;
+  const who = [];
+  plugins.push(await connect(url, { token, name: "测试电脑", version: "1.4.0", sites: [{ site: "deepseek", open: true, ready: true }, { site: "kimi", open: true, ready: true }, { site: "doubao", open: true, ready: true }] }, async (m) => {
+    if (m.cmd !== "ask") return { ok: true };
+    const txt = (m.args.files || []).find((f) => f.content);
+    who.push({ site: m.site, what: /给每条评价打标签/.test(m.args.text) ? "rates" : /归纳一个主题/.test(m.args.text) ? "qa" : /合并成一个归类名/.test(m.args.text) ? "vocab" : /竞品分析结论/.test(m.args.text) ? "write" : "other" });
+    return { answer: fakeAnswer(m.args.text, txt && txt.content) };
+  }));
+  plugins.push(await connect(url, { token, app: "taobao", name: "测试电脑", sites: [{ site: "taobao", open: true, ready: true }] }, async () => fakeItem("777", 100)));
+  // 保存：问大家只用 Kimi，评价只用 DeepSeek，写结论只用豆包；合并标签跟着“写文字”
+  const st0 = (await api("GET", "/api/status")).body;
+  const save = await api("PUT", "/api/roles", { roles: { ...Object.fromEntries(Object.keys(st0.roleNames).map((k) => [k, st0.roles[k]])), an_qa: ["kimi"], an_rates: ["deepseek"], an_write: ["doubao"] } });
+  assert.equal(save.status, 200);
+  const st = (await api("GET", "/api/status")).body;
+  assert.deepEqual(st.roles.an_qa, ["kimi"]);
+  assert.equal(st.follows.an_qa, false);
+  assert.equal(st.follows.an_vocab, true, "没单独设置的跟着走");
+  assert.deepEqual(st.roles.an_vocab, st.roles.text);
+  const r = await api("POST", "/api/analyses", { links: "https://item.taobao.com/item.htm?id=777", rates: 100, batch: 50 });
+  let a;
+  for (let i = 0; i < 300; i++) { a = (await api("GET", `/api/analyses/${r.body.id}`)).body.analysis; if (["done", "failed"].includes(a.stage)) break; await sleep(150); }
+  assert.equal(a.stage, "done");
+  const by = (w) => [...new Set(who.filter((x) => x.what === w).map((x) => x.site))];
+  assert.deepEqual(by("qa"), ["kimi"], "问大家只给 Kimi");
+  assert.deepEqual(by("rates"), ["deepseek"], "评价只给 DeepSeek");
+  assert.deepEqual(by("write"), ["doubao"], "写结论只给豆包");
+  // 恢复默认：模块都跟着走
+  await api("DELETE", "/api/roles");
+  const st2 = (await api("GET", "/api/status")).body;
+  assert.ok(Object.values(st2.follows).every(Boolean));
+});

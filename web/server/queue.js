@@ -37,7 +37,27 @@ const st = (connId, site) => {
   if (!siteState.has(k)) siteState.set(k, { busy: false, cooldownUntil: 0, nextAt: 0, why: "" });
   return siteState.get(k);
 };
-export const roles = () => ({ ...DEFAULT_ROLES, ...(kvGet("aiRoles") || {}) });
+/**
+ * 分模块的分工（Lee 2026-10-21）：竞品分析的每一步可以单独指定用哪些 AI。
+ * 没单独设置的模块“跟着” follow 那一类走（比如评价打标签默认跟“写文字”一样）。
+ */
+export const MODULES = {
+  an_rates: { name: "评价打标签", group: "竞品分析", follow: "text" },
+  an_qa: { name: "问大家归类", group: "竞品分析", follow: "text" },
+  an_vocab: { name: "合并同义标签", group: "竞品分析", follow: "text" },
+  an_desc: { name: "读详情页（看详情图）", group: "竞品分析", follow: "read" },
+  an_write: { name: "写结论和建议", group: "竞品分析", follow: "text" },
+};
+export const baseRole = (role) => (MODULES[role] ? MODULES[role].follow : role);
+export function roles() {
+  const saved = kvGet("aiRoles") || {};
+  const out = { ...DEFAULT_ROLES };
+  for (const k of Object.keys(DEFAULT_ROLES)) if (Array.isArray(saved[k])) out[k] = saved[k];
+  for (const [k, m] of Object.entries(MODULES)) out[k] = Array.isArray(saved[k]) ? saved[k] : out[m.follow];
+  return out;
+}
+/** 哪些模块是“跟着走”的（没单独设置） */
+export const follows = () => { const saved = kvGet("aiRoles") || {}; return Object.fromEntries(Object.keys(MODULES).map((k) => [k, !Array.isArray(saved[k])])); };
 // 老版本存的分工：写文字换成新的默认（国内模型），千问去掉（2026-10-21）
 if (kvGet("rolesVer") !== 2) {
   const old = kvGet("aiRoles");
@@ -188,7 +208,8 @@ export function tick() {
         let pick = null;
         for (const site of order) {
           for (const c of bridge.connsFor(site)) {
-            if (c.app === "aiweb" && role !== "text" && !(role === "read" && verAtLeast(c.version, "1.4.0"))) continue; // ai-web 只能写文字；1.4.0 起能发图片看详情图
+            const br = baseRole(role);
+            if (c.app === "aiweb" && br !== "text" && !(br === "read" && verAtLeast(c.version, "1.4.0"))) continue; // ai-web 只能写文字；1.4.0 起能发图片看详情图
             const s = st(c.id, site);
             if (!s.busy && now >= s.cooldownUntil && now >= s.nextAt) { pick = { conn: c, site }; break; }
           }
@@ -217,10 +238,11 @@ function hasOther(row, site) {
   const bad = badSites.get(row.id) || new Set([site]);
   return order.some((x) => x !== site && !bad.has(x) && bridge.connsFor(x).length);
 }
-function waitWhy(row, role, order) {
+function waitWhy(row, role0, order) {
   let msg = "";
+  const role = baseRole(role0);
   const conns = order.flatMap((site) => bridge.connsFor(site).map((c) => ({ c, site })));
-  if (!order.length) msg = `等待：“AI 分工”里“${ROLE_NAMES[role] || role}”一个网站都没勾`;
+  if (!order.length) msg = `等待：“AI 分工”里“${MODULES[role0] ? MODULES[role0].name : ROLE_NAMES[role] || role}”一个网站都没勾`;
   else if (!conns.length) msg = `等待：现在没有连着能做“${(ROLE_NAMES[role] || role).replace(/（.*$/, "")}”的 AI。${HOW[role] || ""}`;
   else if (role === "read" && conns.every(({ c }) => c.app === "aiweb" && !verAtLeast(c.version, "1.4.0"))) msg = `等待：ai-web 是 ${conns[0].c.version} 版，发不了图片，要升级到 1.4.0；或者让 AI图图 插件连上工作台`;
   else if (role !== "text" && conns.every(({ c }) => c.app === "aiweb") && role !== "read") msg = `等待：ai-web 只能写文字。${HOW[role] || ""}`;

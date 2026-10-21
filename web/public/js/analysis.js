@@ -71,6 +71,18 @@
     },
   };
 
+  /** 每一步交给哪些 AI（在“AI 连接 → AI 分工”里改） */
+  function modsHtml() {
+    const s = W.status;
+    if (!s || !s.modules) return "";
+    const online = new Set(s.workers.flatMap((w) => w.sites.map((x) => x.site)));
+    const rows = Object.entries(s.modules).filter(([, m]) => m.group === "竞品分析").map(([k, m]) => {
+      const list = (s.roles[k] || []).map((x) => `<span class="${online.has(x) ? "" : "muted"}">${esc(s.siteNames[x] || x)}</span>`).join(" → ");
+      return `<div class="row"><b style="min-width:9em">${esc(m.name)}</b><span>${list || '<span style="color:var(--bad)">一个都没选</span>'}</span>${s.follows[k] ? `<span class="muted">（跟“${esc(String(s.roleNames[m.follow] || "").replace(/（.*$/, ""))}”一样）</span>` : ""}</div>`;
+    }).join("");
+    return `<div class="card"><div class="row"><h3>每一步交给哪些 AI</h3><span class="muted">按顺序找空闲的；灰色的是现在没连上的</span><a class="sp" href="#/connect">去修改</a></div><div class="col" style="margin-top:8px;gap:4px">${rows}</div></div>`;
+  }
+
   function renderNew(main) {
     let pre = {};
     try { pre = JSON.parse(sessionStorage.getItem("aitutuDupe") || "{}"); sessionStorage.removeItem("aitutuDupe"); } catch {}
@@ -97,6 +109,7 @@
           <label class="f wide">我们的详情页图片（可以多选，按文件名排顺序；不传就不分析我们的详情页）<input type="file" id="oDesc" accept="image/*" multiple></label></div></div>
         <div data-mode="none" hidden class="muted">只分析竞品，报告里不写“我们 vs 竞品”。</div>
       </div>
+      ${modsHtml()}
       <div class="row" style="margin-top:14px"><button class="primary" data-act="submit">开始分析</button><span class="muted">采集交给淘宝采集插件，分析评价交给 ai-web（DeepSeek / Kimi 等），读详情页按“AI 连接”里“看详情图”的顺序（国产优先），做的时候可以关掉这个网页。</span></div>`;
     main.querySelector("#oursMode").onchange = (e) => {
       const v = e.target.value;
