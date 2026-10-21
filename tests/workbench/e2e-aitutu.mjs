@@ -37,6 +37,13 @@ const ctx = await chromium.launchPersistentContext('', {
 });
 await ctx.route('https://gemini.google.com/**', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: mock }));
 const sw = ctx.serviceWorkers()[0] || (await ctx.waitForEvent('serviceworker'));
+// 用户自己已经开着 Gemini（和别的标签页在同一个窗口里）：插件应该接着用它，不另开新页面
+await ctx.route('https://accounts.google.com/**', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: '<html><body>登录页（模拟）</body></html>' }));
+const mine = ctx.pages()[0] || (await ctx.newPage());
+await mine.goto('about:blank');
+const userGem = await ctx.newPage();
+await userGem.goto('https://gemini.google.com/app');
+const userGemTabCount = ctx.pages().length;
 await sw.evaluate(([port, tok]) => chrome.storage.local.set({ aitutu_wb: { enabled: true, host: '127.0.0.1', port, token: tok, name: '书房电脑' } }), [PORT, token]);
 let st;
 for (let i = 0; i < 50; i++) { st = await api('GET', '/api/status'); if (st.workers.some((w) => w.app === 'aitutu')) break; await sleep(200); }
@@ -58,7 +65,10 @@ const t1 = await api('POST', '/api/tasks', { kind: 'text', prompt: '补充几个
 const r1 = await waitTask(t1.id);
 check('写文字：Gemini 回复，代码块原文也带回来', r1.task.status === 'done' && /背久不累/.test(r1.result.text) && r1.result.codes.length > 0, r1.task.error || r1.result.text.slice(0, 60));
 const gpages = ctx.pages().filter((p) => p.url().includes('gemini.google.com'));
-check('插件单独开了一个 Gemini 窗口', gpages.length === 1, String(gpages.length));
+check('没有新开 Gemini 页面：用的是已经开着的那个', gpages.length === 1 && gpages[0] === userGem, String(gpages.length));
+const winOf = async (p) => sw.evaluate(async (u) => { const t = (await chrome.tabs.query({})).find((x) => x.url === u); const w = await chrome.windows.get(t.windowId, { populate: true }); return { id: w.id, n: w.tabs.length }; }, p.url());
+const gw = await winOf(gpages[0]);
+check('那个标签页被移到单独的窗口（一个 AI 一个窗口）', gw.n === 1, JSON.stringify(gw));
 // 2. 看图（带图片）
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const t2 = await api('POST', '/api/tasks', { kind: 'vision', prompt: '看图，补充卖点，只回复一个 JSON 代码块', images: [{ b64: png, mime: 'image/png', name: '产品.png' }], label: '测试看图' });
@@ -82,6 +92,31 @@ check('插件断开时任务排队', (await api('GET', `/api/tasks/${t5.id}/resu
 await sw.evaluate(([port, tok]) => chrome.storage.local.set({ aitutu_wb: { enabled: true, host: '127.0.0.1', port, token: tok, name: '书房电脑' } }), [PORT, token]);
 const r5 = await waitTask(t5.id);
 check('连回来以后接着做', r5.task.status === 'done');
+
+// 7. 同时来好几个任务（写文字 + 看图 + 写文字）：还是只有一个 Gemini 窗口
+const many = [];
+for (let i = 0; i < 3; i++) many.push((await api('POST', '/api/tasks', { kind: i === 1 ? 'vision' : 'text', prompt: '补充卖点 JSON', images: i === 1 ? [{ b64: png, mime: 'image/png', name: 'x.png' }] : undefined, label: '并发' + i })).id);
+for (const id of many) await waitTask(id);
+check('好几个任务一起来：还是一个 Gemini 窗口', ctx.pages().filter((p) => p.url().includes('gemini.google.com')).length === 1);
+// 8. Gemini 跳到了登录页：不另开窗口，提示去登录；登录好（回到 Gemini）接着做
+await gp.goto('https://accounts.google.com/signin');
+const t8 = await api('POST', '/api/tasks', { kind: 'text', prompt: '补充卖点 JSON', label: '登录页' });
+await sleep(9000);
+const pagesNow = ctx.pages().filter((p) => /gemini\.google\.com|accounts\.google\.com/.test(p.url()));
+const st8 = (await api('GET', `/api/tasks/${t8.id}/result`)).task;
+check('跳到登录页时不另开窗口', pagesNow.length === 1, pagesNow.map((p) => p.url()).join(' '));
+check('任务提示要登录', /登录/.test(st8.error || st8.progress || ''), st8.status + ' ' + (st8.error || st8.progress));
+await gp.goto('https://gemini.google.com/app');
+const r8 = await waitTask(t8.id);
+check('登录好以后接着做', r8.task.status === 'done', r8.task.status + ' ' + (r8.task.error || ''));
+// 9. 用户把 Gemini 窗口关了：下一个任务新开一个（只开一个）
+await gp.close();
+const t9 = await api('POST', '/api/tasks', { kind: 'text', prompt: '补充卖点 JSON', label: '窗口关了' });
+const r9 = await waitTask(t9.id);
+check('窗口关了：重新开一个，只开一个', r9.task.status === 'done' && ctx.pages().filter((p) => p.url().includes('gemini.google.com')).length === 1);
+const log = await sw.evaluate(async () => (await chrome.storage.local.get('aitutu_wb_log')).aitutu_wb_log || []);
+console.log('窗口记录：\n  ' + log.join('\n  '));
+check('窗口记录写下来了', log.length >= 2);
 
 await ctx.close();
 srv.kill();

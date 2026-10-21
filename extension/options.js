@@ -26,3 +26,9 @@ $("test").addEventListener("click", () => {
     $("state").className = r && r.ok ? "on" : "bad";
   });
 });
+
+// 窗口记录
+const showLog = async () => { const v = await chrome.storage.local.get("aitutu_wb_log"); const l = v.aitutu_wb_log || []; document.getElementById("log").textContent = l.length ? l.join("\n") : "（还没有）"; };
+showLog();
+chrome.storage.onChanged.addListener((ch) => { if (ch.aitutu_wb_log) showLog(); });
+document.getElementById("logClear").onclick = () => chrome.storage.local.set({ aitutu_wb_log: [] });

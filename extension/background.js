@@ -116,7 +116,7 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
 // 工作台把“写文字 / 看图 / 画图”的任务发过来，这里转给 Gemini / Copilot 页面里的 content/workbench-runner.js 去做。
 // 协议和 ai-web 插件一样（WebSocket：hello / cmd / result / progress），hello 里带 app: "aitutu"。
 // 每个网站用一个单独的窗口（和别的标签页放一起时，切到后台会被浏览器暂停）。在插件“选项”里填工作台 IP、端口、口令。
-const AWB = { ws: null, state: "off", error: "", retry: 0, timer: null, ping: null, tabs: {}, jobs: new Map() };
+const AWB = { ws: null, state: "off", error: "", retry: 0, timer: null, ping: null, tabs: {}, wins: {}, jobs: new Map() };
 const AWB_VERSION = chrome.runtime.getManifest().version;
 async function awbConf() {
   const v = await chrome.storage.local.get("aitutu_wb");
@@ -161,7 +161,7 @@ async function awbConnect() {
     if (m.type === "welcome") { AWB.retry = 0; awbSetState("on"); clearInterval(AWB.ping); AWB.ping = setInterval(() => awbSend({ type: "ping", t: Date.now() }), 20000); return; }
     if (m.type === "error") { awbSetState("error", m.error || "工作台拒绝连接"); if (m.fatal) AWB.retry = 99; return; }
     if (m.type === "ping") { awbSend({ type: "pong", t: m.t }); return; }
-    if (m.type === "cmd") awbHandle(m);
+    if (m.type === "cmd") awbReady.finally(() => awbHandle(m));
   };
   ws.onclose = () => {
     clearInterval(AWB.ping);
@@ -179,30 +179,89 @@ function awbRetry() {
 }
 function awbClose() { clearInterval(AWB.ping); clearTimeout(AWB.timer); if (AWB.ws) { const w = AWB.ws; AWB.ws = null; try { w.close(); } catch {} } }
 
-/** 找到（或新开）这个网站的单独窗口，等页面和插件准备好 */
-async function awbEnsure(site, progress) {
-  let t = await awbTabOf(site);
-  if (!t) {
-    // 已经开着这个网站、而且那个窗口里只有它一个标签页：直接用
-    const tabs = await chrome.tabs.query({ url: WT_SITES[site].patterns });
-    for (const x of tabs) { const w = await chrome.windows.get(x.windowId, { populate: true }).catch(() => null); if (w && w.tabs.length === 1) { t = x; break; } }
-    if (!t) {
-      progress(`打开 ${site === "gemini" ? "Gemini" : "Copilot"}（单独的窗口）`);
-      const w = await chrome.windows.create({ url: "about:blank", focused: false, width: 1000, height: 900 });
-      t = w.tabs[0];
-      await chrome.tabs.update(t.id, { url: WT_SITES[site].open });
-    }
-    AWB.tabs[site] = t.id;
-    chrome.storage.session && chrome.storage.session.set({ aitutu_wb_tabs: AWB.tabs });
+/**
+ * 找到（或新开）这个网站的窗口，等页面和插件准备好。一个 AI 一个窗口（Lee 2026-10-21）：
+ *  1. 上次用的标签页还在：接着用（就算跳到了登录页，也不另开，提示去那个窗口登录）
+ *  2. 上次的窗口还在（标签页被关了或换了网址）：在那个窗口里重新打开这个网站
+ *  3. 已经开着这个网站的标签页：直接用；它和别的标签页在同一个窗口里时，把它移到单独的窗口（切到后台的标签页会被浏览器暂停）
+ *  4. 都没有才新开一个窗口
+ * 同一个网站同时只做一次（加锁），免得两个任务同时进来各开一个窗口。每次怎么选的记在 aitutu_wb_log（选项页面能看到）。
+ */
+const AWB_LOGIN = { gemini: /(^|\.)(google|gstatic)\.com$/, copilot: /(^|\.)(microsoft|microsoftonline|live|bing|copilot|office|cloud\.microsoft)\.com$|(^|\.)cloud\.microsoft$/ };
+const awbUrl = (t) => (t && (t.pendingUrl || t.url)) || "";
+const awbHost = (u) => { try { return new URL(u).hostname; } catch { return ""; } };
+const awbName = (site) => (site === "gemini" ? "Gemini" : "Copilot");
+async function awbLog(msg) {
+  const v = await chrome.storage.local.get("aitutu_wb_log");
+  const list = (v.aitutu_wb_log || []).slice(-60);
+  list.push(`${new Date(Date.now() + 8 * 3600e3).toISOString().slice(5, 19).replace("T", " ")} ${msg}`);
+  await chrome.storage.local.set({ aitutu_wb_log: list });
+}
+function awbRemember(site, t) {
+  AWB.tabs[site] = t.id;
+  AWB.wins[site] = t.windowId;
+  chrome.storage.local.set({ aitutu_wb_tabs: { tabs: AWB.tabs, wins: AWB.wins } });
+}
+const awbLocks = {};
+function awbEnsure(site, progress) {
+  const run = (awbLocks[site] || Promise.resolve()).catch(() => {}).then(() => awbEnsure0(site, progress));
+  awbLocks[site] = run;
+  return run;
+}
+async function awbFindTab(site) {
+  // 1. 上次用的标签页
+  const id = AWB.tabs[site];
+  const t0 = id ? await chrome.tabs.get(id).catch(() => null) : null;
+  if (t0 && (awbMatch(site, awbUrl(t0)) || AWB_LOGIN[site].test(awbHost(awbUrl(t0))))) return { t: t0, how: "接着用上次的标签页" };
+  // 2. 上次的窗口还在：在里面重新打开
+  const wid = AWB.wins[site];
+  const w = wid ? await chrome.windows.get(wid, { populate: true }).catch(() => null) : null;
+  if (w && w.tabs && w.tabs.length) {
+    const t = w.tabs.find((x) => awbMatch(site, awbUrl(x))) || w.tabs.find((x) => x.active) || w.tabs[0];
+    if (!awbMatch(site, awbUrl(t))) await chrome.tabs.update(t.id, { url: WT_SITES[site].open, active: true });
+    return { t, how: "在上次的窗口里重新打开" };
   }
+  // 3. 已经开着的标签页：优先单独一个窗口的，其次正在显示的
+  const tabs = await chrome.tabs.query({ url: WT_SITES[site].patterns });
+  if (tabs.length) {
+    const info = [];
+    for (const x of tabs) { const ww = await chrome.windows.get(x.windowId, { populate: true }).catch(() => null); if (ww) info.push({ x, n: ww.tabs.length, type: ww.type }); }
+    const pick = info.find((i) => i.n === 1 && i.type === "normal") || info.find((i) => i.x.active) || info[0];
+    if (pick) {
+      if (pick.n === 1) return { t: pick.x, how: "用已经开着的窗口" };
+      const nw = await chrome.windows.create({ tabId: pick.x.id, focused: false, width: 1000, height: 900 }).catch(() => null);
+      return { t: nw ? nw.tabs[0] : pick.x, how: nw ? "把已经开着的标签页移到单独的窗口" : "用已经开着的标签页" };
+    }
+  }
+  return null;
+}
+async function awbEnsure0(site, progress) {
+  let found = await awbFindTab(site);
+  let t;
+  if (found) t = found.t;
+  else {
+    progress(`打开 ${awbName(site)}（单独的窗口）`);
+    const w = await chrome.windows.create({ url: "about:blank", focused: false, width: 1000, height: 900 });
+    t = w.tabs[0];
+    await chrome.tabs.update(t.id, { url: WT_SITES[site].open });
+    found = { how: "新开了一个窗口" };
+  }
+  if (AWB.tabs[site] !== t.id) awbLog(`${awbName(site)}：${found.how}（标签页 ${t.id}，窗口 ${t.windowId}，${awbUrl(t).slice(0, 60)}）`);
+  awbRemember(site, t);
   let r = null;
   for (let i = 0; i < 90; i++) {
     r = await chrome.tabs.sendMessage(t.id, { type: "aitutu-wb-ping" }).catch(() => null);
     if (r && r.ready) return t;
-    if (i === 10 && !r) { await chrome.tabs.reload(t.id).catch(() => {}); } // 页面是插件更新前打开的：刷新一下
+    const cur = await chrome.tabs.get(t.id).catch(() => null);
+    if (!cur) throw new Error(`${awbName(site)} 的窗口被关掉了，稍后会重新打开`);
+    if (cur.status === "complete" && !awbMatch(site, awbUrl(cur)) && AWB_LOGIN[site].test(awbHost(awbUrl(cur))) && i >= 5) {
+      awbLog(`${awbName(site)}：页面在 ${awbHost(awbUrl(cur))}，要登录`);
+      throw Object.assign(new Error(`${awbName(site)} 要登录：请在那个窗口里登录，登录好以后任务会接着做`), { stop: true });
+    }
+    if (i === 10 && !r && awbMatch(site, awbUrl(cur))) { await chrome.tabs.reload(t.id).catch(() => {}); } // 页面是插件更新前打开的：刷新一下
     await new Promise((res) => setTimeout(res, 1000));
   }
-  throw Object.assign(new Error(r ? `${site === "gemini" ? "Gemini" : "Copilot"} 页面上没找到输入框：请在那个窗口里登录，打开对话页面` : "AI 页面没有响应，请刷新那个窗口"), { stop: true });
+  throw Object.assign(new Error(r ? `${awbName(site)} 页面上没找到输入框：请在那个窗口里登录，打开对话页面` : "AI 页面没有响应，请刷新那个窗口"), { stop: true });
 }
 
 async function awbHandle(m) {
@@ -247,4 +306,6 @@ chrome.runtime.onStartup.addListener(awbConnect);
 chrome.runtime.onInstalled.addListener(awbConnect);
 chrome.alarms.create("aitutu-wb", { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((a) => { if (a.name === "aitutu-wb") awbConnect(); });
-(chrome.storage.session ? chrome.storage.session.get("aitutu_wb_tabs") : Promise.resolve({})).then((v) => { if (v && v.aitutu_wb_tabs) AWB.tabs = v.aitutu_wb_tabs; }).finally(awbConnect);
+// 记下的标签页 / 窗口存在 storage.local（插件后台被浏览器回收、重启以后还认得；编号失效时 awbFindTab 会按网址再找）
+const awbReady = chrome.storage.local.get("aitutu_wb_tabs").then((v) => { const x = v.aitutu_wb_tabs; if (x && x.tabs) { AWB.tabs = x.tabs; AWB.wins = x.wins || {}; } }).catch(() => {});
+awbReady.finally(awbConnect);

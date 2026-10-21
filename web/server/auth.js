@@ -52,6 +52,13 @@ export function extToken() {
   if (!t) { t = crypto.randomBytes(4).toString("hex"); kvSet("extToken", t); }
   return t;
 }
+/** 自己设口令（比如和 AI 会议中转站用同一个，ai-web 切换时只改端口） */
+export function setExtToken(t) {
+  t = String(t || "").trim();
+  if (!/^[\x21-\x7e]{4,40}$/.test(t)) throw new Error("口令要 4～40 个字母、数字或符号，不能有空格和中文");
+  kvSet("extToken", t);
+  return t;
+}
 export function resetExtToken() {
   const t = crypto.randomBytes(4).toString("hex");
   kvSet("extToken", t);

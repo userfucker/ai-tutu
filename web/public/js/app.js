@@ -49,6 +49,15 @@ var W = (globalThis.W = { pages: {}, status: null, cur: null, params: [] });
     };
     if (o.onOpen) o.onOpen(m);
   });
+  /** 输入一行字，返回输入的内容（取消为 null） */
+  W.prompt = async (title, def = "") => {
+    let val = null;
+    const r = await W.modal(title, `<input id="wPrompt" style="width:100%" value="${W.esc(def)}"><div class="mf"><button data-ret="">取消</button><button class="primary" data-ret="ok">确定</button></div>`, {
+      onOpen: (m) => { const i = m.querySelector("#wPrompt"); i.focus(); i.select(); i.onkeydown = (e) => { if (e.key === "Enter") m.querySelector('[data-ret="ok"]').click(); }; },
+      check: (v, m) => { val = m.querySelector("#wPrompt").value.trim(); },
+    });
+    return r === "ok" ? val : null;
+  };
   W.confirm = async (msg, yes = "确定", danger) => (await W.modal("请确认", `<p>${W.esc(msg)}</p><div class="mf"><button data-ret="">取消</button><button class="${danger ? "danger" : "primary"}" data-ret="yes">${W.esc(yes)}</button></div>`)) === "yes";
 
   // ------------------------------------------------------------ 路由：#/页面/参数

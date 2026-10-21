@@ -12,13 +12,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
-import { db, kvGet } from "./db.js";
+import { db, kvGet, kvSet } from "./db.js";
 import { bridge, SITE_NAMES } from "./bridge.js";
 import { broadcast } from "./events.js";
 import { FILES_DIR } from "./config.js";
 
 export const DEFAULT_ROLES = {
-  text: ["deepseek", "kimi", "glm", "doubao", "qwen", "gemini", "copilot"],
+  text: ["deepseek", "kimi", "doubao", "glm"], // 写文字默认用国内模型；Gemini / Copilot 可以在“AI 分工”里勾上（Lee 2026-10-21）
   vision: ["gemini", "copilot"],
   image: ["gemini", "copilot"],
   collect: ["taobao"],
@@ -37,6 +37,12 @@ const st = (connId, site) => {
   return siteState.get(k);
 };
 export const roles = () => ({ ...DEFAULT_ROLES, ...(kvGet("aiRoles") || {}) });
+// 老版本存的分工：写文字换成新的默认（国内模型），千问去掉（2026-10-21）
+if (kvGet("rolesVer") !== 2) {
+  const old = kvGet("aiRoles");
+  if (old) { delete old.text; for (const k of Object.keys(old)) old[k] = (old[k] || []).filter((s) => s !== "qwen"); kvSet("aiRoles", old); }
+  kvSet("rolesVer", 2);
+}
 const gaps = () => (process.env.QUEUE_FAST ? { text: [0, 0], vision: [0, 0], image: [0, 0], collect: [0, 0] } : { ...DEFAULT_GAPS, ...(kvGet("gaps") || {}) });
 
 const Q = {
@@ -174,7 +180,7 @@ export function tick() {
         const order = payload.sites && payload.sites.length ? payload.sites : roles()[role] || [];
         let pick = null;
         for (const site of order) {
-          if (role !== "text" && ["deepseek", "glm", "kimi", "qwen", "doubao"].includes(site)) continue; // ai-web 只能写文字
+          if (role !== "text" && ["deepseek", "glm", "kimi", "doubao"].includes(site)) continue; // ai-web 只能写文字
           for (const c of bridge.connsFor(site)) {
             const s = st(c.id, site);
             if (!s.busy && now >= s.cooldownUntil && now >= s.nextAt) { pick = { conn: c, site }; break; }

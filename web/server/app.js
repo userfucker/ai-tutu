@@ -82,6 +82,11 @@ app.get("/api/status", (c) => c.json({
   roles: queue.roles(), roleNames: queue.ROLE_NAMES, siteNames: SITE_NAMES, appNames: APP_NAMES, disk: disk(),
 }));
 app.post("/api/ext-token/reset", (c) => c.json({ token: auth.resetExtToken() }));
+app.put("/api/ext-token", async (c) => {
+  const { token } = await c.req.json();
+  try { return c.json({ token: auth.setExtToken(token) }); } catch (e) { return c.json({ error: e.message }, 400); }
+});
+app.delete("/api/roles", (c) => { kvSet("aiRoles", null); queue.tick(); return c.json({ ok: true, roles: queue.roles() }); });
 app.put("/api/roles", async (c) => {
   const { roles } = await c.req.json();
   const clean = {};

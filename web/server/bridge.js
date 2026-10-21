@@ -1,6 +1,6 @@
 /**
  * 和浏览器插件的连接：插件连 ws://服务器:端口/ext。
- *  - ai-web（DeepSeek / 智谱 / Kimi / 千问 / 豆包）：协议见 ai-web 仓库 docs/protocol.md，这里原样兼容
+ *  - ai-web（DeepSeek / 智谱 / Kimi / 豆包；千问不用了）：协议见 ai-web 仓库 docs/protocol.md，这里原样兼容
  *  - AI图图（Gemini / Copilot）：hello 里带 app: "aitutu"，命令 run（写文字 / 看图 / 画图）
  *  - 淘宝采集（淘宝 / 天猫）：hello 里带 app: "taobao"，命令 collect（按链接采集）
  * 可以同时连好几个插件；同一台电脑上同一种插件重连时顶替旧的连接。
@@ -10,7 +10,7 @@ import { WebSocketServer } from "ws";
 import { extToken } from "./auth.js";
 
 export const SITE_NAMES = {
-  deepseek: "DeepSeek", glm: "智谱清言", kimi: "Kimi", qwen: "千问", doubao: "豆包",
+  deepseek: "DeepSeek", glm: "智谱清言", kimi: "Kimi", doubao: "豆包",
   gemini: "Gemini", copilot: "Copilot", taobao: "淘宝 / 天猫",
 };
 export const APP_NAMES = { aiweb: "ai-web", aitutu: "AI图图", taobao: "淘宝采集" };

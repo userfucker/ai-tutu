@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI图图 · 电商作图助手（Gemini / Copilot）",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "在 Gemini / Copilot 网页版里批量做抠白底图 / 产品精修；也可以连接 AI图图 工作台（网页版），替工作台在 Gemini / Copilot 里写文字、看图、画图。Copilot 请用谷歌浏览器（Edge 不允许插件进 Copilot）。",
   "permissions": [
     "storage",

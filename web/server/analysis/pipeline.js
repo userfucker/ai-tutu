@@ -137,7 +137,7 @@ async function pipeline(id) {
     if (!fs.existsSync(rawFile)) {
       try {
         const r = await queue.ensure({ key: `an:${id}:collect:${p.key}`, kind: "collect", label: `采集：${p.role === "ours" ? "我们的产品" : "竞品 " + p.key.slice(1)}`, ownerType: "analysis", ownerId: id,
-          payload: { url: p.url, rates: an.options.rates, sort: "time", qa: an.options.qa, qaMax: 200, desc: false } });
+          payload: { url: p.url, rates: an.options.rates, sort: "time", qa: an.options.qa, qaMax: 0, desc: false } });
         fs.copyFileSync(queue.filePath(r.file), rawFile);
       } catch (e) {
         setProduct(id, p.key, { status: "failed", error: e.message });
