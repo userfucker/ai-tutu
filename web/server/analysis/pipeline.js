@@ -9,13 +9,18 @@ import { DATA_DIR, FILES_DIR } from "../config.js";
 import * as queue from "../queue.js";
 import { broadcast } from "../events.js";
 import { extractJson } from "../util.js";
-import { tagPrompt, qaPrompt, vocabPrompt, writePrompt, descPrompt } from "./prompts.js";
-import { buildDescImages } from "./descimg.js";
+import { tagPrompt, qaPrompt, vocabPrompt, writePrompt, descPrompt, titlePrompt, mainPrompt, attrPrompt } from "./prompts.js";
+import { buildDescImages, saveSmallImages } from "./descimg.js";
 import { usableRates, usableQa, rateMaterial, qaMaterial, productStats, compactForWriting } from "./stats.js";
 import { renderReport } from "./report.js";
 
 export const RATE_OPTIONS = [100, 200, 300, 500, 800, 1000];
-export const BATCH_OPTIONS = [50, 100, 200]; // 评价打标签每轮几条（Lee 2026-10-21：默认 100）
+export const BATCH_OPTIONS = [50, 100, 200];
+// 报告模块（Lee 2026-10-22：每个都能勾选，没勾的不采集、不分析、不显示）
+export const MODS = [["summary", "总体结论"], ["overview", "对比总览"], ["title", "标题分析"], ["main", "主图分析"], ["attr", "产品属性对比"], ["time", "评价时间分布与销量估算"],
+  ["rates", "买家评价分析"], ["sku", "规格分布"], ["qa", "问大家"], ["desc", "详情页分析"], ["advice", "优化建议"]];
+export const MAX_PRODUCTS = 3; // 加上我们的最多 3 个商品
+const has = (an, k) => !an.options.mods || an.options.mods.includes(k); // 老的分析没有 mods：都算 // 评价打标签每轮几条（Lee 2026-10-21：默认 100）
 const QA_BATCH = 200; // 问大家一般一轮做完，特别多才拆开
 const dirOf = (id) => path.join(DATA_DIR, "analysis", id);
 // 详情页切好的图放在 files/desc/<分析编号>/（任务队列从 files 下面读图片发给 AI）
@@ -63,13 +68,16 @@ export function parseLinks(text) {
   return out;
 }
 
-export function create({ name, rivals, ours, rates, qa, batch, desc, oursDesc }) {
+export function create({ name, rivals, ours, rates, qa, batch, desc, oursDesc, mods }) {
   const id = uid("a");
+  mods = Array.isArray(mods) ? MODS.map(([k]) => k).filter((k) => mods.includes(k)) : null;
+  if (mods) { qa = mods.includes("qa"); desc = mods.includes("desc"); }
+  rivals = rivals.slice(0, MAX_PRODUCTS - (ours && (ours.url || ours.manual) ? 1 : 0));
   const products = [];
   if (ours && (ours.url || ours.manual)) products.push({ key: "ours", role: "ours", url: ours.url || "", manual: ours.url ? null : ours.manual, status: ours.url ? "waiting" : "manual", title: ours.url ? "" : (ours.manual && ours.manual.name) || "我们的产品" });
   rivals.forEach((u, i) => products.push({ key: `p${i + 1}`, role: "rival", url: u, status: "waiting", title: "" }));
   const an = { id, name: name || `竞品分析 ${new Date(Date.now() + 8 * 3600e3).toISOString().slice(5, 16).replace("T", " ")}`, created: Date.now(), updated: Date.now(),
-    options: { rates: RATE_OPTIONS.includes(+rates) ? +rates : 300, qa: qa !== false, batch: BATCH_OPTIONS.includes(+batch) ? +batch : 100, desc: desc !== false }, products, stage: "collect", progress: { msg: "排队采集", done: 0, total: 0 }, error: "" };
+    options: { rates: RATE_OPTIONS.includes(+rates) ? +rates : 300, qa: qa !== false, batch: BATCH_OPTIONS.includes(+batch) ? +batch : 100, desc: desc !== false, mods: mods || undefined }, products, stage: "collect", progress: { msg: "排队采集", done: 0, total: 0 }, error: "" };
   fs.mkdirSync(dirOf(id), { recursive: true });
   // 我们的详情页图片（手动上传的）
   const ourP = products.find((p) => p.role === "ours");
@@ -168,7 +176,9 @@ async function pipeline(id) {
 
   // 2. 给评价、问大家打标签（几个网站同时做）；同时让“看详情图”的 AI 读详情页
   an.stage = "tag"; save(an);
-  const descJob = readDescs(an, dir);
+  const descJob = has(an, "desc") ? readDescs(an, dir) : Promise.resolve({});
+  const titleJob = has(an, "title") ? readTitles(an, dir, ready).catch((e) => ({ error: e.message })) : Promise.resolve(null);
+  const mainJob = has(an, "main") ? readMains(an, dir, ready) : Promise.resolve({});
   const RB = an.options.batch || 40; // 老的分析没有这个选项：还是 40 条一轮
   const QB = an.options.batch ? QA_BATCH : 60;
   const jobs = [];
@@ -195,7 +205,8 @@ async function pipeline(id) {
           const k = Number(x.i) - 1;
           const src = j.batch[k];
           if (!src) return null;
-          return isRate ? { idx: src.idx, s: Number(x.s) || 0, good: arr2(x.good), bad: arr2(x.bad), need: arr2(x.need), who: arr2(x.who) } : { idx: src.idx, topic: String(x.topic || "").trim(), worry: !!x.worry };
+          return isRate ? { idx: src.idx, s: Number(x.s) || 0, good: arr2(x.good), bad: arr2(x.bad), need: arr2(x.need), who: arr2(x.who), x: !!Number(x.x), rb: !!Number(x.rb), ap: ["up", "down", "same"].includes(x.ap) ? x.ap : "" }
+            : { idx: src.idx, topic: String(x.topic || "").trim(), worry: !!x.worry, a: ["none", "good", "dodge", "bad"].includes(x.a) ? x.a : "" };
         }).filter(Boolean);
       } catch (e) {
         tags[slot] = [];
@@ -209,20 +220,20 @@ async function pipeline(id) {
   if (stopped(id)) return;
   // 读详情页的任务一直派不出去（没有能看详情图的 AI 连着）：评价分析完以后最多再等 5 分钟，然后跳过，不让报告卡住
   let waitedSince = Date.now(), descDone = false;
-  descJob.finally(() => (descDone = true));
+  Promise.all([descJob, titleJob, mainJob]).finally(() => (descDone = true)); // 读详情页、标题、主图都在这里等
   while (!descDone) {
     await new Promise((r) => setTimeout(r, process.env.QUEUE_FAST ? 300 : 5000));
     if (stopped(id)) return;
-    const dt = queue.list({ ownerType: "analysis", ownerId: id, limit: 2000 }).filter((t) => (t.key || "").startsWith(`an:${id}:desc:`));
+    const dt = queue.list({ ownerType: "analysis", ownerId: id, limit: 2000 }).filter((t) => /^an:[^:]+:(desc|main|title)/.test(t.key || ""));
     // 只有“派不出去”（说明是“等待：没有能做的 AI…”）才计时；正在做、失败后等着重试都不算
     if (!dt.some((t) => t.status === "queued" && /^等待：/.test(t.progress || ""))) waitedSince = Date.now();
     else if (Date.now() - waitedSince > (process.env.QUEUE_FAST ? 3000 : 5 * 60000)) {
       descSkipped.add(id);
       for (const t of dt) if (t.status === "queued") queue.cancel(t.id);
-      prog("没有能看详情图的 AI，跳过读详情页", 0, 1);
+      prog("没有能做的 AI，跳过读详情页 / 主图 / 标题里还没做的", 0, 1);
       break;
     }
-    if (!descDone) prog(dt.some((t) => t.status === "running") ? "AI 正在读详情页" : `等 AI 读详情页：${dt.find((t) => t.status === "queued")?.progress || "排队中"}`, 0, 1);
+    if (!descDone) { const run = dt.find((t) => t.status === "running"); prog(run ? `AI 正在做：${run.label}` : `等 AI：${dt.find((t) => t.status === "queued")?.progress || "排队中"}`, 0, 1); }
   }
   const descAll = await descJob;
   const descs = Object.fromEntries(Object.entries(descAll).filter(([, v]) => !v.error));
@@ -266,14 +277,40 @@ async function pipeline(id) {
     else if (descAll[p.key] && descAll[p.key].error) st.descError = descAll[p.key].error;
     return st;
   });
-  writeJson(path.join(dir, "stats.json"), stats);
+  // 标题、主图（和评价分析同时做的）
+  const titles = await titleJob;
+  const mains = await mainJob;
+  if (stopped(id)) return;
+  for (const st of stats) {
+    const t = titles && titles.products && titles.products.find((x) => x.key === st.key);
+    if (t) st.titleAI = t;
+    if (mains[st.key] && !mains[st.key].error) st.mainAI = mains[st.key];
+    else if (mains[st.key]) st.mainError = mains[st.key].error;
+  }
+  if (titles && titles.error) stats.titleError = titles.error;
+  // 产品属性对比（要用到统计和详情页）
+  let attr = null;
+  if (has(an, "attr") && stats.length) {
+    prog("AI 对比产品属性", 0, 1);
+    attr = readJson(path.join(dir, "attr.json"));
+    if (!attr) {
+      try {
+        const mat = Object.fromEntries(stats.map((s) => [s.key, { 标题: s.title, 参数: s.params, 规格和价格: s.skuList, 规格: s.skuProps, 价格: s.price, 详情页: s.desc ? { 卖点: s.desc.selling, 参数: s.desc.params, 人群: s.desc.audience, 场景: s.desc.scenes, 风格: s.desc.style } : undefined, 满意点: s.good.slice(0, 8).map((x) => `${x.name} ${x.pct}%`), 不满意点: s.bad.slice(0, 8).map((x) => `${x.name} ${x.pct}%`), manual: s.manual || undefined }]));
+        attr = await askJson(an, `an:${id}:attr`, "对比产品属性", attrPrompt(), JSON.stringify(mat), (x) => x && Array.isArray(x.hard), "an_attr");
+      } catch (e) { attr = { error: e.message }; }
+      writeJson(path.join(dir, "attr.json"), attr);
+    }
+  }
+  stats.attr = attr;
+  writeJson(path.join(dir, "stats.json"), { list: stats, attr, titleError: stats.titleError || "" });
 
   // 5. AI 写结论
   an.stage = "write"; save(an);
   prog("AI 写结论和建议", 0, 1);
   const ours = an.products.find((p) => p.role === "ours");
   let written = null;
-  try {
+  if (!["summary", "overview", "advice", "desc", "qa"].some((k) => has(an, k))) written = {};
+  else try {
     written = await askJson(an, `an:${id}:write`, "写结论和建议", writePrompt(!!ours, !!(ours && ours.manual)), JSON.stringify(compactForWriting(stats)), (x) => x && typeof x === "object" && x.summary, "an_write");
   } catch (e) {
     written = { summary: `（AI 没写出结论：${e.message}。下面的统计数据仍然可用。）` };
@@ -283,7 +320,7 @@ async function pipeline(id) {
   // 6. 报告
   an = load(id);
   an.stage = "report"; save(an);
-  fs.writeFileSync(path.join(dir, "report.html"), renderReport(an, stats, written));
+  fs.writeFileSync(path.join(dir, "report.html"), renderReport(an, stats, written, { attr, titleError: stats.titleError || "" }));
   an = load(id);
   an.reportFile = "report.html";
   an.stage = "done";
@@ -339,6 +376,53 @@ async function readDescs(an, dir) {
 }
 const descSkipped = new Set();
 
+/** 标题分析：所有商品的标题一个任务 */
+async function readTitles(an, dir, ready) {
+  const file = path.join(dir, "title.json");
+  const old = readJson(file);
+  if (old && old.products) return old;
+  const mat = {};
+  for (const p of an.products) {
+    const raw = p.status === "collected" ? readJson(path.join(dir, `raw_${p.key}.json`), {}) : null;
+    const title = raw && raw.item && raw.item.title;
+    if (title) mat[p.key] = { 标题: title, 参数: ((raw.item.params) || []).slice(0, 12).map((x) => `${x.name}:${x.value}`) };
+  }
+  if (!Object.keys(mat).length) return null;
+  const v = await askJson(an, `an:${an.id}:title`, "标题分析", titlePrompt(), JSON.stringify(mat), (x) => x && Array.isArray(x.products), "an_title");
+  writeJson(file, v);
+  return v;
+}
+
+/** 主图分析：每个商品的 1:1 主图（最多 8 张，缩到 800）一个任务，交给“看图”的 AI */
+async function readMains(an, dir, ready) {
+  const file = path.join(dir, "main.json");
+  const out = readJson(file, {});
+  await Promise.all(ready.map(async (p) => {
+    if (out[p.key] && !out[p.key].error) return;
+    const who = p.role === "ours" ? "我们的" : "竞品 " + p.key.slice(1);
+    try {
+      const raw = readJson(path.join(dir, `raw_${p.key}.json`), {});
+      const urls = ((raw.item && raw.item.mainImages) || []).slice(0, 8);
+      if (!urls.length) { out[p.key] = { error: "没采到主图" }; return; }
+      const saved = await saveSmallImages(urls, descDir(an.id), `main_${p.key}`);
+      if (!saved.files.length) { out[p.key] = { error: `主图下载不下来（${saved.lastError || "原因不明"}）` }; return; }
+      const images = saved.files.map((f, i) => ({ file: `desc/${an.id}/${f}`, name: `主图${i + 1}.jpg`, mime: "image/jpeg" }));
+      let v = null;
+      for (let attempt = 0; attempt < 2 && !v; attempt++) {
+        const r = await queue.ensure({ key: `an:${an.id}:main:${p.key}${attempt ? ":again" : ""}`, kind: "text", label: `主图分析：${who}（${images.length} 张）`, ownerType: "analysis", ownerId: an.id,
+          maxAttempts: 6, payload: { role: "an_main", prompt: mainPrompt(images.length, raw.item && raw.item.title), images } });
+        try { const x = extractJson(r.text, r.codes); if (x && typeof x === "object" && !Array.isArray(x) && (x.firstType || x.images)) v = x; } catch {}
+      }
+      if (!v) throw new Error("AI 没按格式回复");
+      out[p.key] = { ...v, count: images.length, thumbs: saved.thumbs };
+    } catch (e) {
+      if (stopped(an.id)) return;
+      out[p.key] = { error: descSkipped.has(an.id) ? "等了 5 分钟没有能看图的 AI，跳过了" : `主图分析没成功：${e.message}` };
+    } finally { writeJson(file, out); }
+  }));
+  return out;
+}
+
 const arr2 = (v) => (Array.isArray(v) ? v : v ? [v] : []).map((x) => String(x).trim()).filter((x) => x && x.length <= 20).slice(0, 6);
 
 function setProduct(id, key, patch) {
@@ -354,10 +438,11 @@ export async function rewrite(id) {
   const an = load(id);
   if (!an) return;
   const dir = dirOf(id);
-  const stats = readJson(path.join(dir, "stats.json"));
-  if (!stats) throw new Error("还没有统计数据");
+  const saved = readJson(path.join(dir, "stats.json"));
+  if (!saved) throw new Error("还没有统计数据");
+  const stats = Array.isArray(saved) ? saved : saved.list; // 老格式是数组
   const written = readJson(path.join(dir, "written.json"), {});
-  fs.writeFileSync(path.join(dir, "report.html"), renderReport(an, stats, written));
+  fs.writeFileSync(path.join(dir, "report.html"), renderReport(an, stats, written, { attr: saved.attr || null, titleError: saved.titleError || "" }));
   an.reportFile = "report.html";
   save(an);
 }

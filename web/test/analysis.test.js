@@ -84,10 +84,11 @@ test("竞品分析：两个竞品 + 我们的产品，跑出报告", async () =>
   assert.ok(asked.deepseek > 0 && asked.kimi > 0, `两个网站同时干活：${JSON.stringify(asked)}`);
   const rep = await api("GET", `/api/analyses/${id}/report`);
   assert.equal(rep.status, 200);
-  for (const s of ["保温杯竞品", "总体结论", "杯盖漏水", "保温效果好", "我们 vs 竞品", "优化建议", "问大家", "倒置不漏"]) assert.ok(rep.body.includes(s), "报告里应该有：" + s);
+  for (const s of ["保温杯竞品", "总体结论", "杯盖漏水", "保温效果好", "我们更好的地方", "优化建议", "问大家", "倒置不漏"]) assert.ok(rep.body.includes(s), "报告里应该有：" + s);
   fs.writeFileSync(path.join(os.tmpdir(), "aitutu-report-test.html"), rep.body);
   // 统计是程序算的：竞品 2（id=222）有一半差评
-  const stats = JSON.parse(fs.readFileSync(path.join(dataDir, "analysis", id, "stats.json"), "utf8"));
+  const saved = JSON.parse(fs.readFileSync(path.join(dataDir, "analysis", id, "stats.json"), "utf8"));
+  const stats = saved.list || saved;
   const p2 = stats.find((s) => s.title.includes("222"));
   assert.equal(p2.analyzed, 90);
   assert.ok(p2.sentiment.negPct >= 45 && p2.sentiment.negPct <= 55, "差评比例 " + p2.sentiment.negPct);
@@ -231,4 +232,52 @@ test("分模块指定 AI：问大家只给 Kimi，评价只给 DeepSeek，设置
   await api("DELETE", "/api/roles");
   const st2 = (await api("GET", "/api/status")).body;
   assert.ok(Object.values(st2.follows).every(Boolean));
+});
+
+test("报告 2.0：只勾选的模块；最多 3 个商品；标题 / 主图 / 属性 / 时间分布 / 回购 / 追评 / 回答质量", async () => {
+  plugins.forEach((p) => p.close());
+  plugins.length = 0;
+  await sleep(200);
+  const { createCanvas } = await import("@napi-rs/canvas");
+  const http = await import("node:http");
+  const png = (c0) => { const c = createCanvas(800, 800); const g = c.getContext("2d"); g.fillStyle = c0; g.fillRect(0, 0, 800, 800); return c.toBuffer("image/png"); };
+  const cdn = http.createServer((req, res) => { res.setHeader("Content-Type", "image/png"); res.end(png(req.url.includes("2") ? "#cde" : "#edc")); });
+  await new Promise((r) => cdn.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${cdn.address().port}`;
+  const url = `ws://127.0.0.1:${PORT}/ext`;
+  const asked2 = [];
+  plugins.push(await connect(url, { token, name: "测试电脑", version: "1.4.0", sites: [{ site: "deepseek", open: true, ready: true }, { site: "kimi", open: true, ready: true }] }, async (m) => {
+    if (m.cmd !== "ask") return { ok: true };
+    asked2.push(m.args.text.slice(0, 40));
+    const txt = (m.args.files || []).find((f) => f.content);
+    return { answer: fakeAnswer(m.args.text, txt && txt.content) };
+  }));
+  plugins.push(await connect(url, { token, app: "taobao", name: "测试电脑", sites: [{ site: "taobao", open: true, ready: true }] }, async (m) => {
+    const id = /id=(\d+)/.exec(m.args.url)[1];
+    const it = fakeItem(id, 100);
+    it.item.mainImages = [`${base}/m1.png`, `${base}/m2.png`, `${base}/x.gif`];
+    it.rates.list.forEach((r, i) => { if (i % 10 === 3) r.content = "第二次回购了，" + r.content; });
+    it.collectedQa = m.args.qa;
+    return it;
+  }));
+  const mods = ["summary", "overview", "title", "main", "attr", "time", "rates", "sku", "qa", "advice"]; // 不要详情页
+  const r = await api("POST", "/api/analyses", { name: "报告2", links: "https://item.taobao.com/item.htm?id=901\nhttps://item.taobao.com/item.htm?id=902\nhttps://item.taobao.com/item.htm?id=903", oursUrl: "https://item.taobao.com/item.htm?id=900", rates: 100, mods });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.dropped.length, 1, "加上我们的最多 3 个：第 3 个竞品不分析");
+  let a;
+  for (let i = 0; i < 300; i++) { a = (await api("GET", `/api/analyses/${r.body.id}`)).body.analysis; if (["done", "failed"].includes(a.stage)) break; await sleep(150); }
+  cdn.close();
+  assert.equal(a.stage, "done", JSON.stringify(a));
+  assert.equal(a.products.length, 3);
+  assert.equal(a.options.desc, false, "没勾详情页：不采详情图");
+  assert.ok(!asked2.some((t) => /详情页/.test(t) && /切开/.test(t)), "没勾详情页：不读详情页");
+  const rep = (await api("GET", `/api/analyses/${r.body.id}/report`)).body;
+  fs.writeFileSync(path.join(os.tmpdir(), "aitutu-report2-test.html"), rep);
+  for (const s of ["标题分析", "字符（剩", "属性覆盖：2 / 5", "标题用词差异", "竞品有、我们没有", "主图分析", "点击率潜力", "AI 的主观判断", "产品属性对比", "硬属性", "商家说的 vs 买家感受到的",
+    "评价时间分布与销量估算", "<svg", "销量估算（仅供参考）", "回购信号", "追评", "极端差评", "主推规格", "按“颜色分类”汇总", "回答质量", "担心有没有成真", "优化建议", "说明"]) assert.ok(rep.includes(s), "报告里应该有：" + s);
+  assert.ok(!rep.includes('id="m-desc"'), "没勾的模块不显示");
+  assert.ok(rep.indexOf('class="tag ours"') < rep.indexOf('<span class="tag">竞品</span>'), "我们在第一列");
+  // 下次新建默认勾这次的模块
+  const list = (await api("GET", "/api/analyses")).body;
+  assert.deepEqual(list.lastMods, mods);
 });

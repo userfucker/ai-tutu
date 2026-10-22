@@ -9,6 +9,7 @@
   const stageTag = (s) => `<span class="tag ${s === "done" ? "ok" : s === "failed" ? "bad" : s === "stopped" ? "warn" : "blue"}">${STAGE_TEXT[s] || s}</span>`;
   let rateOptions = [100, 200, 300, 500, 800, 1000];
   let batchOptions = [50, 100, 200];
+  let modList = [], lastMods = null, maxProducts = 3;
   let cache = { list: null, detail: null };
 
   function stagesHtml(a) {
@@ -25,6 +26,7 @@
       const r = await W.api("GET", "/api/analyses");
       rateOptions = r.rateOptions || rateOptions;
       batchOptions = r.batchOptions || batchOptions;
+      modList = r.mods || modList; lastMods = r.lastMods; maxProducts = r.maxProducts || maxProducts;
       cache.list = r.list;
       main.innerHTML = `<div class="head"><div><h1>竞品分析</h1><div class="muted">贴上淘宝 / 天猫的商品链接，插件自动采集商品信息、评价和问大家，AI 分析买家的需求和不满，出一份 HTML 报告。</div></div>
         <div class="sp"><button class="primary" data-act="new">＋ 新建分析</button></div></div>
@@ -43,21 +45,25 @@
         const v = (id) => (m.querySelector("#" + id) || {}).value || "";
         const mode = m.querySelector("input[name=ours]:checked").value;
         const body = {
-          name: v("aName").trim(), links: v("aLinks"), rates: +v("aRates"), qa: m.querySelector("#aQa").checked, batch: +v("aBatch"), desc: m.querySelector("#aDesc").checked,
+          name: v("aName").trim(), links: v("aLinks"), rates: +v("aRates"), batch: +v("aBatch"),
+          mods: [...m.querySelectorAll("[data-mod]:checked")].map((x) => x.dataset.mod),
           oursUrl: mode === "link" ? v("oUrl") : "",
           oursManual: mode === "manual" ? { name: v("oName"), price: v("oPrice"), points: v("oPoints"), params: v("oParams"), notes: v("oNotes") } : null,
           oursDesc: [],
         };
+        if (!body.mods.length) return W.toast("至少勾一个模块", true);
         el.disabled = true;
         // 我们的详情页图片（手动填写时可以上传）：按文件名排序
         const files = mode === "manual" ? [...(m.querySelector("#oDesc").files || [])].sort((a, b) => a.name.localeCompare(b.name, "zh", { numeric: true })).slice(0, 40) : [];
         for (const f of files) body.oursDesc.push({ name: f.name, mime: f.type, b64: await new Promise((res) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.readAsDataURL(f); }) });
         try {
           const r = await W.api("POST", "/api/analyses", body);
-          W.toast("已开始：插件会一个一个采集");
+          W.toast(r.dropped && r.dropped.length ? `已开始。最多 ${maxProducts} 个商品（含我们的），后面 ${r.dropped.length} 个链接没分析` : "已开始：插件会一个一个采集", r.dropped && r.dropped.length);
           W.go(`#/analysis/${r.id}`);
         } catch (e) { W.toast(e.message, true); el.disabled = false; }
       },
+      modsAll: () => document.querySelectorAll("[data-mod]").forEach((x) => (x.checked = true)),
+      modsNone: () => document.querySelectorAll("[data-mod]").forEach((x) => (x.checked = false)),
       stop: async () => { if (await W.confirm("停止这个分析？已经做完的部分会保留，之后可以“重新开始”接着做。", "停止")) { await W.api("POST", `/api/analyses/${W.params[0]}/stop`); W.render(); } },
       restart: async () => { await W.api("POST", `/api/analyses/${W.params[0]}/restart`); W.toast("接着做：没做完和失败的部分会重新排队"); W.render(); },
       del: async () => { if (await W.confirm("删除这个分析和报告？不能恢复。", "删除", true)) { await W.api("DELETE", `/api/analyses/${W.params[0]}`); W.go("#/analysis"); } },
@@ -65,7 +71,7 @@
       retryTask: async (el) => { await W.api("POST", `/api/tasks/${el.dataset.id}/retry`); W.toast("已重新排队"); },
       dupe: async () => {
         const a = cache.detail;
-        sessionStorage.setItem("aitutuDupe", JSON.stringify({ name: a.name + "（重新分析）", links: a.products.filter((p) => p.role === "rival").map((p) => p.url).join("\n"), oursUrl: (a.products.find((p) => p.role === "ours" && p.url) || {}).url || "", rates: a.options.rates, batch: a.options.batch, desc: a.options.desc }));
+        sessionStorage.setItem("aitutuDupe", JSON.stringify({ name: a.name + "（重新分析）", links: a.products.filter((p) => p.role === "rival").map((p) => p.url).join("\n"), oursUrl: (a.products.find((p) => p.role === "ours" && p.url) || {}).url || "", rates: a.options.rates, batch: a.options.batch, mods: a.options.mods }));
         W.go("#/analysis/new");
       },
     },
@@ -83,18 +89,25 @@
     return `<div class="card"><div class="row"><h3>每一步交给哪些 AI</h3><span class="muted">按顺序找空闲的；灰色的是现在没连上的</span><a class="sp" href="#/connect">去修改</a></div><div class="col" style="margin-top:8px;gap:4px">${rows}</div></div>`;
   }
 
-  function renderNew(main) {
+  async function renderNew(main) {
+    if (!modList.length) {
+      const r = await W.api("GET", "/api/analyses");
+      rateOptions = r.rateOptions || rateOptions; batchOptions = r.batchOptions || batchOptions;
+      modList = r.mods || modList; lastMods = r.lastMods; maxProducts = r.maxProducts || maxProducts;
+    }
     let pre = {};
     try { pre = JSON.parse(sessionStorage.getItem("aitutuDupe") || "{}"); sessionStorage.removeItem("aitutuDupe"); } catch {}
     main.innerHTML = `<div class="head"><div><h1>新建竞品分析</h1><div class="muted">现在只支持淘宝和天猫的链接，其他平台以后补充。</div></div><div class="sp"><button data-act="back" onclick="history.back()">返回</button></div></div>
       <div class="card"><div class="form">
         <label class="f wide">名称（可以不填）<input id="aName" value="${esc(pre.name || "")}" placeholder="例如：保温杯竞品 10 月"></label>
-        <label class="f wide">竞品链接（一行一个）<textarea id="aLinks" rows="6" placeholder="https://item.taobao.com/item.htm?id=...&#10;https://detail.tmall.com/item.htm?id=...">${esc(pre.links || "")}</textarea></label>
+        <label class="f wide">竞品链接（一行一个；加上我们的最多 ${maxProducts} 个商品，多出来的不分析）<span class="muted" id="aLimit"></span><textarea id="aLinks" rows="4" placeholder="https://item.taobao.com/item.htm?id=...&#10;https://detail.tmall.com/item.htm?id=...">${esc(pre.links || "")}</textarea></label>
         <label class="f">每个商品采集多少条评价（按时间，最新的优先）<select id="aRates">${rateOptions.map((n) => `<option value="${n}" ${n === (pre.rates || 300) ? "selected" : ""}>${n} 条</option>`).join("")}</select></label>
         <label class="f">评价打标签每轮几条（越多轮数越少，但 AI 一次要处理的越多）<select id="aBatch">${batchOptions.map((n) => `<option value="${n}" ${n === (pre.batch || 100) ? "selected" : ""}>每轮 ${n} 条</option>`).join("")}</select></label>
-        <label class="f">问大家<span class="row" style="color:var(--ink)"><label class="row"><input type="checkbox" id="aQa" checked> 也采集“问大家”（全部采集）</label></span></label>
-        <label class="f wide">详情页<span class="row" style="color:var(--ink)"><label class="row"><input type="checkbox" id="aDesc" ${pre.desc === false ? "" : "checked"}> 读详情页：采集详情图，拼成几张图交给“看详情图”的 AI，和评价对照着分析</label></span></label>
+
       </div></div>
+      <div class="card"><div class="row"><h3>报告里要哪些模块</h3><span class="muted">没勾的不采集、不分析、不显示；会记住这次的选择</span><span class="sp row"><button class="sm" data-act="modsAll">全选</button><button class="sm" data-act="modsNone">全不选</button></span></div>
+        <div class="modgrid">${modList.map(([k, n]) => `<label class="row"><input type="checkbox" data-mod="${k}" ${(pre.mods || lastMods || modList.map((x) => x[0])).includes(k) ? "checked" : ""}> ${esc(n)}</label>`).join("")}</div>
+        <div class="muted" style="margin-top:6px">标题、主图、属性对比、问大家、详情页会多一些 AI 任务；主图和详情页交给“看图”的 AI（AI 连接里可以指定）。</div></div>
       <div class="card"><h3>我们的产品（用来对比）</h3>
         <div class="pills" id="oursMode" style="margin:6px 0 12px">
           <label class="pill on"><input type="radio" name="ours" value="link" hidden checked>贴我们的链接</label>
@@ -111,6 +124,15 @@
       </div>
       ${modsHtml()}
       <div class="row" style="margin-top:14px"><button class="primary" data-act="submit">开始分析</button><span class="muted">采集交给淘宝采集插件，分析评价交给 ai-web（DeepSeek / Kimi 等），读详情页按“AI 连接”里“看详情图”的顺序（国产优先），做的时候可以关掉这个网页。</span></div>`;
+    const limitHint = () => {
+      const n = (main.querySelector("#aLinks").value.match(/https?:\/\/\S*(taobao|tmall|tb\.cn)\S*/gi) || []).length;
+      const mode = main.querySelector("input[name=ours]:checked").value;
+      const keep = maxProducts - (mode === "none" ? 0 : 1);
+      main.querySelector("#aLimit").innerHTML = n > keep ? ` <b style="color:var(--bad)">现在 ${n} 个竞品，只分析前 ${keep} 个</b>` : "";
+    };
+    main.querySelector("#aLinks").oninput = limitHint;
+    main.addEventListener("change", limitHint);
+    limitHint();
     main.querySelector("#oursMode").onchange = (e) => {
       const v = e.target.value;
       main.querySelectorAll("#oursMode .pill").forEach((p) => p.classList.toggle("on", p.querySelector("input").checked));

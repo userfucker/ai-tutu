@@ -124,7 +124,7 @@ app.post("/api/tasks/:id/retry", (c) => c.json({ ok: queue.retry(Number(c.req.pa
 app.post("/api/tasks/:id/bump", (c) => { queue.bump(Number(c.req.param("id"))); return c.json({ ok: true }); });
 
 // ------------------------------------------------------------ 竞品分析
-app.get("/api/analyses", (c) => c.json({ list: analysis.listAll(), rateOptions: analysis.RATE_OPTIONS, batchOptions: analysis.BATCH_OPTIONS }));
+app.get("/api/analyses", (c) => c.json({ list: analysis.listAll(), rateOptions: analysis.RATE_OPTIONS, batchOptions: analysis.BATCH_OPTIONS, mods: analysis.MODS, lastMods: kvGet("ui:anMods", null), maxProducts: analysis.MAX_PRODUCTS }));
 app.post("/api/analyses", async (c) => {
   const b = await c.req.json();
   const rivals = analysis.parseLinks(b.links);
@@ -133,8 +133,11 @@ app.post("/api/analyses", async (c) => {
   if (!rivals.length && !oursUrl) return c.json({ error: "没有找到淘宝 / 天猫的商品链接（一行一个）" }, 400);
   const oursDesc = Array.isArray(b.oursDesc) ? b.oursDesc.filter((x) => x && x.b64) : [];
   const ours = oursUrl ? { url: oursUrl } : manual ? { manual } : oursDesc.length ? { manual: { name: "我们的产品" } } : null;
-  const an = analysis.create({ name: b.name, rivals, ours, rates: b.rates, qa: b.qa, batch: b.batch, desc: b.desc, oursDesc: oursUrl ? [] : oursDesc });
-  return c.json({ ok: true, id: an.id });
+  const keep = analysis.MAX_PRODUCTS - (ours ? 1 : 0);
+  const dropped = rivals.slice(keep);
+  const an = analysis.create({ name: b.name, rivals, ours, rates: b.rates, qa: b.qa, batch: b.batch, desc: b.desc, oursDesc: oursUrl ? [] : oursDesc, mods: b.mods });
+  if (Array.isArray(b.mods)) kvSet("ui:anMods", b.mods); // 记住这次勾的模块，下次新建默认这样
+  return c.json({ ok: true, id: an.id, dropped });
 });
 app.get("/api/analyses/:id", (c) => {
   const an = analysis.load(c.req.param("id"));

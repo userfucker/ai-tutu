@@ -99,3 +99,30 @@ export async function buildDescImages(sources, outDir, prefix) {
   }
   return { files, width: W, height: H, used: imgs.length, failed, gifs, cut, why };
 }
+
+/** 主图：每张缩到长边 800 的 JPG，存到 outDir/<prefix>_N.jpg；另外做 160 的小图（base64，放进报告里）。返回 { files, thumbs, failed, lastError } */
+export async function saveSmallImages(urls, outDir, prefix, max = 800) {
+  fs.mkdirSync(outDir, { recursive: true });
+  const files = [], thumbs = [];
+  let failed = 0;
+  for (const u of urls) {
+    if (/\.gif(\?|_|$)/i.test(u)) continue;
+    const b = await download(String(u));
+    if (!b || b.subarray(0, 4).toString("latin1") === "GIF8") { failed++; continue; }
+    try {
+      const im = await loadImage(b);
+      const s = Math.min(1, max / Math.max(im.width, im.height));
+      const c = createCanvas(Math.round(im.width * s), Math.round(im.height * s));
+      const g = c.getContext("2d");
+      g.fillStyle = "#ffffff"; g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(im, 0, 0, c.width, c.height);
+      const name = `${prefix}_${files.length + 1}.jpg`;
+      fs.writeFileSync(path.join(outDir, name), c.toBuffer("image/jpeg", 80));
+      files.push(name);
+      const t = createCanvas(160, Math.max(1, Math.round((160 * c.height) / c.width)));
+      t.getContext("2d").drawImage(c, 0, 0, t.width, t.height);
+      thumbs.push("data:image/jpeg;base64," + t.toBuffer("image/jpeg", 70).toString("base64"));
+    } catch { failed++; }
+  }
+  return { files, thumbs, failed, lastError: failed ? download.last || "" : "" };
+}

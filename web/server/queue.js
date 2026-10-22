@@ -46,6 +46,9 @@ export const MODULES = {
   an_qa: { name: "问大家归类", group: "竞品分析", follow: "text" },
   an_vocab: { name: "合并同义标签", group: "竞品分析", follow: "text" },
   an_desc: { name: "读详情页（看详情图）", group: "竞品分析", follow: "read" },
+  an_title: { name: "标题分析", group: "竞品分析", follow: "text" },
+  an_main: { name: "主图分析（看图）", group: "竞品分析", follow: "read" },
+  an_attr: { name: "产品属性对比", group: "竞品分析", follow: "text" },
   an_write: { name: "写结论和建议", group: "竞品分析", follow: "text" },
 };
 export const baseRole = (role) => (MODULES[role] ? MODULES[role].follow : role);

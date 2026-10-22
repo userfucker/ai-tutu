@@ -58,13 +58,22 @@ export function fakeAnswer(prompt, material) {
       const i = Number(/^#(\d+)/.exec(l)[1]);
       const good = pick(l, [[/保温效果很好/, "保温效果好"], [/做工精细/, "做工好"], [/颜值高/, "颜值高"], [/容量刚好/, "容量合适"], [/物流很快/, "物流快"]]);
       const bad = pick(l, [[/漏水/, "杯盖漏水"], [/有点重/, "太重"], [/异味/, "有异味"], [/保温效果一般/, "保温差"], [/不好拧/, "盖子难拧"]]);
-      return { i, s: bad.length ? -1 : 1, good, bad, need: pick(l, [[/送/, "送礼"], [/上班/, "上班用"]]), who: pick(l, [[/学生/, "学生"], [/女朋友/, "情侣"]]) };
+      return { i, s: bad.length ? -1 : 1, good, bad, need: pick(l, [[/送/, "送礼"], [/上班/, "上班用"]]), who: pick(l, [[/学生/, "学生"], [/女朋友/, "情侣"]]),
+        ...(/漏水/.test(l) ? { x: 1 } : {}), ...(/回购|第二次/.test(l) ? { rb: 1 } : {}), ...(/追评/.test(l) ? { ap: /还不错/.test(l) ? "up" : "down" } : {}) };
     });
   } else if (/归纳一个主题/.test(prompt)) {
-    out = lines.map((l) => ({ i: Number(/^#(\d+)/.exec(l)[1]), topic: /漏/.test(l) ? "是否漏水" : /保温/.test(l) ? "保温时间" : "其他", worry: /漏/.test(l) }));
+    out = lines.map((l) => ({ i: Number(/^#(\d+)/.exec(l)[1]), topic: /漏/.test(l) ? "是否漏水" : /保温/.test(l) ? "保温时间" : "其他", worry: /漏/.test(l), a: /｜\s*$/.test(l) ? "none" : /不会/.test(l) ? "good" : "dodge" }));
   } else if (/合并成一个归类名/.test(prompt)) {
     const v = JSON.parse(material);
     out = Object.fromEntries(Object.entries(v).map(([k, o]) => [k, Object.fromEntries(Object.keys(o).map((t) => [t, t === "保温差" ? "保温效果差" : t]))]));
+  } else if (/标题优化专家/.test(prompt)) {
+    const m = JSON.parse(material);
+    out = { products: Object.entries(m).map(([key, v]) => ({ key, core: ["保温杯"], modifiers: key === "ours" ? ["高颜值"] : ["新款"], attrs: { 材质: ["316不锈钢"], 款式外观: [], 季节时间: [], 人群: key === "ours" ? ["学生"] : [], 场景: [] }, fillers: [], repeats: [], orderIssues: ["核心词靠后"], coverage: key === "ours" ? 2 : 1, suggest: "316不锈钢保温杯 学生 大容量", advice: ["加上场景词"] })) };
+  } else if (/的主图（1:1/.test(prompt)) {
+    out = { firstType: "白底图", promo: false, textPoints: ["保温 24 小时"], tone: "冷色调", focus: "清楚", benefit: "卖点透出", pros: ["干净"], cons: ["没有场景"], ctr: { level: "中", reason: "和同类差不多" }, images: [{ i: 1, what: "白底正面", advice: "加场景" }] };
+  } else if (/电商产品经理/.test(prompt)) {
+    const m = JSON.parse(material);
+    out = { hard: [{ name: "材质", values: Object.fromEntries(Object.keys(m).map((k) => [k, "316不锈钢"])) }, { name: "容量", values: Object.fromEntries(Object.keys(m).map((k, i) => [k, i ? "350ml" : "500ml"])) }], soft: Object.fromEntries(Object.keys(m).map((k) => [k, { audience: "上班族", season: "秋冬", pricePos: "中端品质", detailStyle: "白底简约" }])), gaps: [{ key: Object.keys(m)[0], attr: "保温", merchant: "保温 24 小时", buyers: "10% 说保温差" }] };
   } else if (/从上到下按顺序切开/.test(prompt)) {
     out = { selling: ["316 不锈钢内胆", "保温 24 小时", "一键开盖不漏水"], structure: ["第 1 屏：首屏海报", "第 2 屏：保温测试"], params: ["容量：500ml"], claims: ["保温 24 小时"], promises: ["一年换新"], audience: "上班族", scenes: "办公室、通勤", style: "白底简约" };
   } else if (/竞品分析结论/.test(prompt)) {
@@ -72,6 +81,7 @@ export function fakeAnswer(prompt, material) {
     out = { summary: `共分析 ${st.length} 个商品，买家最在意保温和漏水。`, products: st.map((s) => ({ key: s.key, positioning: "中端保温杯", strengths: ["保温好"], weaknesses: ["杯盖漏水"] })),
       needs: ["上班用", "送礼"], pains: [{ point: "杯盖漏水", evidence: "竞品 1 有 20% 的评价提到", opportunity: "做双层密封盖" }],
       compare: { better: ["更轻"], worse: ["价格高"], gaps: ["漏水"] }, suggestions: { product: ["加密封圈"], detail: ["首屏放倒置不漏水的图"], points: ["倒置不漏"], faq: ["会漏水吗"], price: ["主推 500ml"] }, risks: ["夸大保温时间"],
+      qaCheck: st.map((x) => ({ key: x.key, worry: "会不会漏水", real: "成真：杯盖漏水 10%" })),
       detail: { products: st.filter((x) => x.详情页).map((x) => ({ key: x.key, accepted: ["316 不锈钢内胆，满意点里做工好 30%"], doubted: ["详情页说保温 24 小时，评价里 20% 说保温差"], missing: ["买家问会不会漏水，详情页没讲"] })), ours: ["首屏写清楚倒置不漏"] } };
   } else out = { ok: true };
   return "好的，结果如下：\n```json\n" + JSON.stringify(out) + "\n```";
