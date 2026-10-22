@@ -273,7 +273,7 @@ test("报告 2.0：只勾选的模块；最多 3 个商品；标题 / 主图 / �
   assert.ok(!asked2.some((t) => /详情页/.test(t) && /切开/.test(t)), "没勾详情页：不读详情页");
   const rep = (await api("GET", `/api/analyses/${r.body.id}/report`)).body;
   fs.writeFileSync(path.join(os.tmpdir(), "aitutu-report2-test.html"), rep);
-  for (const s of ["标题分析", "字符（剩", "属性覆盖：2 / 5", "标题用词差异", "竞品有、我们没有", "主图分析", "点击率潜力", "AI 的主观判断", "产品属性对比", "硬属性", "商家说的 vs 买家感受到的",
+  for (const s of ["标题分析", "字符（剩", "覆盖范围", "1 × 3 = 3", "产品词（去重）", "标题用词差异", "竞品有、我们没有", "主图分析", "点击率潜力", "AI 的主观判断", "产品属性对比", "硬属性", "商家说的 vs 买家感受到的",
     "评价时间分布与销量估算", "<svg", "销量估算（仅供参考）", "回购信号", "追评", "极端差评", "主推规格", "按“颜色分类”汇总", "回答质量", "担心有没有成真", "优化建议", "说明"]) assert.ok(rep.includes(s), "报告里应该有：" + s);
   assert.ok(!rep.includes('id="m-desc"'), "没勾的模块不显示");
   assert.ok(rep.indexOf('class="tag ours"') < rep.indexOf('<span class="tag">竞品</span>'), "我们在第一列");

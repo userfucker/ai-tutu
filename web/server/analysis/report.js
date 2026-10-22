@@ -2,12 +2,13 @@
  * 竞品分析报告：生成一个独立的 HTML 文件（样式都写在文件里，发给别人直接用浏览器打开）。
  */
 import { esc, bj } from "../util.js";
+import { titleWords } from "./stats.js";
 
 const CSS = `
 :root{--ink:#1b1f27;--sub:#5d6472;--mute:#8a909c;--line:#e3e6ec;--soft:#f5f6f8;--bg:#fafbfc;--accent:#2f5fd0;--good:#1f8a4c;--goodsoft:#e4f4ea;--bad:#c2362f;--badsoft:#fbe8e6;--warn:#a86400;--warnsoft:#fdf2df;--ours:#7a3fd1;--ourssoft:#f1e9fc}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 -apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif}
-.wrap{margin:0;padding:28px 32px 80px}
+.wrap{margin:0;padding:28px 32px 28px}
 h1{font-size:28px;line-height:1.3;margin:0 0 6px}
 h2{font-size:21px;margin:44px 0 14px;padding-top:12px;border-top:2px solid var(--ink)}
 h3{font-size:16px;margin:22px 0 8px}
@@ -140,27 +141,37 @@ export function renderReport(an, stats0, w, extra = {}) {
     ${ovRows.slice(1).map(([k, f]) => `<tr><th>${k}</th>${withRates.map((s) => `<td>${f(s) || '<span class="meta">—</span>'}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
     <div class="meta">满意率 = AI 判断为“满意”的评价条数 ÷ 分析的评价条数（程序统计）。</div>` : "");
 
-  // 3 标题分析
+  // 3 标题分析（AI 只负责把标题切成“产品词 / 修饰词”，数字都是程序算的）
   const titled = stats.filter((s) => s.titleInfo && s.titleInfo.text);
   if (on("title") && titled.length) {
-    const wordsOf = (s) => { const t = s.titleAI || {}; return new Set([...(t.core || []), ...(t.modifiers || []), ...Object.values(t.attrs || {}).flat()].map((x) => String(x).trim()).filter(Boolean)); };
-    const coreFront = (s) => { const c = (s.titleAI && s.titleAI.core) || []; const i = Math.min(...c.map((x) => { const k = s.titleInfo.text.indexOf(x); return k < 0 ? 999 : [...s.titleInfo.text.slice(0, k)].length; })); return c.length ? (i < 15 ? `是（第 ${i + 1} 个字开始）` : i === 999 ? "标题里没找到核心词" : `否（第 ${i + 1} 个字才出现）`) : ""; };
+    const tws = new Map(titled.map((s) => [s.key, titleWords(s.titleInfo.text, s.titleAI)]));
+    const wordsOf = (s) => { const t = tws.get(s.key); return new Set(t ? [...t.core, ...t.mod] : []); };
     let html = cols(titled, (s) => {
-      const t = s.titleAI || {}, ti = s.titleInfo;
-      const dims = ["材质", "款式外观", "季节时间", "人群", "场景"];
-      return `<div class="ttl">${esc(ti.text)}</div>
-        ${kv([["字数", `${ti.len} / ${ti.max} 字符（剩 ${Math.max(0, ti.max - ti.len)}）${ti.len >= ti.max - 2 ? ' <span class="tag good">基本写满</span>' : ' <span class="tag bad">没写满</span>'}`], ["核心词在前 15 个字", esc(coreFront(s))]])}
-        ${s.titleAI ? `<h4>词性拆解</h4>${kv([["核心词", chips(t.core, "good")], ["修饰词", chips(t.modifiers)], ...dims.map((d) => [d, chips((t.attrs || {})[d])]), ["无效占位", chips(t.fillers, "bad")], ["重复的词", chips(t.repeats, "bad")]])}
-        <h4>属性覆盖：${Number(t.coverage) || 0} / 5 个维度</h4><div class="score"><i style="width:${(Number(t.coverage) || 0) * 20}%"></i></div>
+      const t = s.titleAI || {}, ti = s.titleInfo, tw = tws.get(s.key);
+      const marked = tw ? tw.words.map((x) => `<span class="w ${x.t}">${esc(x.w)}</span>`).join("") : esc(ti.text);
+      return `<div class="ttl">${marked}</div>${tw ? '<div class="meta"><span class="w core">产品词</span> <span class="w mod">修饰词</span></div>' : ""}
+        ${kv([["字数", `${ti.len} / ${ti.max} 字符（剩 ${Math.max(0, ti.max - ti.len)}）${ti.len >= ti.max - 2 ? ' <span class="tag good">基本写满</span>' : ' <span class="tag bad">没写满</span>'}`],
+          ...(tw ? [
+            ["产品词在前 15 个字", tw.firstCore < 0 ? "标题里没找到产品词" : tw.firstCore < 15 ? `是（第 ${tw.firstCore + 1} 个字开始）` : `否（第 ${tw.firstCore + 1} 个字才出现）`],
+            ["产品词（去重）", `<b>${tw.core.length}</b> 个：${chips(tw.core, "good")}`],
+            ["修饰词（去重）", `<b>${tw.mod.length}</b> 个：${chips(tw.mod)}`],
+            ["重复的词", tw.repeats.length ? tw.repeats.map((x) => `<span class="tag bad">${esc(x.w)} ×${x.n}</span>`).join("") : '<span class="meta">没有</span>'],
+            ["覆盖范围", `<b>${tw.core.length} × ${tw.mod.length} = ${tw.coverage}</b> 个词组合 <span class="meta">（产品词 × 修饰词，大体估算标题能覆盖多少搜索词）</span>`],
+          ] : [])])}
+        ${tw && !tw.matches ? '<div class="meta" style="color:var(--warn)">AI 切出来的词和原标题对不上，数字可能有出入</div>' : ""}
+        ${!tw ? `<div class="meta">${esc(extra.titleError || "没有 AI 拆词结果")}</div>` : ""}
         ${t.orderIssues && t.orderIssues.length ? `<h4>词序问题</h4>${ul(t.orderIssues)}` : ""}
-        ${t.suggest ? `<h4>优化后的标题（${esc(String(t.suggest).length)} 字）</h4><div class="ttl good">${esc(t.suggest)}</div>` : ""}
-        ${t.advice && t.advice.length ? `<h4>建议</h4>${ul(t.advice)}` : ""}` : `<div class="meta">${esc(extra.titleError || "没有 AI 分析结果")}</div>`}`;
+        ${t.suggest ? `<h4>优化后的标题</h4><div class="ttl good">${esc(t.suggest)}</div>` : ""}
+        ${t.advice && t.advice.length ? `<h4>建议</h4>${ul(t.advice)}` : ""}`;
     });
-    if (ours && ours.titleAI && titled.length > 1) {
+    // 覆盖范围对比条（一眼看出谁的标题覆盖得多）
+    const maxCov = Math.max(1, ...titled.map((s) => (tws.get(s.key) || {}).coverage || 0));
+    html = `<div class="card">${titled.map((s) => { const tw = tws.get(s.key); return tw ? `<div class="sku"><span>${nameOf(s)}</span><span class="p">${tw.core.length}×${tw.mod.length}</span><span class="b"><i style="width:${(tw.coverage / maxCov) * 100}%"></i></span><span class="n">${tw.coverage}</span></div>` : ""; }).join("")}<div class="meta">覆盖范围 = 产品词数 × 修饰词数（都去重）</div></div>` + html;
+    if (ours && tws.get(ours.key) && titled.length > 1) {
       const mine = wordsOf(ours);
-      html += `<h3>标题用词差异（和我们比）</h3>${cols(titled.filter((s) => s !== ours && s.titleAI), (s) => { const theirs = wordsOf(s); return kv([["竞品有、我们没有<br><span class=meta>可能漏掉的流量词</span>", chips([...theirs].filter((x) => !mine.has(x)), "bad")], ["我们有、竞品没有<br><span class=meta>差异化还是占位，看上面的拆解</span>", chips([...mine].filter((x) => !theirs.has(x)), "ours")], ["都有", chips([...theirs].filter((x) => mine.has(x)))]]); })}`;
+      html += `<h3>标题用词差异（和我们比）</h3>${cols(titled.filter((s) => s !== ours && tws.get(s.key)), (s) => { const theirs = wordsOf(s); return kv([["竞品有、我们没有<br><span class=meta>可能漏掉的流量词</span>", chips([...theirs].filter((x) => !mine.has(x)), "bad")], ["我们有、竞品没有<br><span class=meta>我们的差异化</span>", chips([...mine].filter((x) => !theirs.has(x)), "ours")], ["都有", chips([...theirs].filter((x) => mine.has(x)))]]); })}`;
     }
-    out.push(`<h2 id="m-title">标题分析</h2>${html}<div class="meta">字数按淘宝规则算：汉字 2 个字符，字母数字 1 个，上限 60。词的分类和建议由 AI 给出，“谁有谁没有”由程序对比。</div>`);
+    out.push(`<h2 id="m-title">标题分析</h2>${html}<div class="meta">字数按淘宝规则算：汉字 2 个字符，字母数字 1 个，上限 60。标题由 AI 切成产品词和修饰词（产品词以外的都算修饰词，包括品牌、型号）；去重、重复的词、覆盖范围、谁有谁没有都是程序算的。</div>`);
   }
 
   // 4 主图分析
@@ -266,6 +277,7 @@ h4{font-size:14px;margin:16px 0 6px}
 table.kv th{width:9em;background:none;color:var(--sub);font-weight:500;padding:5px 8px 5px 0}table.kv td{padding:5px 0}
 table.cmp th:first-child{width:9em}table.cmp td,table.cmp thead th{min-width:220px}
 .ttl{background:var(--soft);border-radius:8px;padding:8px 10px;margin:4px 0 8px}.ttl.good{background:var(--goodsoft)}
+.w{display:inline-block;padding:0 3px;margin:1px;border-radius:4px}.w.core{background:var(--goodsoft);color:var(--good);font-weight:600}.w.mod{background:#eef1f6}
 .score{height:10px;border-radius:5px;background:var(--soft);overflow:hidden;margin-bottom:6px}.score i{display:block;height:100%;background:var(--accent)}
 .thumbs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}.thumbs img{width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
 .chart{width:100%;height:auto;margin-top:8px}.chart text{font-size:11px;fill:#8a909c}

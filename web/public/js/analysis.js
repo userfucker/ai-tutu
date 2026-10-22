@@ -176,7 +176,8 @@
     // 报告按内容的高度完全展开，整页一起滚动（不在小框里滚）
     const fr = main.querySelector("#reportFrame");
     if (fr) {
-      const fit = () => { try { const d = fr.contentDocument; if (d && d.body) fr.style.height = Math.max(400, d.documentElement.scrollHeight) + "px"; } catch {} };
+      // 按报告内容本身的高度（body），不用 scrollHeight：scrollHeight 不会比框现在的高度小，内容变短时框缩不回来，下面就空出一大块
+      const fit = () => { try { const d = fr.contentDocument; if (d && d.body) fr.style.height = Math.max(300, Math.ceil(d.body.getBoundingClientRect().height)) + "px"; } catch {} };
       fr.onload = () => { fit(); try { new ResizeObserver(fit).observe(fr.contentDocument.body); fr.contentDocument.addEventListener("toggle", fit, true); } catch {} setTimeout(fit, 500); };
     }
   }

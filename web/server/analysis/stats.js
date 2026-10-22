@@ -123,6 +123,26 @@ export function productStats(p, raw, tags, vocab) {
 // ------------------------------------------------------------ 报告 2.0 新增的统计（Lee 2026-10-22）
 const REBUY_RE = /第[二三四五六七八九十2-9]次|回购|又买|再次购买|再买|之前买过|一直在?买|老顾客|买了好几次|无限回购|复购/;
 const dayKey = (ms) => new Date(ms + 8 * 3600e3).toISOString().slice(0, 10);
+/**
+ * 标题拆词结果（AI 切的 words）→ 程序统计：产品词 / 修饰词去重、标题里重复出现的词、覆盖范围 = 产品词数 × 修饰词数、产品词最早出现的位置。
+ * AI 切的词连起来要和标题对得上（容许一点出入），对不上就标出来。
+ */
+export function titleWords(title, ai) {
+  const words = (ai && Array.isArray(ai.words) ? ai.words : []).map((x) => ({ w: String(x.w || "").trim(), t: x.t === "core" ? "core" : "mod" })).filter((x) => x.w);
+  if (!words.length) return null;
+  const uniq = (t) => [...new Set(words.filter((x) => x.t === t).map((x) => x.w))];
+  const core = uniq("core"), mod = uniq("mod");
+  const count = new Map();
+  for (const x of words) count.set(x.w, (count.get(x.w) || 0) + 1);
+  const repeats = [...count.entries()].filter(([, n]) => n > 1).map(([w, n]) => ({ w, n }));
+  const clean = (s) => String(s || "").replace(/\s+/g, "");
+  const joined = clean(words.map((x) => x.w).join(""));
+  const chars = [...clean(title)];
+  let firstCore = -1;
+  if (core.length) { const t = clean(title); const idx = Math.min(...core.map((c) => { const k = t.indexOf(c); return k < 0 ? Infinity : [...t.slice(0, k)].length; })); firstCore = idx === Infinity ? -1 : idx; }
+  return { words, core, mod, repeats, coverage: core.length * mod.length, firstCore, matches: joined === clean(title), titleChars: chars.length };
+}
+
 /** 淘宝标题字数：汉字算 2，字母数字算 1，上限 60（30 个汉字） */
 export const titleLen = (t) => [...String(t || "")].reduce((a, ch) => a + (/[\u0000-\u00ff]/.test(ch) ? 1 : 2), 0);
 function answerStats(qas, qaTag) {
@@ -219,7 +239,7 @@ export function compactForWriting(all) {
     评价时间: s.time ? `${s.time.from}～${s.time.to} 共 ${s.time.totalDays} 天，日均 ${s.time.avg} 条` : undefined,
     问大家回答: s.qa && s.qa.answers ? `没回答 ${s.qa.answers.none}，正面回答 ${s.qa.answers.good}，回避 ${s.qa.answers.dodge}，透露负面 ${s.qa.answers.bad}` : undefined,
     标题: s.title ? `${s.titleInfo ? s.titleInfo.len : ""}/60 字符：${s.titleInfo ? s.titleInfo.text : ""}` : undefined,
-    标题分析: s.titleAI ? { 覆盖维度: s.titleAI.coverage, 问题: s.titleAI.orderIssues } : undefined,
+    标题分析: s.titleAI ? (() => { const tw = titleWords(s.title, s.titleAI); return { 产品词: tw && tw.core, 修饰词数: tw && tw.mod.length, 覆盖范围: tw && tw.coverage, 重复词: tw && tw.repeats.map((x) => x.w), 问题: s.titleAI.orderIssues }; })() : undefined,
     主图: s.mainAI ? { 首图: s.mainAI.firstType, 文字卖点: s.mainAI.textPoints, 点击率潜力: s.mainAI.ctr, 缺点: s.mainAI.cons } : undefined,
     详情页: s.desc ? { 卖点: s.desc.selling, 结构: (s.desc.structure || []).slice(0, 15), 宣传: s.desc.claims, 承诺: s.desc.promises, 参数: (s.desc.params || []).slice(0, 12), 人群: s.desc.audience, 场景: s.desc.scenes, 风格: s.desc.style } : undefined,
   }));

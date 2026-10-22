@@ -68,7 +68,8 @@ export function fakeAnswer(prompt, material) {
     out = Object.fromEntries(Object.entries(v).map(([k, o]) => [k, Object.fromEntries(Object.keys(o).map((t) => [t, t === "保温差" ? "保温效果差" : t]))]));
   } else if (/标题优化专家/.test(prompt)) {
     const m = JSON.parse(material);
-    out = { products: Object.entries(m).map(([key, v]) => ({ key, core: ["保温杯"], modifiers: key === "ours" ? ["高颜值"] : ["新款"], attrs: { 材质: ["316不锈钢"], 款式外观: [], 季节时间: [], 人群: key === "ours" ? ["学生"] : [], 场景: [] }, fillers: [], repeats: [], orderIssues: ["核心词靠后"], coverage: key === "ours" ? 2 : 1, suggest: "316不锈钢保温杯 学生 大容量", advice: ["加上场景词"] })) };
+    // 标题像“测试保温杯 901 316不锈钢”：切成 测试 / 保温杯 / 901 / 316不锈钢
+    out = { products: Object.entries(m).map(([key, v]) => ({ key, words: String(v.标题).replace(/\s+/g, " ").split(/(保温杯)| /).filter(Boolean).map((w) => ({ w, t: w === "保温杯" ? "core" : "mod" })), orderIssues: ["产品词靠后"], suggest: "316不锈钢保温杯 学生 大容量", advice: ["加上场景词"] })) };
   } else if (/的主图（1:1/.test(prompt)) {
     out = { firstType: "白底图", promo: false, textPoints: ["保温 24 小时"], tone: "冷色调", focus: "清楚", benefit: "卖点透出", pros: ["干净"], cons: ["没有场景"], ctr: { level: "中", reason: "和同类差不多" }, images: [{ i: 1, what: "白底正面", advice: "加场景" }] };
   } else if (/电商产品经理/.test(prompt)) {
