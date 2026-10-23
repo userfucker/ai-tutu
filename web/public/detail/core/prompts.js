@@ -160,6 +160,7 @@ ST.P = (() => {
         `Style: ${tone(p).en}${ref && ref.style ? "; " + ref.style : ""}${ref && ref.colors && ref.colors.length ? "; color palette " + ref.colors.join(", ") : ""}.`,
         hasStyleRef ? "Match the color palette, lighting and overall style of the attached reference image, but use a different composition suitable for this section." : "",
         "Strict rules: absolutely NO text, letters, numbers, logos, watermarks or UI elements. NO people. Do NOT include any product (the product photo will be added on top later). Photorealistic, high quality, soft and clean.",
+        "Text will be placed on the calm areas described above: keep those areas plain, evenly lit and low in detail (one soft tone, no busy patterns or strong highlights) so the text stays readable.",
         "Reply with the image only.",
       ].filter(Boolean).join("\n");
     },
@@ -212,7 +213,8 @@ ST.P = (() => {
       return [
         `Generate one image: a photorealistic macro close-up photo of the area outlined in red in the first uploaded image (the second uploaded image is that area enlarged). Aspect ratio ${ratio}.`,
         `- It is the same product${name ? ` ("${name}", Chinese name)` : ""}: keep exactly the same material, texture, color, stitching, pattern, printed text and logos of that area; do not redesign it.`,
-        "- Fill the frame with that detail, sharp focus, shallow depth of field, soft studio light, clean neutral background where the background shows.",
+        "- Show that part as a close-up product cut-out filling most of the frame, sharp focus, soft even studio light.",
+        "- Background: pure white (RGB 255,255,255), no shadows or reflections on the background, crisp clean edges (the white will be removed by a program afterwards).",
         "- Do NOT draw the red outline. No people, no added text, no watermark.",
         note ? `- What this detail is (Chinese): ${note}` : "",
         "Reply with the image only.",
@@ -234,6 +236,26 @@ ST.P = (() => {
         "Reply with the image only.",
       ].filter(Boolean).join("\n");
     },
+    /** 主图背景：空场景，中间留出放产品的地方（产品由程序贴上去） */
+    mainBg(p, style, hasRef) {
+      return [
+        "Generate one image: an empty background scene for an e-commerce main product photo, square 1:1.",
+        `- Scene: ${style}.`,
+        "- Composition: a surface, table or podium in the center where a product will be placed later; the center area must be EMPTY (no objects there); camera at product height with a slight high angle; soft realistic lighting, shallow depth of field in the far background.",
+        hasRef ? "- Match the background style, colors, materials and lighting of the uploaded reference image. Do NOT copy any product, text or logo from it." : "",
+        "- Absolutely NO products, NO text, letters, numbers, logos or watermarks, NO people. Photorealistic, high quality.",
+        "Reply with the image only.",
+      ].filter(Boolean).join("\n");
+    },
+    /** 看一张图，说出它的背景风格（存成“我的风格”） */
+    styleOf() {
+      return [
+        "这是一张电商主图或场景图。请只看它的背景（不管里面的产品），总结背景风格，给 AI 画图用。",
+        "name：风格名称，中文，6 个字以内；desc：中文描述，30 个字以内（场景、台面材质、光线、颜色、氛围）；",
+        "prompt：英文，40 个词以内，描述背景场景、台面 / 展台、光线、配色和氛围，给画图 AI 用，不要提到产品、文字、logo。",
+        '只回复一个 JSON 代码块，格式：{"name":"","desc":"","prompt":""}',
+      ].join("\n");
+    },
     /** 检查融入后产品有没有变样 */
     sameProduct(p) {
       return [
@@ -254,6 +276,7 @@ ST.ANGLES = [
   { id: "right", name: "右视图", en: "right side view (camera on the product's right, 90 degrees from the front)" },
   { id: "back", name: "后视图", en: "back view (camera behind the product, 180 degrees from the front)" },
   { id: "top", name: "俯视图", en: "top-down view (camera directly above, looking down)" },
+  { id: "bottom", name: "底视图", en: "bottom view (camera directly below, looking up at the underside / sole / base of the product)" },
   { id: "45", name: "45°侧面", en: "three-quarter view, 45 degrees between front and side, camera slightly above" },
 ];
 
@@ -405,3 +428,15 @@ ST.missingTexts = (project, lang) => {
   }
   return out;
 };
+
+/** 主图的预设背景风格（Lee 2026-10-23；还可以上传图片让 AI 识别风格，存成“我的风格”） */
+ST.MAIN_STYLES = [
+  { id: "studio", name: "纯色渐变棚拍", prompt: "seamless studio backdrop with a soft color gradient, smooth matte tabletop, soft diffused studio light" },
+  { id: "marble", name: "大理石台面", prompt: "white marble tabletop with subtle gray veins, soft window light, clean bright minimal interior background" },
+  { id: "wood", name: "木桌居家", prompt: "warm wooden table in a cozy modern home, soft morning sunlight, blurred living room background" },
+  { id: "nature", name: "户外自然", prompt: "natural outdoor setting, a flat stone or wooden surface, green plants and soft sunlight, blurred nature background" },
+  { id: "podium", name: "简约展台", prompt: "minimal geometric podium in soft pastel colors, simple shapes, soft even light, clean modern backdrop" },
+  { id: "festival", name: "节日促销", prompt: "festive promotional scene with a podium, red and gold accents, soft bokeh lights, celebratory mood" },
+  { id: "tech", name: "科技感", prompt: "dark high-tech scene, reflective floor, subtle neon blue rim lights, sleek modern mood" },
+];
+

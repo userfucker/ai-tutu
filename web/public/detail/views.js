@@ -3,7 +3,7 @@
  *
  * - 多角度：在素材卡片上点“AI 多角度”，勾几个角度（主视图、左视图、右视图、后视图、俯视图、45°侧面），一次全部排进去，
  *   Gemini / Copilot 轮流画（也可以指定一个）。画出来是白底图，采用时直接去白底。
- * - 细节特写：点“圈细节”，用画笔在图上涂出要放大的地方，AI 照着画一张特写。
+ * - 细节特写：点“圈细节”，用画笔涂或者拉一个 8 点方框圈出要放大的地方，AI 照着画一张白底特写，采用时也去白底（透明）。
  * - AI 画的图先放在“待确认”里（p.pending），点“采用”才变成素材；全自动不做这一步。
  */
 (() => {
@@ -114,14 +114,20 @@
     for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) if (d[(y * t.width + x) * 4 + 3] > 10) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
     return x1 < 0 ? null : { x: x0 / s, y: y0 / s, w: (x1 - x0 + 1) / s, h: (y1 - y0 + 1) / s };
   }
+  const lsGet = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+  /** 圈细节：自由画笔（最细 2 像素，粗细记在浏览器里）或 8 点方框（拖出一个框，拖角 / 边改大小，拖里面移动） */
   async function closeUpDialog(a) {
     const img = await ST.imgOf(a.key);
     const W = img.naturalWidth, H = img.naturalHeight;
-    let size = 40, site = lastSite, note = "", mask = null;
+    let size = Math.max(2, +lsGet("st:cuSize", 2) || 2), mode = lsGet("st:cuMode", "brush") === "box" ? "box" : "brush";
+    let site = lastSite, note = "", mask = null;
+    let box = null; // 方框（图片像素）
     const r = await APP.modal(`
-      <div class="row" style="margin-bottom:10px"><span class="muted">用画笔涂出要放大的地方（涂一块就行）</span>
-        <label class="row lb">笔刷大小 <input type="range" id="cSize" min="8" max="160" value="40" style="width:140px"></label><button class="sm" id="cReset">重新涂</button></div>
-      <div class="trim closeup"><div class="cwrap"><img id="cImg" src="${esc(await ST.urlOf(a.key))}" alt=""><canvas id="cMask"></canvas></div></div><div class="brush" id="cBrush" hidden></div>
+      <div class="row" style="margin-bottom:10px"><span class="pills" id="cMode"><span class="pill ${mode === "brush" ? "on" : ""}" data-m="brush">自由画笔</span><span class="pill ${mode === "box" ? "on" : ""}" data-m="box">方框</span></span>
+        <span class="muted" id="cTip"></span>
+        <label class="row lb" id="cSizeRow">笔刷粗细 <input type="range" id="cSize" min="2" max="160" value="${size}" style="width:140px"><span id="cSizeV">${size}</span></label><button class="sm" id="cReset">重新圈</button></div>
+      <div class="trim closeup"><div class="cwrap" id="cWrap"><img id="cImg" src="${esc(await ST.urlOf(a.key))}" alt=""><canvas id="cMask"></canvas><div class="cbox" id="cBox" hidden>${["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((h) => `<i data-h="${h}" class="h-${h}"></i>`).join("")}</div></div></div><div class="brush" id="cBrush" hidden></div>
       <div class="row" style="margin-top:10px"><input id="cNote" class="grow" placeholder="这是什么地方（可以不填），如：拉链头、鞋底纹路"> <label class="row lb">用哪个 AI ${siteSel("cSite")}</label></div>
       <div class="mf"><button data-ret="">取消</button><button class="primary" data-ret="go">画特写</button></div>`, {
       title: "圈细节：AI 画特写", big: true,
@@ -130,35 +136,79 @@
         c.width = W; c.height = H;
         const g = c.getContext("2d");
         const brush = m.querySelector("#cBrush");
-        m.querySelector("#cSize").oninput = (e) => (size = +e.target.value);
-        m.querySelector("#cReset").onclick = () => g.clearRect(0, 0, W, H);
+        const bx = m.querySelector("#cBox");
+        const setMode = (v) => {
+          mode = v; lsSet("st:cuMode", v);
+          m.querySelectorAll("#cMode .pill").forEach((x) => x.classList.toggle("on", x.dataset.m === v));
+          m.querySelector("#cSizeRow").hidden = v !== "brush";
+          m.querySelector("#cTip").textContent = v === "brush" ? "用画笔涂出要放大的地方" : "在图上拖出一个框；拖 8 个点改大小，拖框里面移动";
+          c.style.cursor = v === "brush" ? "none" : "crosshair";
+          bx.hidden = v !== "box" || !box;
+        };
+        // 方框：图片像素 → 页面上的位置
+        const k = () => c.getBoundingClientRect().width / W;
+        const showBox = () => {
+          if (!box) { bx.hidden = true; return; }
+          const s = k();
+          Object.assign(bx.style, { left: box.x * s + "px", top: box.y * s + "px", width: box.w * s + "px", height: box.h * s + "px" });
+          bx.hidden = mode !== "box";
+        };
+        m.querySelector("#cMode").onclick = (e) => { const t = e.target.closest("[data-m]"); if (t) setMode(t.dataset.m); };
+        m.querySelector("#cSize").oninput = (e) => { size = +e.target.value; m.querySelector("#cSizeV").textContent = size; lsSet("st:cuSize", size); };
+        m.querySelector("#cReset").onclick = () => { g.clearRect(0, 0, W, H); box = null; showBox(); };
         m.querySelector("#cSite").onchange = (e) => (site = e.target.value);
         let down = false, last = null;
-        const pt = (e) => { const b = c.getBoundingClientRect(); return { x: ((e.clientX - b.left) / b.width) * W, y: ((e.clientY - b.top) / b.height) * H, s: W / b.width }; };
+        const pt = (e) => { const b = c.getBoundingClientRect(); return { x: ST.clamp(((e.clientX - b.left) / b.width) * W, 0, W), y: ST.clamp(((e.clientY - b.top) / b.height) * H, 0, H), s: W / b.width }; };
         const dab = (q) => {
-          g.strokeStyle = g.fillStyle = "rgba(255,40,40,0.45)";
+          g.strokeStyle = g.fillStyle = "rgba(255,40,40,0.55)";
           g.lineCap = g.lineJoin = "round";
           g.lineWidth = size * q.s;
           g.beginPath();
           if (last) { g.moveTo(last.x, last.y); g.lineTo(q.x, q.y); g.stroke(); }
-          else { g.arc(q.x, q.y, (size * q.s) / 2, 0, Math.PI * 2); g.fill(); }
+          else { g.arc(q.x, q.y, Math.max(1, (size * q.s) / 2), 0, Math.PI * 2); g.fill(); }
           last = q;
         };
-        c.onpointerdown = (e) => { down = true; last = null; c.setPointerCapture(e.pointerId); dab(pt(e)); };
+        // 拖动方框：drag = { kind: "new" | "move" | 把手, 起点, 原来的框 }
+        let drag = null;
+        const startDrag = (e, kind) => { e.preventDefault(); e.stopPropagation(); drag = { kind, p0: pt(e), b0: box ? { ...box } : null }; window.addEventListener("pointermove", onDrag); window.addEventListener("pointerup", endDrag, { once: true }); };
+        const onDrag = (e) => {
+          const q = pt(e), d = drag, dx = q.x - d.p0.x, dy = q.y - d.p0.y;
+          if (d.kind === "new") box = { x: Math.min(d.p0.x, q.x), y: Math.min(d.p0.y, q.y), w: Math.abs(dx), h: Math.abs(dy) };
+          else if (d.kind === "move") box = { ...d.b0, x: ST.clamp(d.b0.x + dx, 0, W - d.b0.w), y: ST.clamp(d.b0.y + dy, 0, H - d.b0.h) };
+          else {
+            let { x, y, w, h } = d.b0;
+            let x2 = x + w, y2 = y + h;
+            if (/w/.test(d.kind)) x = ST.clamp(x + dx, 0, x2 - 8);
+            if (/e/.test(d.kind)) x2 = ST.clamp(x2 + dx, x + 8, W);
+            if (/n/.test(d.kind)) y = ST.clamp(y + dy, 0, y2 - 8);
+            if (/s/.test(d.kind)) y2 = ST.clamp(y2 + dy, y + 8, H);
+            box = { x, y, w: x2 - x, h: y2 - y };
+          }
+          showBox();
+        };
+        const endDrag = () => { window.removeEventListener("pointermove", onDrag); drag = null; };
+        bx.onpointerdown = (e) => startDrag(e, e.target.dataset.h || "move");
+        c.onpointerdown = (e) => {
+          if (mode === "box") return startDrag(e, "new");
+          down = true; last = null; c.setPointerCapture(e.pointerId); dab(pt(e));
+        };
         c.onpointermove = (e) => {
+          if (mode !== "brush") return;
+          const sz = Math.max(4, size);
           brush.hidden = false;
-          brush.style.width = brush.style.height = size + "px";
-          brush.style.left = e.clientX - size / 2 + "px"; brush.style.top = e.clientY - size / 2 + "px";
+          brush.style.width = brush.style.height = sz + "px";
+          brush.style.left = e.clientX - sz / 2 + "px"; brush.style.top = e.clientY - sz / 2 + "px";
           if (down) dab(pt(e));
         };
         c.onpointerup = () => { down = false; last = null; };
         c.onpointerleave = () => (brush.hidden = true);
         m._mask = c;
+        setMode(mode);
       },
       check: (v, m) => {
         note = m.querySelector("#cNote").value.trim();
-        mask = maskBox(m._mask);
-        if (!mask || mask.w < 4 || mask.h < 4) { APP.toast("先用画笔涂出要放大的地方", true); return false; }
+        mask = mode === "box" ? box : maskBox(m._mask);
+        if (!mask || mask.w < 4 || mask.h < 4) { APP.toast(mode === "box" ? "先在图上拖出一个框" : "先用画笔涂出要放大的地方", true); return false; }
       },
     });
     if (r !== "go") return;
@@ -213,11 +263,12 @@
     const id = ST.uid("a");
     const key = `${p.id}:${id}-orig`;
     await ST.saveImage(key, await ST.db.getBlob(x.key));
-    const a = { id, name: `${x.kind === "angle" ? "AI角度" : "AI细节"}-${x.note || ""}.png`, tag: x.kind === "angle" ? "angle" : "detail", note: x.note || "", group: "", key, w: x.w, h: x.h, white: "", cut: "", cutBox: null, edgeWhite: x.kind === "angle", ai: true };
+    const a = { id, name: `${x.kind === "angle" ? "AI角度" : "AI细节"}-${x.note || ""}.png`, tag: x.kind === "angle" ? "angle" : "detail", note: x.note || "", group: "", key, w: x.w, h: x.h, white: "", cut: "", cutBox: null, edgeWhite: true, ai: true };
     const at = p.assets.findIndex((y) => y.id === x.from);
     p.assets.splice(at >= 0 ? at + 1 : p.assets.length, 0, a);
     await dropPending(x);
-    if (x.kind === "angle") { try { await APP.makeCut(a, await ST.db.getBlob(key)); } catch (e) { APP.toast("去白底没成功，先用原图：" + e.message, true); } }
+    // 角度图、细节图都是白底画的：直接去白底，变成透明图
+    try { await APP.makeCut(a, await ST.db.getBlob(key)); } catch (e) { APP.toast("去白底没成功，先用原图：" + e.message, true); }
   }
 
   const pendOf = (el) => (P().pending || []).find((x) => x.id === el.closest("[data-pid]").dataset.pid);

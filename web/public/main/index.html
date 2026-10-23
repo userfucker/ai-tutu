@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>主图 · AI图图 工作台</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<link rel="stylesheet" href="/detail/studio.css">
+<link rel="stylesheet" href="main.css">
+</head>
+<body>
+<header id="top">
+  <a class="ghost backwb" href="/#/main" title="回到工作台">← 工作台</a>
+  <div class="brandmark" data-act="home" title="回到我的主图项目">主图</div>
+  <input id="projName" placeholder="项目名称" hidden>
+  <div class="topright"><span class="chip" id="aiChip" title="AI 任务（详情在工作台的任务中心）"><i></i><span>AI</span></span></div>
+</header>
+<main id="main"></main>
+<div id="modalWrap" hidden><div id="modal"></div></div>
+<div id="toast" hidden></div>
+<script src="/lib/imagekit.js"></script>
+<script src="/detail/core/data.js"></script>
+<script src="/detail/core/util.js"></script>
+<script src="/detail/core/store.js"></script>
+<script src="/detail/core/prompts.js"></script>
+<script src="/detail/core/harmony.js"></script>
+<script src="/detail/ai.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

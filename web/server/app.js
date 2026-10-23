@@ -156,7 +156,7 @@ app.get("/api/analyses/:id/report", (c) => {
 });
 
 // ------------------------------------------------------------ 详情页：项目、图片、设置
-app.get("/api/projects", (c) => c.json({ list: dstore.listProjects() }));
+app.get("/api/projects", (c) => c.json({ list: dstore.listProjects(c.req.query("kind") === "main" ? "main" : "detail") }));
 app.get("/api/projects/:id", (c) => { const p = dstore.getProject(c.req.param("id")); return p ? c.json({ project: p }) : c.json({ error: "项目不存在" }, 404); });
 app.put("/api/projects/:id", async (c) => {
   const { project, rev } = await c.req.json();

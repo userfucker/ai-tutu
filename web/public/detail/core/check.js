@@ -62,5 +62,5 @@ ST.checkProject = async (project, o) => {
   }
   return out;
 };
-ST.ISSUE_NAMES = { banned: "违禁词", overflow: "文字放不下", shrink: "文字缩得太小", overlap: "文字压住产品", noimg: "缺图片", nobg: "缺背景", untranslated: "没翻译" };
-ST.ISSUE_LEVEL = { banned: "bad", overflow: "bad", noimg: "bad", nobg: "warn", shrink: "warn", overlap: "warn", untranslated: "warn" };
+ST.ISSUE_NAMES = { banned: "违禁词", overflow: "文字放不下", shrink: "文字缩得太小", overlap: "文字压住产品", noimg: "缺图片", nobg: "缺背景", untranslated: "没翻译", lowcontrast: "文字看不清" };
+ST.ISSUE_LEVEL = { banned: "bad", overflow: "bad", noimg: "bad", nobg: "warn", shrink: "warn", overlap: "warn", untranslated: "warn", lowcontrast: "warn" };

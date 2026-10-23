@@ -35,14 +35,19 @@ export function putProject(p, baseRev) {
   return p.rev;
 }
 export function summary(p) {
+  if (p.kind === "main") { // 主图项目（Lee 2026-10-23）
+    const pr = (p.products || []).find((x) => x.id === p.cur) || (p.products || [])[0];
+    return { id: p.id, kind: "main", name: p.name, updated: p.updated, created: p.created, rev: p.rev || 0, size: p.size, firstAsset: pr ? pr.cut || pr.key : "", items: (p.items || []).length, done: (p.items || []).filter((x) => x.state === "ok").length };
+  }
   return {
-    id: p.id, name: p.name, updated: p.updated, created: p.created, platform: p.platform, platforms: p.platforms, lang: p.lang, langs: p.langs,
+    id: p.id, kind: "detail", name: p.name, updated: p.updated, created: p.created, platform: p.platform, platforms: p.platforms, lang: p.lang, langs: p.langs,
     screens: (p.screens || []).length, assets: (p.assets || []).length, thumb: p.thumb || "", rev: p.rev || 0,
     auto: p.auto ? { status: p.auto.status, step: p.auto.step, msg: p.auto.msg, error: p.auto.error || "", exportFile: p.auto.exportFile || "" } : null,
     firstAsset: (p.assets || []).find((a) => a.tag === "white") ? ((p.assets.find((a) => a.tag === "white").cut) || p.assets.find((a) => a.tag === "white").key) : (p.assets && p.assets[0] && (p.assets[0].cut || p.assets[0].key)) || "",
   };
 }
-export function listProjects() { return S.all.all().map((r) => summary(JSON.parse(r.data))); }
+/** kind = detail（详情页，默认）/ main（主图） */
+export function listProjects(kind = "detail") { return S.all.all().map((r) => summary(JSON.parse(r.data))).filter((x) => x.kind === kind); }
 export function deleteProject(id) {
   S.del.run(id);
   fs.rmSync(path.join(BLOB_DIR, safe(id)), { recursive: true, force: true });

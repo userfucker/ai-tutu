@@ -248,8 +248,8 @@
             <button class="sm" data-act="cutAi" ${b && !/失败/.test(b) ? "disabled" : ""} title="让 AI 出一张纯白背景的图，再去白底（适合背景复杂的图）">AI 抠图</button>
             <button class="sm" data-act="cutDirect" ${b && !/失败/.test(b) ? "disabled" : ""} title="图本来就是白底：直接去掉白色背景，不用 AI">直接去白底</button>
             ${a.cut ? '<button class="sm" data-act="trim">修边</button><button class="sm" data-act="uncut" title="不用抠好的图，用原图">用原图</button>' : ""}
-            <button class="sm" data-act="angleAi" title="照着这张图让 AI 画其他角度（主视、左右、后视、俯视、45°），可以多选">AI 多角度</button>
-            <button class="sm" data-act="closeUp" title="用画笔圈出一块地方，让 AI 画这块的特写">圈细节</button>
+            <button class="sm" data-act="angleAi" title="照着这张图让 AI 画其他角度（主视、左右、后视、俯视、底视、45°），可以多选">AI 多角度</button>
+            <button class="sm" data-act="closeUp" title="用画笔或方框圈出一块地方，让 AI 画这块的特写（透明底）">圈细节</button>
             <button class="sm danger" data-act="delAsset">删除</button></div></div>`;
       }));
       main.innerHTML = `

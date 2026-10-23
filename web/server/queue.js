@@ -54,6 +54,11 @@ export const MODULES = {
   dt_angle: { name: "多角度图、细节特写（画图）", group: "详情页", follow: "image" },
   dt_blend: { name: "产品融入背景（画图）", group: "详情页", follow: "image" },
   dt_check: { name: "检查产品有没有变样（看图）", group: "详情页", follow: "vision" },
+  // 主图（Lee 2026-10-23）
+  mn_style: { name: "识别背景风格（看图）", group: "主图", follow: "vision" },
+  mn_bg: { name: "画主图背景（画图）", group: "主图", follow: "image" },
+  mn_blend: { name: "产品融入背景（画图）", group: "主图", follow: "image" },
+  mn_check: { name: "检查产品有没有变样（看图）", group: "主图", follow: "vision" },
 };
 export const baseRole = (role) => (MODULES[role] ? MODULES[role].follow : role);
 export function roles() {

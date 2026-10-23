@@ -282,6 +282,8 @@
     else if ((k === "Delete" || k === "Backspace") && ed.sel) { e.preventDefault(); setOv({ hidden: true }); ed.sel = null; renderRight(); }
   });
 
+  // 文字看不清时的处理（Lee 2026-10-23：多个选项，自己选）
+  const FIXES = [["", "跟项目设置"], ["auto", "程序自己选"], ["scrim", "加半透明底"], ["outline", "加描边"], ["shadow", "加阴影"], ["none", "不处理（只在检查里提示）"]];
   function setOv(patch, commit = true) {
     const sc = cur();
     if (!ed.sel) return;
@@ -303,7 +305,7 @@
     if (APP.step !== "edit") return;
     const pf = curPf();
     for (const sc of p.screens) {
-      const sig = JSON.stringify(sc) + ed.lang + pf.id + pf.w + (p.info.params || []).length + p.tone + (p.brandId || "");
+      const sig = JSON.stringify(sc) + ed.lang + pf.id + pf.w + (p.info.params || []).length + p.tone + (p.brandId || "") + (p.textFix || "") + (p.textColorAuto === false);
       const t = thumbs.get(sc.id);
       const el = document.querySelector(`[data-thumb="${sc.id}"] img`);
       if (t && t.sig === sig) { if (el && el.src !== t.url) el.src = t.url; continue; }
@@ -352,6 +354,10 @@
         <div id="txtBanned">${banned.map((b) => `<div class="issue tag bad">违禁词“${esc(b.word)}”：${esc(b.tip)}</div>`).join("")}</div>
         ${scaleRow}
         <label class="row lb">颜色 <input type="color" data-ov="color" value="${o.color || "#000000"}"> <button class="sm" data-act="resetColor" ${o.color ? "" : "disabled"}>用默认颜色</button></label>
+        <div class="muted">${o.color ? "手动选了颜色：不自动换黑白" : "和背景对比不够时，自动换成黑或白里对比更强的颜色"}</div>
+        <label class="row lb">看不清时 <select id="txtFix">${FIXES.map(([v, n]) => `<option value="${v}" ${(o.fix || "") === v ? "selected" : ""}>${v ? n : `跟项目设置（${(FIXES.find((f) => f[0] === (p.textFix || "auto")) || [])[1]}）`}</option>`).join("")}</select></label>
+        <label class="row lb">项目设置 <select id="projFix">${FIXES.slice(1).map(([v, n]) => `<option value="${v}" ${(p.textFix || "auto") === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        <label class="row lb"><input type="checkbox" id="projColorAuto" ${p.textColorAuto !== false ? "checked" : ""}> 对比不够时自动换黑 / 白（整个项目）</label>
         ${lockHide}</div>`;
     } else if (d && d.kind === "img") {
       const a = ST.assetOf(p, d.asset());
@@ -448,6 +454,9 @@
       else if (el.id === "bgBlend") sc.bg.blend = el.checked;
       else if (el.id === "harmSite") { harmSite = el.value; try { localStorage.setItem("st:harmSite", harmSite); } catch {} return; }
       else if (el.id === "harmAuto") P().harmAuto = el.checked;
+      else if (el.id === "txtFix") { setOv({ fix: el.value || undefined }, false); APP.commit(); renderRight(); return; }
+      else if (el.id === "projFix") P().textFix = el.value;
+      else if (el.id === "projColorAuto") P().textColorAuto = el.checked;
       else if (el.id === "shDir") sc.shadow = { ...(sc.shadow || { op: 0.35 }), dir: el.value };
       APP.commit();
       refresh();

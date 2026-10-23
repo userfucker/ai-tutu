@@ -48,39 +48,51 @@ var ST = globalThis.ST || (globalThis.ST = {});
     return { shape: shape / (N * N * 3), color: color / (N * N * 3) };
   };
 
-  /** 融入一屏。成功：sc.harm = { key, sig, on: true, status: "ok" }；放弃：{ on: false, status: "fallback", note: 原因 } */
-  ST.harmonize = async (p, sc, ai) => {
-    const pf = ST.platformOf(p, p.platform);
-    const r = await ST.renderScreen(p, sc, { platform: pf, lang: p.lang, pxWidth: 1000, only: "base" });
-    if (!r.harm.can) return { ok: false, skip: true, why: "这一屏没有背景图或产品图" };
-    const W = r.canvas.width, H = r.canvas.height;
-    const baseBlob = await ST.toBlob(r.canvas, "image/jpeg", 0.92);
+  /**
+   * 融入一张贴好产品的图（详情页的一屏、主图都用它）。canvas = 程序贴好的图，box = 产品在图上的位置（像素）。
+   * 成功 { ok: true, blob, note }；两次都变样 { ok: false, why }
+   */
+  ST.harmonizeCanvas = async (p, canvas, b, ai, what) => {
+    const W = canvas.width, H = canvas.height;
+    const baseBlob = await ST.toBlob(canvas, "image/jpeg", 0.92);
     const ratio = closestAiRatio(W, H);
-    const k = r.k;
-    const b = r.harm.box;
-    const box = b ? { x: Math.max(0, b.x * k), y: Math.max(0, b.y * k), w: Math.max(4, Math.min(W - b.x * k, b.w * k)), h: Math.max(4, Math.min(H - b.y * k, b.h * k)) } : null;
-    const no = p.screens.indexOf(sc) + 1;
+    const box = b ? { x: Math.max(0, b.x), y: Math.max(0, b.y), w: Math.max(4, Math.min(W - Math.max(0, b.x), b.w)), h: Math.max(4, Math.min(H - Math.max(0, b.y), b.h)) } : null;
     let why = "";
     for (let n = 0; n < 2; n++) {
-      const out = await ai.image(ST.P.harmonize(p, ratio, n > 0), [{ blob: baseBlob, name: "原图.jpg" }], `融入背景：第 ${no} 屏${n ? "（重做）" : ""}`, n);
+      const out = await ai.image(ST.P.harmonize(p, ratio, n > 0), [{ blob: baseBlob, name: "原图.jpg" }], `融入背景：${what}${n ? "（重做）" : ""}`, n);
       const cv = await fit(out, W, H);
-      const diff = box ? ST.regionDiff(r.canvas, cv, box) : { shape: 0, color: 0 };
+      const diff = box ? ST.regionDiff(canvas, cv, box) : { shape: 0, color: 0 };
       if (diff.shape > SHAPE_LIMIT || diff.color > COLOR_LIMIT) { why = `产品那块变化太大（形状 ${Math.round(diff.shape)}，颜色 ${Math.round(diff.color)}）`; continue; }
       const blob = await ST.toBlob(cv, "image/jpeg", 0.92);
       let note = "";
       try {
-        const chk = await ai.json(ST.P.sameProduct(p), [{ blob: baseBlob, name: "原图.jpg" }, { blob, name: "调整后.jpg" }], `检查产品有没有变样：第 ${no} 屏${n ? "（重做）" : ""}`, n);
+        const chk = await ai.json(ST.P.sameProduct(p), [{ blob: baseBlob, name: "原图.jpg" }, { blob, name: "调整后.jpg" }], `检查产品有没有变样：${what}${n ? "（重做）" : ""}`, n);
         if (chk && (chk.same === false || chk.same === "false")) { why = `AI 检查：${String(chk.why || "产品变样了").slice(0, 40)}`; continue; }
       } catch (e) {
         if (e && (e.stopped || /已停止/.test(e.message || ""))) throw e;
         note = `AI 检查没做成（${String((e && e.message) || e).slice(0, 30)}），程序比过产品那块，没问题`;
       }
+      return { ok: true, blob, note };
+    }
+    return { ok: false, why };
+  };
+
+  /** 融入一屏。成功：sc.harm = { key, sig, on: true, status: "ok" }；放弃：{ on: false, status: "fallback", note: 原因 } */
+  ST.harmonize = async (p, sc, ai) => {
+    const pf = ST.platformOf(p, p.platform);
+    const r = await ST.renderScreen(p, sc, { platform: pf, lang: p.lang, pxWidth: 1000, only: "base" });
+    if (!r.harm.can) return { ok: false, skip: true, why: "这一屏没有背景图或产品图" };
+    const k = r.k;
+    const b = r.harm.box;
+    const res = await ST.harmonizeCanvas(p, r.canvas, b ? { x: b.x * k, y: b.y * k, w: b.w * k, h: b.h * k } : null, ai, `第 ${p.screens.indexOf(sc) + 1} 屏`);
+    const why = res.why;
+    if (res.ok) {
       const key = `${p.id}:harm-${sc.id}-${Date.now()}`;
-      await ST.saveImage(key, blob);
+      await ST.saveImage(key, res.blob);
       const old = sc.harm && sc.harm.key;
       if (old && old !== key) { ST.forget && ST.forget(old); ST.db.delBlob(old); }
-      sc.harm = { key, sig: r.harm.sig, on: true, status: "ok", note, t: Date.now() };
-      return { ok: true, note };
+      sc.harm = { key, sig: r.harm.sig, on: true, status: "ok", note: res.note, t: Date.now() };
+      return { ok: true, note: res.note };
     }
     const prev = sc.harm || {};
     if (prev.key && prev.sig === r.harm.sig && prev.status === "ok") sc.harm = { ...prev, note: `这次没成功（${why}），还用上一次融入的图` };

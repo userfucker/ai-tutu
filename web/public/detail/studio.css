@@ -242,3 +242,8 @@ input[type=range] { width: 100%; }
 .closeup .cwrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: none; touch-action: none; }
 .pendbox { border-color: #f0c36d; background: #fffaf0; margin-bottom: 14px; }
 .asset.pend .pic { min-height: 120px; display: flex; align-items: center; justify-content: center; }
+.closeup .cbox { position: absolute; border: 2px solid #ff2828; background: rgba(255,40,40,.08); cursor: move; touch-action: none; }
+.closeup .cbox i { position: absolute; width: 10px; height: 10px; background: #fff; border: 2px solid #ff2828; border-radius: 2px; margin: -6px 0 0 -6px; }
+.closeup .cbox .h-nw { left: 0; top: 0; cursor: nwse-resize; } .closeup .cbox .h-n { left: 50%; top: 0; cursor: ns-resize; } .closeup .cbox .h-ne { left: 100%; top: 0; cursor: nesw-resize; }
+.closeup .cbox .h-e { left: 100%; top: 50%; cursor: ew-resize; } .closeup .cbox .h-se { left: 100%; top: 100%; cursor: nwse-resize; } .closeup .cbox .h-s { left: 50%; top: 100%; cursor: ns-resize; }
+.closeup .cbox .h-sw { left: 0; top: 100%; cursor: nesw-resize; } .closeup .cbox .h-w { left: 0; top: 50%; cursor: ew-resize; }

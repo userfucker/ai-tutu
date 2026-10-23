@@ -141,6 +141,28 @@ try {
   await page.click('.pendbox [data-act="pendOk"]');
   await page.waitForFunction(() => document.querySelectorAll('.assets > .asset[data-aid]').length === 3);
   check('采用细节图：放在原图后面，标签是“细节图”', (await page.locator('.asset[data-aid] >> nth=1').locator('select[data-k="tag"]').inputValue()) === 'detail');
+  check('细节图采用后也去了白底（透明）', await page.locator('.asset[data-aid] >> nth=1').locator('text=已抠图').count() === 1);
+  // 方框模式：拖出一个框，粗细、模式都记住
+  await page.click('.asset[data-aid] [data-act="closeUp"] >> nth=0');
+  await page.waitForSelector('#cMask');
+  check('画笔默认最细（2），可以调', (await page.inputValue('#cSize')) === '2');
+  await page.click('#cMode [data-m="box"]');
+  const cb = await (await page.$('#cMask')).boundingBox();
+  await page.mouse.move(cb.x + cb.width * 0.3, cb.y + cb.height * 0.3);
+  await page.mouse.down();
+  await page.mouse.move(cb.x + cb.width * 0.6, cb.y + cb.height * 0.5, { steps: 6 });
+  await page.mouse.up();
+  check('方框模式：拖出 8 点方框', await page.isVisible('#cBox') && (await page.locator('#cBox i').count()) === 8);
+  await page.screenshot({ path: path.join(out, '7-box.png') });
+  const nBefore = ai.asked.filter((a) => /macro close-up/.test(a.prompt)).length;
+  await page.click('#modal [data-ret="go"]');
+  await page.waitForSelector('.pendbox [data-pid]', { timeout: 60000 });
+  check('方框圈的细节也画好了', ai.asked.filter((a) => /macro close-up/.test(a.prompt) && /pure white/.test(a.prompt)).length === nBefore + 1);
+  await page.click('.pendbox [data-act="pendNo"]');
+  await page.click('.asset[data-aid] [data-act="closeUp"] >> nth=0');
+  await page.waitForSelector('#cMask');
+  check('下次打开还是方框模式', await page.isVisible('#cMode [data-m="box"].on'));
+  await page.click('#modal [data-ret=""]');
   await page.click('#steps [data-go="info"]');
   await page.fill('[data-info="name"]', '男士双肩包');
   await page.click('[data-act="aiPoints"]');

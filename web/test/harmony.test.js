@@ -52,9 +52,44 @@ test("融入后的图：布局没变才用；挪了产品、关掉开关都显�
 
 test("角度列表和提示词", () => {
   const ST = getST();
-  assert.equal(ST.ANGLES.map((a) => a.name).join(","), ["主视图", "左视图", "右视图", "后视图", "俯视图", "45°侧面"].join(","));
+  assert.equal(ST.ANGLES.map((a) => a.name).join(","), ["主视图", "左视图", "右视图", "后视图", "俯视图", "底视图", "45°侧面"].join(","));
   const p = { info: { name: "保温杯" } };
   assert.match(ST.P.angleView(p, { note: "" }, "45", "1:1"), /three-quarter view, 45 degrees/);
   assert.match(ST.P.harmonize(p, "3:4", true), /extremely conservative/);
   assert.match(ST.P.sameProduct(p), /保温杯/);
+});
+
+test("文字对比度：深背景自动换白字；背景花时按设置加底 / 不处理就提示看不清", async () => {
+  const ST = getST();
+  assert.ok(ST.contrastRatio("#000000", "#ffffff") > 20);
+  const p = newProject({ name: "对比度" });
+  const blob = (buf) => new Blob([buf], { type: "image/png" });
+  const sc = ST.newScreen("hero");
+  sc.text.title = { [p.lang]: "保温十二小时" };
+  sc.text.sub = { [p.lang]: "" };
+  sc.items = [];
+  sc.bg.key = `${p.id}:dark`;
+  await ST.saveImage(sc.bg.key, blob(png(750, 1000, (g, w, h) => { g.fillStyle = "#101010"; g.fillRect(0, 0, w, h); })));
+  p.screens.push(sc);
+  const pf = ST.platformOf(p, p.platform);
+  const titleArea = async (o = {}) => {
+    const r = await ST.renderScreen(p, sc, { platform: pf, lang: p.lang, pxWidth: 500, ...o });
+    const d = r.canvas.getContext("2d").getImageData(50, 60, 400, 80).data;
+    let bright = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] > 120) bright++;
+    return { r, bright };
+  };
+  let x = await titleArea();
+  assert.ok(x.bright > 200, "黑背景上的深色标题自动换成白字");
+  assert.equal((await titleArea({ contrast: false })).bright, 0, "关掉对比度处理：还是深色字（看不见）");
+  p.textColorAuto = false;
+  x = await titleArea();
+  assert.ok(x.r.issues.some((i) => i.type === "lowcontrast") || x.bright > 200, "不许换颜色时：要么加了底 / 阴影，要么提示看不清");
+  p.textFix = "none";
+  x = await titleArea();
+  assert.ok(x.r.issues.some((i) => i.type === "lowcontrast" && i.id === "title"), "设成不处理：检查里提示“文字看不清”");
+  p.textFix = "scrim";
+  x = await titleArea();
+  assert.ok(!x.r.issues.some((i) => i.type === "lowcontrast"), "加半透明底：不再提示");
+  assert.ok(x.bright > 200, "浅色半透明底画出来了");
 });

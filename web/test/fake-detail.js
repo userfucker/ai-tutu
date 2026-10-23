@@ -50,6 +50,7 @@ function answer(badBg, prompt, nImages) {
     { template: "params", purpose: "参数", title: "产品参数" },
   ] };
   else if (/调整光影后的图/.test(prompt)) out = { same: true, why: "" };
+  else if (/总结背景风格/.test(prompt)) out = { name: "暖色木桌", desc: "温暖的木桌，早晨阳光", prompt: "warm wooden table, soft morning sunlight, cozy home" };
   else if (/背景图（按顺序）/.test(prompt)) out = { bad: badBg() ? [{ i: 1, why: "有文字" }] : [] };
   else if (/重写下面这一屏/.test(prompt)) { const cur = JSON.parse(/【当前文案】\n(.*)\n/.exec(prompt)[1]); out = { ...cur, title: "品质之选保温杯" }; }
   else if (/翻译成/.test(prompt)) { const map = JSON.parse(prompt.split("\n").find((l) => l.startsWith("{"))); out = { t: Object.fromEntries(Object.entries(map).map(([k, v]) => [k, "EN " + v])) }; }

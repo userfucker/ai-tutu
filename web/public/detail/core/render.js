@@ -100,7 +100,8 @@ var ST = globalThis.ST || (globalThis.ST = {});
           l.x += dx - (l.w * (s - 1)) / 2; l.y += dy - (l.h * (s - 1)) / 2; l.w *= s; l.h *= s;
           if (l.t === "text") { l.size *= s; l.min *= s; }
         }
-        if (v.color && l.t === "text") l.color = v.color;
+        if (v.color && l.t === "text") { l.color = v.color; l.manualColor = true; }
+        if (v.fix && l.t === "text") l.fix = v.fix;
         if (v.text !== undefined && l.t === "text") l.text = v.text;
         l.locked = !!v.locked;
       }
@@ -319,6 +320,10 @@ var ST = globalThis.ST || (globalThis.ST = {});
           const total = fit.lines.length * lineH;
           let y0 = l.y * k + (l.valign === "middle" ? (l.h * k - total) / 2 : l.valign === "bottom" ? l.h * k - total : 0);
           const tx = l.align === "left" ? l.x * k : l.align === "right" ? (l.x + l.w) * k : (l.x + l.w / 2) * k;
+          const cf = o.contrast === false ? null : fixContrast(g, l, fit, tx, y0, lineH, project, Wpx, Hpx);
+          if (cf && cf.issue) issues.push({ type: "lowcontrast", id: l.id, msg: cf.issue });
+          if (cf && cf.outline) { g.save(); g.strokeStyle = cf.outline; g.lineWidth = Math.max(2, fit.size * 0.12); g.lineJoin = "round"; fit.lines.forEach((line, i) => g.strokeText(line, tx, y0 + lineH * (i + 0.5))); g.restore(); }
+          if (cf && cf.shadow) { g.shadowColor = cf.shadow; g.shadowBlur = Math.max(4, fit.size * 0.35); }
           fit.lines.forEach((line, i) => g.fillText(line, tx, y0 + lineH * (i + 0.5)));
           if (fit.overflow) issues.push({ type: "overflow", id: l.id, msg: "文字太长，放不下（已截断）" });
           else if (fit.shrink < 0.72) issues.push({ type: "shrink", id: l.id, msg: `文字已缩到 ${Math.round(fit.shrink * 100)}%，建议检查` });
@@ -339,6 +344,65 @@ var ST = globalThis.ST || (globalThis.ST = {});
     }
     return { canvas, H, k, boxes, issues, harm: { can: base.size > 0, sig, used: !!harmImg, box: productBoxes[productBoxes.length - 1] || null, stale: !!(base.size && hm.key && hm.sig !== sig) } };
   };
+
+  // ---------------------------------------------------------------- 文字和背景的对比度（Lee 2026-10-23）
+  // 写字之前看文字下面那块（已经画好的背景、色块、产品）：
+  //  1. 颜色对比不够（标题 3:1、正文 4.5:1，WCAG 的算法）→ 换成黑或白里对比更强的那个（手动改过颜色的不换）；
+  //  2. 背景花（有一部分地方还是看不清）→ 按设置加半透明底 / 描边 / 阴影（auto = 程序自己选）；设成“不处理”就记一条“文字看不清”。
+  // 设置：项目 p.textFix（auto / scrim / outline / shadow / none）、p.textColorAuto（false = 不自动换颜色）；每段文字 ov.fix 可以单独改
+  const lum = (r, g, b) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+  const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  const hexRgb = (c) => {
+    const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(c || "").trim());
+    if (!m) { const n = /rgba?\((\d+)\D+(\d+)\D+(\d+)/.exec(String(c)); return n ? [+n[1], +n[2], +n[3]] : [0, 0, 0]; }
+    let h = m[1]; if (h.length === 3) h = h.split("").map((x) => x + x).join("");
+    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  };
+  ST.contrastRatio = (c1, c2) => ratio(lum(...hexRgb(c1)), lum(...hexRgb(c2)));
+  function fixContrast(g, l, fit, tx, y0, lineH, project, Wpx, Hpx) {
+    const mode = l.fix || project.textFix || "auto";
+    // 文字实际占的范围
+    let tw = 0;
+    for (const line of fit.lines) tw = Math.max(tw, g.measureText(line).width);
+    const th = fit.lines.length * lineH;
+    const x0 = g.textAlign === "left" ? tx : g.textAlign === "right" ? tx - tw : tx - tw / 2;
+    const rx = Math.max(0, Math.floor(x0)), ry = Math.max(0, Math.floor(y0));
+    const rw = Math.min(Wpx - rx, Math.ceil(tw)), rh = Math.min(Hpx - ry, Math.ceil(th));
+    if (rw < 2 || rh < 2) return null;
+    let d;
+    try { d = g.getImageData(rx, ry, rw, rh).data; } catch { return null; }
+    const step = Math.max(1, Math.floor(Math.sqrt((rw * rh) / 4000))); // 最多看 4000 个点左右
+    const Ls = [];
+    for (let y = 0; y < rh; y += step) for (let x = 0; x < rw; x += step) { const i = (y * rw + x) * 4; Ls.push(lum(d[i], d[i + 1], d[i + 2])); }
+    if (!Ls.length) return null;
+    Ls.sort((a, b) => a - b);
+    const Lbg = Ls[Ls.length >> 1]; // 用中位数，不被一两块亮斑带偏
+    const need = l.role === "head" ? 3 : 4.5;
+    let Lt = lum(...hexRgb(l.color));
+    if (ratio(Lt, Lbg) < need && !l.manualColor && project.textColorAuto !== false) {
+      const black = ratio(lum(17, 17, 17), Lbg), white = ratio(1, Lbg);
+      l.color = white >= black ? "#ffffff" : "#111111";
+      g.fillStyle = l.color;
+      Lt = lum(...hexRgb(l.color));
+    }
+    const bad = Ls.filter((v) => ratio(Lt, v) < need).length / Ls.length; // 还有多少地方看不清
+    if (bad < 0.12) return null;
+    const light = Lt > 0.4;
+    const opp = light ? "0,0,0" : "255,255,255";
+    if (mode === "none") return { issue: `文字和背景太接近（${Math.round(bad * 100)}% 的地方看不清）` };
+    const pick = mode === "auto" ? (bad > 0.45 ? "scrim" : "shadow") : mode;
+    if (pick === "scrim") {
+      const pad = fit.size * 0.35;
+      g.save();
+      g.fillStyle = `rgba(${opp},${light ? 0.45 : 0.62})`;
+      roundRect(g, x0 - pad, y0 - pad * 0.6, tw + pad * 2, th + pad * 1.2, pad);
+      g.fill();
+      g.restore();
+      return {};
+    }
+    if (pick === "outline") return { outline: `rgba(${opp},0.85)` };
+    return { shadow: `rgba(${opp},0.9)` };
+  }
 
   const shadow0 = (screen) => screen.shadow || { dir: "b", op: 0.35 };
   /** 底图包含的层：最后一个带投影的产品图（主图）以及它前面的所有非文字、非图标层；没有主产品图就是空的 */
