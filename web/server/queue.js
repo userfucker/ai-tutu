@@ -50,6 +50,10 @@ export const MODULES = {
   an_main: { name: "主图分析（看图）", group: "竞品分析", follow: "read" },
   an_attr: { name: "产品属性对比", group: "竞品分析", follow: "text" },
   an_write: { name: "写结论和建议", group: "竞品分析", follow: "text" },
+  // 详情页（Lee 2026-10-23）：多张图一起画时，在勾选的网站之间轮流分
+  dt_angle: { name: "多角度图、细节特写（画图）", group: "详情页", follow: "image" },
+  dt_blend: { name: "产品融入背景（画图）", group: "详情页", follow: "image" },
+  dt_check: { name: "检查产品有没有变样（看图）", group: "详情页", follow: "vision" },
 };
 export const baseRole = (role) => (MODULES[role] ? MODULES[role].follow : role);
 export function roles() {
@@ -205,6 +209,8 @@ export function tick() {
         const payload = parse(row.payload) || {};
         const role = payload.role || (row.kind === "text" && payload.images && payload.images.length ? "vision" : row.kind);
         let order = payload.sites && payload.sites.length ? payload.sites : roles()[role] || [];
+        // 一批任务轮流分给不同网站：第 n 个任务从第 n 个网站开始排
+        if (payload.rotate && order.length > 1) { const r = payload.rotate % order.length; order = [...order.slice(r), ...order.slice(0, r)]; }
         // 这个任务在某个网站失败过：先换别的网站；都失败过了再从头来
         const bad = badSites.get(row.id);
         if (bad && order.some((x) => !bad.has(x) && bridge.connsFor(x).length)) order = order.filter((x) => !bad.has(x));

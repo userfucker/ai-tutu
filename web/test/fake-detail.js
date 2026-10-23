@@ -49,20 +49,23 @@ function answer(badBg, prompt, nImages) {
     { template: "features3", purpose: "卖点", title: "三大卖点", items: [{ title: "不漏水", desc: "双层密封", icon: "shield" }, { title: "保温久", desc: "12 小时", icon: "clock" }, { title: "轻便", desc: "只有 300 克", icon: "feather" }], bg: "light studio" },
     { template: "params", purpose: "参数", title: "产品参数" },
   ] };
+  else if (/调整光影后的图/.test(prompt)) out = { same: true, why: "" };
   else if (/背景图（按顺序）/.test(prompt)) out = { bad: badBg() ? [{ i: 1, why: "有文字" }] : [] };
   else if (/重写下面这一屏/.test(prompt)) { const cur = JSON.parse(/【当前文案】\n(.*)\n/.exec(prompt)[1]); out = { ...cur, title: "品质之选保温杯" }; }
   else if (/翻译成/.test(prompt)) { const map = JSON.parse(prompt.split("\n").find((l) => l.startsWith("{"))); out = { t: Object.fromEntries(Object.entries(map).map(([k, v]) => [k, "EN " + v])) }; }
   else out = { ok: true };
   return { text: "好的：\n```json\n" + JSON.stringify(out) + "\n```", codes: [JSON.stringify(out)] };
 }
-const aiImage = (prompt) => {
-  if (/isolated on a pure white background/.test(prompt)) return product("#ffffff");
+const aiImage = (prompt, images, harmBad) => {
+  if (/isolated on a pure white background/.test(prompt) || /different camera angle/.test(prompt)) return product("#ffffff");
+  // 融入背景：正常就原样还回去（产品没变）；harmBad = 产品被 AI 画没了（测重做、退回原贴图）
+  if (/Edit the uploaded image/.test(prompt) && images && images[0] && !harmBad) return Buffer.from(images[0].b64, "base64");
   return png(768, 1024, (g, w, h) => { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, "#f3e9dc"); gr.addColorStop(1, "#d9c2a5"); g.fillStyle = gr; g.fillRect(0, 0, w, h); });
 };
 
 
 /** 假 AI图图：onCmd 给 connect() 用；asked 记下每个任务；第一次检查背景时说第 1 张有字（测重画） */
-export function fakeDetailAI() {
+export function fakeDetailAI(o = {}) {
   const asked = [];
   let once = true;
   const badBg = () => { const r = once; once = false; return r; };
@@ -72,7 +75,7 @@ export function fakeDetailAI() {
       if (m.cmd !== "run") return { error: "不支持" };
       asked.push({ kind: m.args.kind, prompt: m.args.prompt, images: (m.args.images || []).length });
       await new Promise((r) => setTimeout(r, 5));
-      if (m.args.kind === "image") return { b64: aiImage(m.args.prompt).toString("base64"), mime: "image/png" };
+      if (m.args.kind === "image") return { b64: aiImage(m.args.prompt, m.args.images, o.harmBad).toString("base64"), mime: "image/png" };
       return answer(badBg, m.args.prompt, (m.args.images || []).length);
     },
   };

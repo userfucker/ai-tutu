@@ -3,7 +3,8 @@
  *
  * 1 识别素材（AI 看图打标签、猜产品信息）→ 2 抠图（白底直接去白底，其他交给 AI 出白底图）→ 3 卖点（评价挖掘 + AI 补充）
  * → 4 参考图（有的话 AI 分析每一屏）→ 5 提纲和文案 → 6 背景（先出一张当风格参考）→ 7 AI 检查背景（有字、有人、有产品的重画一次）
- * → 8 翻译 → 9 检查违禁词、放不下的文字，AI 改写 → 10 导出 zip，等人审核。
+ * → 8 融入背景（B 方式：程序贴好产品，AI 只调光影，检查产品没变样；原贴图保留，可以切换）
+ * → 9 翻译 → 10 检查违禁词、放不下的文字，AI 改写 → 11 导出 zip，等人审核。
  *
  * 每一步做之前看项目里是不是已经有了（有就跳过），AI 任务都带固定的 key，所以中途停了、服务器重启了，重新开始不会重复做。
  */
@@ -14,7 +15,7 @@ import * as store from "./store.js";
 import { getST, kit } from "./runtime.js";
 import { FILES_DIR } from "../config.js";
 
-export const STEPS = ["识别素材", "抠图", "卖点", "参考图", "提纲和文案", "背景", "检查背景", "翻译", "检查修正", "导出"];
+export const STEPS = ["识别素材", "抠图", "卖点", "参考图", "提纲和文案", "背景", "检查背景", "融入背景", "翻译", "检查修正", "导出"];
 const running = new Map(); // 项目编号 → { stop }
 class Stopped extends Error {}
 
@@ -48,28 +49,29 @@ function ctxOf(p) {
     fs.writeFileSync(path.join(tmpDir, file), Buffer.from(await small.arrayBuffer()));
     return { file: `tmp/${p.id}/${file}`, name: name || "图片.jpg", mime: "image/jpeg" };
   }
-  async function ask(key, kind, prompt, images, label, again) {
+  /** opt.role = “AI 分工”里的模块，opt.rotate = 一批里的第几个（轮流分给不同网站） */
+  async function ask(key, kind, prompt, images, label, again, opt = {}) {
     check();
-    const spec = { key: k(key), kind, label: `${p.name}：${label}`, ownerType: "project", ownerId: p.id, payload: { prompt, images: (images || []).filter(Boolean) }, retryFailed: again };
+    const spec = { key: k(key), kind, label: `${p.name}：${label}`, ownerType: "project", ownerId: p.id, payload: { prompt, images: (images || []).filter(Boolean), role: opt.role, rotate: opt.rotate || undefined }, retryFailed: again };
     const r = await Q.ensure(spec);
     check();
     return r;
   }
-  async function json(key, prompt, images, label) {
+  async function json(key, prompt, images, label, opt) {
     const ST = getST();
     try {
-      const r = await ask(key, "text", prompt, images, label, true);
+      const r = await ask(key, "text", prompt, images, label, true, opt);
       return ST.extractJson(r.text, r.codes);
     } catch (e) {
       if (e instanceof Stopped) throw e;
       if (e.task) throw e; // 任务本身失败（重试过了）
       // 回复里没有 JSON：再问一次
-      const r = await ask(key + ":again", "text", prompt + "\n\n注意：上次的回复格式不对。这次只回复一个 JSON 代码块，不要别的文字。", images, label + "（再问一次）", true);
+      const r = await ask(key + ":again", "text", prompt + "\n\n注意：上次的回复格式不对。这次只回复一个 JSON 代码块，不要别的文字。", images, label + "（再问一次）", true, opt);
       return ST.extractJson(r.text, r.codes);
     }
   }
-  async function image(key, prompt, images, label) {
-    const r = await ask(key, "image", prompt, images, label, true);
+  async function image(key, prompt, images, label, opt) {
+    const r = await ask(key, "image", prompt, images, label, true, opt);
     if (!r.file) throw new Error("AI 没有给出图片");
     const buf = fs.readFileSync(Q.filePath(r.file));
     return new Blob([buf], { type: r.mime || "image/png" });
@@ -249,6 +251,25 @@ async function stepCheckBg(p, c) {
   p.auto.bgChecked = true;
   store.putProject(p);
 }
+/** 融入背景：有背景图、有主产品图的屏都做（同一个布局做过、放弃过的不再做）；几屏同时做，Gemini / Copilot 轮流 */
+async function stepHarmony(p, c) {
+  const ST = getST();
+  const list = [];
+  for (const sc of p.screens) {
+    const h = await ST.harmState(p, sc);
+    if (h.can && !(sc.harm && sc.harm.sig === h.sig && (sc.harm.status === "fallback" || sc.harm.key))) list.push({ sc, sig: h.sig });
+  }
+  const imgs = (list2) => Promise.all(list2.map((x) => c.img(x.blob, x.name, 1536)));
+  await Promise.all(list.map(({ sc, sig }, i) => ST.harmonize(p, sc, {
+    image: async (prompt, list2, label, n) => c.image(`harm:${sc.id}:${sig}:${n}`, prompt, await imgs(list2), label, { role: "dt_blend", rotate: i + n }),
+    json: async (prompt, list2, label, n) => c.json(`harmchk:${sc.id}:${sig}:${n}`, prompt, await imgs(list2), label, { role: "dt_check", rotate: i }),
+  }).then((r) => {
+    store.putProject(p);
+    const no = p.screens.indexOf(sc) + 1;
+    if (r.ok) log(p, `第 ${no} 屏融入背景完成${r.note ? "（" + r.note + "）" : ""}`);
+    else if (!r.skip) log(p, `第 ${no} 屏融入背景放弃，用原贴图：${r.why}`);
+  }).catch((e) => { if (e instanceof Stopped) throw e; log(p, `第 ${p.screens.indexOf(sc) + 1} 屏融入背景没成功，用原贴图：${e.message}`); })));
+}
 async function stepTranslate(p, c, tag = "") {
   const ST = getST();
   for (const lang of p.langs) {
@@ -313,7 +334,7 @@ async function exportProject(p) {
 }
 
 // ------------------------------------------------------------ 开始 / 停止 / 审核通过
-const RUNNERS = [stepRecognize, stepCut, stepPoints, stepRef, stepOutline, stepBg, stepCheckBg, (p, c) => stepTranslate(p, c), stepFix];
+const RUNNERS = [stepRecognize, stepCut, stepPoints, stepRef, stepOutline, stepBg, stepCheckBg, stepHarmony, (p, c) => stepTranslate(p, c), stepFix];
 
 async function runPipeline(id) {
   let p = store.getProject(id);

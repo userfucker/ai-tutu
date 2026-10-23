@@ -54,7 +54,7 @@ ST.AI = (() => {
     const images = await prepImages(j.images);
     if (j.cancelled) throw cancelled();
     const kind = j.kind === "text" && images.length ? "vision" : j.kind;
-    const r = await api("POST", "/api/tasks", { kind, prompt: j.prompt, images, label: j.label, ownerType: "project", ownerId: (globalThis.APP && APP.project && APP.project.id) || "" });
+    const r = await api("POST", "/api/tasks", { kind, prompt: j.prompt, images, label: j.label, role: j.role, sites: j.sites, rotate: j.rotate, ownerType: "project", ownerId: (globalThis.APP && APP.project && APP.project.id) || "" });
     j.taskId = r.id;
     emit();
     for (;;) {
@@ -95,10 +95,11 @@ ST.AI = (() => {
     configure() {},
     /**
      * 排一个任务。kind = text / image；images = [Blob 或 { blob, name, max }]
+     * o.role = “AI 分工”里的模块（dt_angle …），o.sites = 只用这些网站，o.rotate = 一批任务里的第几个（轮流分给不同网站）
      * 成功给 { ok, text, codes } 或 { ok, blob, mime }，失败抛错（err.result 里有详情）
      */
     async run(kind, prompt, images, o = {}) {
-      const j = { kind, prompt, images, label: o.label || (kind === "text" ? "AI 写文字" : "AI 画图"), status: "wait", steps: [], t0: Date.now() };
+      const j = { kind, prompt, images, label: o.label || (kind === "text" ? "AI 写文字" : "AI 画图"), role: o.role, sites: o.sites, rotate: o.rotate, status: "wait", steps: [], t0: Date.now() };
       queue.push(j);
       emit();
       try {

@@ -94,6 +94,7 @@
     a.cutBox = ST.alphaBox(cimg);
     a.cutW = cimg.naturalWidth; a.cutH = cimg.naturalHeight;
   }
+  APP.makeCut = makeCut;
   APP.cutAsset = async (a, how) => {
     const p = P();
     busy.set(a.id, how === "ai" ? "AI 抠图排队中…" : "去白底中…");
@@ -247,11 +248,14 @@
             <button class="sm" data-act="cutAi" ${b && !/失败/.test(b) ? "disabled" : ""} title="让 AI 出一张纯白背景的图，再去白底（适合背景复杂的图）">AI 抠图</button>
             <button class="sm" data-act="cutDirect" ${b && !/失败/.test(b) ? "disabled" : ""} title="图本来就是白底：直接去掉白色背景，不用 AI">直接去白底</button>
             ${a.cut ? '<button class="sm" data-act="trim">修边</button><button class="sm" data-act="uncut" title="不用抠好的图，用原图">用原图</button>' : ""}
+            <button class="sm" data-act="angleAi" title="照着这张图让 AI 画其他角度（主视、左右、后视、俯视、45°），可以多选">AI 多角度</button>
+            <button class="sm" data-act="closeUp" title="用画笔圈出一块地方，让 AI 画这块的特写">圈细节</button>
             <button class="sm danger" data-act="delAsset">删除</button></div></div>`;
       }));
       main.innerHTML = `
         <div class="head"><div><h1>② 素材</h1><div class="muted">上传产品图，给每张图打标签（程序靠标签决定哪张图放进哪一屏）。产品要贴到背景上，所以白底主图、角度图、规格图最好都抠成透明底。</div></div>
           <div class="sp"><button data-act="pickFiles">上传图片</button><button data-act="pickTaobao">从淘宝采集导入</button><button class="blue" data-act="cutAll" ${p.assets.some((a) => !a.cut && ["white", "angle", "spec", "package"].includes(a.tag)) ? "" : "disabled"}>全部抠图</button><button class="primary" data-go="info">下一步：产品信息 →</button></div></div>
+        ${await APP.pendingHtml()}
         ${p.assets.length ? `<div class="assets">${cards.join("")}</div>` : `<div class="empty" id="dropZone">把图片拖到这里，或者点“上传图片”，或者按 Ctrl+V 粘贴<br><span class="muted">白底主图、多角度图、细节图、规格图（每个颜色一张）、包装图、真实场景图都可以</span></div>`}
         <div class="note" style="margin-top:14px">“全部抠图”：白底图直接去白底，背景复杂的图交给 AI 先出白底图再去白底。白色、透明、反光的产品边缘可能抠不干净，可以点“修边”手动处理。</div>
         <input type="file" id="assetInput" accept="image/*" multiple hidden><input type="file" id="tbInput" accept=".zip" hidden>`;

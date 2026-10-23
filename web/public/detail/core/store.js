@@ -7,6 +7,7 @@ var ST = globalThis.ST || (globalThis.ST = {});
 
 ST.db = (() => {
   const revs = new Map(); // 项目编号 → 服务器上的版本号
+  const saving = new Map(); // 项目编号 → 正在进行的保存
   const j = async (method, url, body) => {
     const r = await fetch(url, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined, credentials: "same-origin" });
     let d = null;
@@ -21,11 +22,16 @@ ST.db = (() => {
       try { const d = await j("GET", "/api/projects/" + encodeURIComponent(id)); revs.set(id, d.project.rev || 0); return d.project; }
       catch (e) { if (e.status === 404) return null; throw e; }
     },
-    putProject: async (p) => {
-      const d = await j("PUT", "/api/projects/" + encodeURIComponent(p.id), { project: p, rev: revs.has(p.id) ? revs.get(p.id) : null });
-      revs.set(p.id, d.rev);
-      p.rev = d.rev;
-      return d.rev;
+    // 同一个项目的保存一个接一个发（同时发两个，后一个带的还是旧版本号，会被服务器当成冲突拒绝）
+    putProject: (p) => {
+      const run = (saving.get(p.id) || Promise.resolve()).catch(() => {}).then(async () => {
+        const d = await j("PUT", "/api/projects/" + encodeURIComponent(p.id), { project: p, rev: revs.has(p.id) ? revs.get(p.id) : null });
+        revs.set(p.id, d.rev);
+        p.rev = d.rev;
+        return d.rev;
+      });
+      saving.set(p.id, run);
+      return run;
     },
     listProjects: async () => (await j("GET", "/api/projects")).list,
     deleteProject: (id) => j("DELETE", "/api/projects/" + encodeURIComponent(id)),

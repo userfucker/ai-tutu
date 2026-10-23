@@ -194,12 +194,12 @@ var APP = (globalThis.APP = {
   });
 
   /** 调 AI 写文字并解析 JSON（失败抛错） */
-  APP.aiJson = async (prompt, images, label) => {
-    const r = await ST.AI.run("text", prompt, images || [], { label });
+  APP.aiJson = async (prompt, images, label, o = {}) => {
+    const r = await ST.AI.run("text", prompt, images || [], { ...o, label });
     return ST.extractJson(r.text, r.codes);
   };
-  APP.aiImage = async (prompt, images, label) => {
-    const r = await ST.AI.run("image", prompt, images || [], { label });
+  APP.aiImage = async (prompt, images, label, o = {}) => {
+    const r = await ST.AI.run("image", prompt, images || [], { ...o, label });
     return r.blob || ST.b64ToBlob(r.b64, r.mime || "image/png");
   };
 

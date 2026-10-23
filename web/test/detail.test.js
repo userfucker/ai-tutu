@@ -12,7 +12,8 @@ const PORT = 18800 + Math.floor(Math.random() * 90);
 const BASE = `http://127.0.0.1:${PORT}`;
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitutu-detail-"));
 let srv, cookie = "", token = "", plugin;
-const ai = fakeDetailAI();
+const aiOpts = {}; // harmBad = 融入背景时 AI 把产品画没了
+const ai = fakeDetailAI(aiOpts);
 const asked = ai.asked;
 
 async function api(method, url, body, raw) {
@@ -84,6 +85,13 @@ test("一键全自动：做完导出 zip，等审核", async () => {
   assert.ok(nAi >= 1);
   assert.equal(asked.filter((a) => a.kind === "image" && /background for an e-commerce/.test(a.prompt)).length, nAi + 1, "检查出有问题的背景重画了一次");
   assert.ok(p.auto.log.some((l) => /有问题（有文字），重画/.test(l)));
+  // 融入背景（B 方式）：有 AI 背景、有主产品图的屏都融入了，原贴图保留（harm.on 可以切换）
+  const harmed = p.screens.filter((s) => s.harm && s.harm.status === "ok");
+  assert.ok(harmed.length >= 1, "至少一屏融入了背景");
+  assert.ok(harmed.every((s) => s.harm.on && s.harm.key && s.harm.sig), "融入后的图存好了，默认显示融入后");
+  assert.ok(asked.some((a) => a.kind === "image" && /Edit the uploaded image/.test(a.prompt) && a.images === 1), "AI 调光影（只发贴好的那一张）");
+  assert.ok(asked.some((a) => /调整光影后的图/.test(a.prompt) && a.images === 2), "AI 对比检查产品有没有变样");
+  assert.ok(p.auto.log.some((l) => /融入背景完成/.test(l)));
   assert.ok(Object.keys(p.screens[0].text.title || {}).includes("en"), "翻译成英语了");
   assert.equal(p.auto.exportFile, `exports/${pid}.zip`);
   const z = await api("GET", `/api/projects/${pid}/export`);
@@ -121,4 +129,23 @@ test("中途停止、再开始：做过的不重复问 AI", async () => {
   const list = (await api("GET", "/api/projects")).body.list;
   assert.equal(list.length, 2);
   assert.ok(list.every((x) => x.firstAsset && x.auto));
+});
+
+test("融入背景：AI 把产品画变样了 → 重做一次 → 还不行就用原贴图", async () => {
+  aiOpts.harmBad = true;
+  try {
+    const r = await api("POST", "/api/projects/import", tbZip(), true);
+    const id = r.body.id;
+    const before = asked.length;
+    await api("POST", `/api/projects/${id}/auto`, {});
+    const p = await waitAuto(id, ["review"]);
+    const tries = asked.slice(before).filter((a) => /Edit the uploaded image/.test(a.prompt));
+    const can = p.screens.filter((s) => s.harm);
+    assert.ok(can.length >= 1);
+    assert.equal(tries.length, can.length * 2, "每屏重做了一次");
+    assert.ok(tries.some((a) => /extremely conservative/.test(a.prompt)), "重做时要求更保守");
+    assert.ok(can.every((s) => s.harm.status === "fallback" && !s.harm.on && !s.harm.key), "放弃了，用原贴图");
+    assert.ok(p.auto.log.some((l) => /融入背景放弃，用原贴图：产品那块变化太大/.test(l)));
+    assert.equal(p.auto.status, "review", "全自动照样做完");
+  } finally { aiOpts.harmBad = false; }
 });

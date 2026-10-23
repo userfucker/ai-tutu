@@ -149,7 +149,15 @@ var ST = globalThis.ST || (globalThis.ST = {});
     const bgColor = bg.color || T[tpl.bgColor === "white" ? "card" : tpl.bgColor] || "#ffffff";
     g.fillStyle = bgColor;
     g.fillRect(0, 0, Wpx, Hpx);
-    const bgImg = bg.mode !== "color" && bg.key ? await ST.imgOf(bg.key) : null;
+    let bgImg = bg.mode !== "color" && bg.key ? await ST.imgOf(bg.key) : null;
+    // 融入背景（B 方式）：“底图” = 背景 + 产品（连同产品下面的色块、线），交给 AI 调光影。
+    // 用的时候整张当背景画，底图里的层就不再画了；产品挪过、换过图、换过背景（sig 对不上）就自动退回原贴图
+    const H0 = H;
+    const base = bgImg && !bg.blend ? harmBase(layers) : new Set();
+    const sig = base.size ? harmSig(project, bg, shadow0(screen), base, H0, L.c.land) : "";
+    const hm = screen.harm || {};
+    const harmImg = base.size && o.only !== "base" && o.harm !== false && hm.on && hm.key && hm.sig === sig ? await ST.imgOf(hm.key) : null;
+    if (harmImg) bgImg = harmImg;
     if (bgImg) {
       const iw = bgImg.naturalWidth, ih = bgImg.naturalHeight;
       const s = Math.max(Wpx / iw, Hpx / ih);
@@ -179,10 +187,18 @@ var ST = globalThis.ST || (globalThis.ST = {});
       imgs.set(l, { img, a, cut: useCut, box: useCut && a.cutBox ? a.cutBox : null });
     }));
     const byId = new Map(layers.filter((l) => l.id).map((l) => [l.id, l]));
-    const shadow = screen.shadow || { dir: "b", op: 0.35 };
+    const shadow = shadow0(screen);
     const productBoxes = [];
 
     for (const l of layers) {
+      if (o.only === "base" && !base.has(l)) continue;
+      if (harmImg && base.has(l)) {
+        if (l.t === "img" && l.id) {
+          boxes.push({ id: l.id, t: "img", x: l.x, y: l.y, w: l.w, h: l.h, locked: l.locked, asset: l.asset || "" });
+          if (l.shadow) productBoxes.push({ x: l.x, y: l.y, w: l.w, h: l.h });
+        }
+        continue;
+      }
       g.save();
       if (l.t === "rect") {
         roundRect(g, l.x * k, l.y * k, l.w * k, l.h * k, (l.r || 0) * k);
@@ -321,6 +337,20 @@ var ST = globalThis.ST || (globalThis.ST = {});
         if ((ix * iy) / (b.w * b.h) > 0.25) { issues.push({ type: "overlap", id: b.id, msg: "文字和产品图重叠" }); break; }
       }
     }
-    return { canvas, H, k, boxes, issues };
+    return { canvas, H, k, boxes, issues, harm: { can: base.size > 0, sig, used: !!harmImg, box: productBoxes[productBoxes.length - 1] || null, stale: !!(base.size && hm.key && hm.sig !== sig) } };
   };
+
+  const shadow0 = (screen) => screen.shadow || { dir: "b", op: 0.35 };
+  /** 底图包含的层：最后一个带投影的产品图（主图）以及它前面的所有非文字、非图标层；没有主产品图就是空的 */
+  function harmBase(layers) {
+    let last = -1;
+    layers.forEach((l, i) => { if (l.t === "img" && l.shadow && l.asset) last = i; });
+    return new Set(layers.slice(0, last + 1).filter((l) => l.t !== "text" && l.t !== "icon"));
+  }
+  const hash = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0; return h.toString(36); };
+  const r1 = (v) => (typeof v === "number" ? Math.round(v * 10) / 10 : v ?? "");
+  function harmSig(project, bg, shadow, base, H, land) {
+    const ls = [...base].map((l) => [l.t, r1(l.x), r1(l.y), r1(l.w), r1(l.h), r1(l.cx), r1(l.cy), r1(l.r), l.asset || "", l.key || "", l.use || "", l.fit || "", l.align || "", !!l.shadow, l.fill || "", String(l.grad || ""), l.asset ? (ST.assetOf(project, l.asset) || {}).cut || "" : ""]);
+    return hash(JSON.stringify([bg.mode, bg.key, bg.color || "", r1(H), !!land, shadow.dir, r1(shadow.op), ls]));
+  }
 })();

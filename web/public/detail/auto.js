@@ -4,7 +4,7 @@
 (() => {
   const esc = ST.esc;
   const P = () => APP.project;
-  const STEPS = ["识别素材", "抠图", "卖点", "参考图", "提纲和文案", "背景", "检查背景", "翻译", "检查修正", "导出"];
+  const STEPS = ["识别素材", "抠图", "卖点", "参考图", "提纲和文案", "背景", "检查背景", "融入背景", "翻译", "检查修正", "导出"];
   const ISSUE = { banned: "违禁词", overflow: "文字放不下", noimg: "缺图", nobg: "缺背景", overlap: "重叠", shrink: "文字缩小", untranslated: "没翻译" };
 
   APP.steps.auto = {
@@ -35,12 +35,21 @@
             <button class="blue" data-act="autoApprove">${a.status === "approved" ? "改完了，重新导出" : "审核通过（按现在的内容导出）"}</button>
             <button class="sm" data-act="autoAgain" title="已经做好的保留，只补缺的；要整套重来，先到提纲里删掉屏幕">再跑一遍全自动</button></div>` : ""}
         </div>
+        ${a.status === "review" || a.status === "approved" ? '<div class="card"><h3>产品融入背景</h3><div class="muted">全自动已经把有产品的屏融入了背景（AI 只调光影）。每屏都保留了原贴图，可以切换；切换后点上面的“审核通过”重新导出。</div><div class="hgrid" id="harmGrid">加载中…</div></div>' : ""}
         <div class="card"><h3>过程记录</h3><div class="alog" id="alog">${esc((a.log || []).join("\n")) || "（还没有）"}</div>
           <div class="muted" style="margin-top:6px">每个 AI 任务的详情在工作台的 <a href="/#/tasks" target="_blank">任务中心</a>。</div></div>`;
       const lg = main.querySelector("#alog");
       if (lg) lg.scrollTop = lg.scrollHeight;
+      fillHarm(main).catch((e) => console.error(e));
     },
     act: {
+      autoHarm: async (el) => {
+        const sc = P().screens.find((x) => x.id === el.closest("[data-sid]").dataset.sid);
+        if (!sc || !sc.harm) return;
+        sc.harm.on = el.dataset.v === "1";
+        await APP.save(true);
+        fillHarm(document.getElementById("main") || document).catch(() => {});
+      },
       autoStart: async () => { await APP.startAuto(P().id); P().auto = { status: "running", step: 0, msg: "开始" }; APP.render(); },
       autoAgain: async () => { if (!(await APP.confirm("再跑一遍全自动？已经做好的保留，只补缺的（比如新加的语言、没生成的背景）。", "开始"))) return; await APP.startAuto(P().id); },
       autoStop: async () => { await APP.api("POST", `/api/projects/${P().id}/auto/stop`); APP.toast("已停止"); },
@@ -54,6 +63,28 @@
       },
     },
   };
+
+  /** 审核时：每一屏融入后 / 原贴图 的小图和切换 */
+  async function fillHarm(main) {
+    const box = main.querySelector("#harmGrid");
+    if (!box) return;
+    const p = P();
+    const pf = ST.platformOf(p, p.platform);
+    const out = [];
+    for (const [i, sc] of p.screens.entries()) {
+      const h = await ST.harmState(p, sc);
+      if (!h.can) continue;
+      const r = await ST.renderScreen(p, sc, { platform: pf, lang: p.lang, brand: APP.brandOf(), pxWidth: 260 });
+      const url = URL.createObjectURL(await ST.toBlob(r.canvas, "image/jpeg", 0.8));
+      const hm = sc.harm || {};
+      const has = hm.key && !h.stale;
+      const sw = has ? `<span class="pills"><span class="pill ${hm.on ? "on" : ""}" data-act="autoHarm" data-v="1">融入后</span><span class="pill ${hm.on ? "" : "on"}" data-act="autoHarm" data-v="0">原贴图</span></span>`
+        : `<span class="muted">${h.stale ? "改过了，用原贴图" : hm.status === "fallback" ? "没融入成功，用原贴图" : "还没融入"}</span>`;
+      out.push(`<div class="hcell" data-sid="${sc.id}"><img src="${url}" alt=""><div class="row"><b>第 ${i + 1} 屏</b>${sw}</div>${hm.note ? `<div class="muted">${esc(hm.note)}</div>` : ""}</div>`);
+    }
+    if (!document.body.contains(box)) return;
+    box.innerHTML = out.join("") || '<span class="muted">没有需要融入的屏（有背景图、有产品图的屏才会融入）</span>';
+  }
 
   // ------------------------------------------------------------ 一键全自动新建（批量）
   /** 拖进来的东西 → [{ name, kind: "zip"|"dir", file | files: [{ name, blob }] }] */

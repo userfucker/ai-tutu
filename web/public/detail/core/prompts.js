@@ -192,8 +192,70 @@ ST.P = (() => {
         "Reply with the image only.",
       ].filter(Boolean).join("\n");
     },
+    /** 多角度图：照着上传的产品图，画同一个产品的另一个角度（白底，程序再去白底） */
+    angleView(p, a, angle, ratio) {
+      const A = ST.ANGLES.find((x) => x.id === angle) || ST.ANGLES[0];
+      const name = (p.info && p.info.name) || "";
+      return [
+        `Generate one image: the exact same product as in the uploaded image, shown from a different camera angle: ${A.en}. Aspect ratio ${ratio}.`,
+        `- Same product: shape, proportions, structure, colors, materials, patterns, printed text, logos and number of parts must stay identical; do not redesign it.${name ? ` It is "${name}" (Chinese name).` : ""}`,
+        "- Infer hidden sides sensibly from the visible design (same material and color); do not invent new decorations, text or logos.",
+        "- Pure white (RGB 255,255,255) background, soft even studio light, no shadows or reflections on the background, crisp clean edges.",
+        "- Show the whole product, centered, nothing cropped. No people, no props, no text.",
+        a.note ? `- Note about the uploaded photo (Chinese): ${a.note}` : "",
+        "Reply with the image only.",
+      ].filter(Boolean).join("\n");
+    },
+    /** 细节特写：第 1 张图上红框圈出的地方，第 2 张是那块放大 */
+    closeUp(p, note, ratio) {
+      const name = (p.info && p.info.name) || "";
+      return [
+        `Generate one image: a photorealistic macro close-up photo of the area outlined in red in the first uploaded image (the second uploaded image is that area enlarged). Aspect ratio ${ratio}.`,
+        `- It is the same product${name ? ` ("${name}", Chinese name)` : ""}: keep exactly the same material, texture, color, stitching, pattern, printed text and logos of that area; do not redesign it.`,
+        "- Fill the frame with that detail, sharp focus, shallow depth of field, soft studio light, clean neutral background where the background shows.",
+        "- Do NOT draw the red outline. No people, no added text, no watermark.",
+        note ? `- What this detail is (Chinese): ${note}` : "",
+        "Reply with the image only.",
+      ].filter(Boolean).join("\n");
+    },
+    /** 融入背景（B 方式）：程序已经把产品贴好了，AI 只调光影 */
+    harmonize(p, ratio, strict) {
+      const name = (p.info && p.info.name) || "";
+      return [
+        `Edit the uploaded image and return the whole edited image, aspect ratio ${ratio}. It is an e-commerce picture: a product${name ? ` ("${name}", Chinese name)` : ""} was pasted onto a background photo, so it looks stuck on.`,
+        "Make it look like one real photo:",
+        "- Add realistic contact shadows and cast shadows that match the light direction of the background; add subtle reflections if the surface is glossy.",
+        "- Adjust the product's lighting, color temperature and edge blending slightly to match the scene; ambient light may spill onto the product.",
+        "Strict rules:",
+        "- Do NOT change the product: same position, size, angle, shape, proportions, colors, materials, patterns, printed text and logos. Do not redraw or redesign it, do not add or remove parts.",
+        "- Keep the composition, framing and the background content the same. Do not crop, zoom or move anything.",
+        "- Do not add any text, letters, logos, watermarks, people or other products.",
+        strict ? "- Last time the product was changed. This time be extremely conservative: only add shadows around the product and very slight light matching." : "",
+        "Reply with the image only.",
+      ].filter(Boolean).join("\n");
+    },
+    /** 检查融入后产品有没有变样 */
+    sameProduct(p) {
+      return [
+        "第 1 张图是原图（产品是程序直接贴上去的），第 2 张图是 AI 调整光影后的图。",
+        "只允许改：阴影、反光、光线、颜色冷暖的轻微变化、产品边缘的融合。",
+        "不允许改：产品的位置、大小、角度、形状、比例、颜色、材质、图案、上面的文字和 logo、零件数量；背景的构图。",
+        `请仔细对比产品${p.info && p.info.name ? `（${p.info.name}）` : ""}，判断有没有不允许的变化。`,
+        '只回复一个 JSON 代码块，格式：{"same":true,"why":""}；有变化就 same 为 false，why 写哪里变了（中文，20 个字以内）。',
+      ].join("\n");
+    },
   };
 })();
+
+/** 多角度图可选的角度（Lee 2026-10-23） */
+ST.ANGLES = [
+  { id: "front", name: "主视图", en: "straight-on front view, camera at product height" },
+  { id: "left", name: "左视图", en: "left side view (camera on the product's left, 90 degrees from the front)" },
+  { id: "right", name: "右视图", en: "right side view (camera on the product's right, 90 degrees from the front)" },
+  { id: "back", name: "后视图", en: "back view (camera behind the product, 180 degrees from the front)" },
+  { id: "top", name: "俯视图", en: "top-down view (camera directly above, looking down)" },
+  { id: "45", name: "45°侧面", en: "three-quarter view, 45 degrees between front and side, camera slightly above" },
+];
 
 /** 平台：用户在“平台设置”里改过的尺寸优先 */
 ST.platformOf = (project, id) => {

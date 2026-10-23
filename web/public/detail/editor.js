@@ -9,6 +9,8 @@
   const P = () => APP.project;
   const ed = (APP.ed = { si: 0, lang: "", pf: "", sel: null, preview: false, last: null, rendering: false, again: false });
   const gen = new Map(); // 屏幕编号 → 生成背景的状态（不保存）
+  const hgen = new Map(); // 屏幕编号 → 融入背景的状态（不保存）
+  let harmSite = (() => { try { return localStorage.getItem("st:harmSite") || ""; } catch { return ""; } })(); // 融入用哪个 AI（空 = 按 AI 分工轮流）
   const thumbs = new Map(); // 屏幕编号 → { sig, url }
 
   const curPf = () => ST.platformOf(P(), ed.pf || P().platform);
@@ -23,7 +25,7 @@
     const r = await ST.renderScreen(p, sc, { platform: pf, lang: p.lang, brand: brand(), pxWidth: 100 });
     return closestAiRatio(1000, r.H);
   }
-  APP.genBg = async (sc) => {
+  APP.genBg = async (sc, i = 0) => {
     const p = P();
     if (gen.get(sc.id) && /排队|生成中/.test(gen.get(sc.id))) return;
     gen.set(sc.id, "排队中");
@@ -52,6 +54,7 @@
       APP.commit();
       if (old && !APP.undo.some((s) => s.includes(old))) { ST.forget(old); }
       gen.delete(sc.id);
+      if (p.harmAuto !== false && !blend) setTimeout(() => APP.harmScreen(sc, i, true), 0); // 融入背景（B 方式）默认开
     } catch (e) {
       gen.set(sc.id, e.result && e.result.cancelled ? "" : "失败：" + e.message);
       if (!gen.get(sc.id)) gen.delete(sc.id);
@@ -64,7 +67,42 @@
     if (!list.length) return APP.toast("没有要生成的背景（需要 AI 背景的屏都已经有了）");
     APP.toast(`开始生成 ${list.length} 张背景，进度看右上角“AI 任务”`);
     if (!p.style.styleRef) { await APP.genBg(list[0]); list.shift(); } // 先出第一张，作为后面几张的风格参考
-    await Promise.all(list.map((s) => APP.genBg(s)));
+    await Promise.all(list.map((s, i) => APP.genBg(s, i + 1)));
+  };
+
+  // ------------------------------------------------------------ 融入背景（B 方式）
+  /** 融入一屏：程序贴好的图交给 AI 调光影，检查产品没变样；i = 一批里的第几个（Gemini / Copilot 轮流） */
+  APP.harmScreen = async (sc, i = 0, quiet) => {
+    const p = P();
+    if (/排队|中/.test(hgen.get(sc.id) || "")) return;
+    const st0 = await ST.harmState(p, sc);
+    if (!st0.can) { if (!quiet) APP.toast("这一屏没有背景图或产品图，不用融入", true); return; }
+    hgen.set(sc.id, "融入：排队中");
+    refresh();
+    const sites = harmSite ? [harmSite] : undefined;
+    const no = p.screens.indexOf(sc) + 1;
+    try {
+      const r = await ST.harmonize(p, sc, {
+        image: (prompt, imgs, label, n) => { hgen.set(sc.id, n ? "融入：重做中" : "融入中"); refresh(); return APP.aiImage(prompt, imgs.map((x) => ({ ...x, max: 1536 })), label, { role: "dt_blend", sites, rotate: i + n }); },
+        json: (prompt, imgs, label) => { hgen.set(sc.id, "融入：检查中"); refresh(); return APP.aiJson(prompt, imgs.map((x) => ({ ...x, max: 1024 })), label, { role: "dt_check", rotate: i }); },
+      });
+      hgen.delete(sc.id);
+      await APP.save(true);
+      if (r.ok) APP.toast(`第 ${no} 屏融入背景完成${r.note ? "（" + r.note + "）" : ""}`);
+      else if (!r.skip) APP.toast(`第 ${no} 屏融入背景放弃，用原贴图：${r.why}`, true);
+    } catch (e) {
+      if (e.result && e.result.cancelled) hgen.delete(sc.id);
+      else hgen.set(sc.id, "融入失败：" + e.message);
+    }
+    refresh();
+  };
+  APP.harmAll = async () => {
+    const p = P();
+    const list = [];
+    for (const sc of p.screens) { const h = await ST.harmState(p, sc); if (h.can && !h.used) list.push(sc); }
+    if (!list.length) return APP.toast("没有要融入的屏（有背景图、有产品图的屏都融入过了）");
+    APP.toast(`开始融入 ${list.length} 屏，进度看右上角“AI 任务”`);
+    await Promise.all(list.map((sc, i) => APP.harmScreen(sc, i)));
   };
   /** 翻译所有缺的文字 */
   APP.translateAll = async (langs) => {
@@ -128,6 +166,8 @@
         canvasEl.getContext("2d").drawImage(r.canvas, 0, 0);
         ed.last = r;
         drawSel();
+        const hk = JSON.stringify(r.harm || {}) + sc.id;
+        if (hk !== ed.hk) { ed.hk = hk; renderRight(); } // 融入背景那一栏要等画完才知道状态
       } while (ed.again);
     } finally { ed.rendering = false; }
   }
@@ -339,10 +379,11 @@
       <div class="sec"><h3>背景</h3>
         <select id="bgMode"><option value="ai">AI 画</option><option value="color">纯色</option><option value="upload">上传图片</option></select>
         ${sc.bg.mode === "ai" ? `<label class="lb">画面描述（英文）<textarea id="bgPrompt" rows="3" placeholder="如：soft beige marble surface, warm morning light">${esc(sc.bg.prompt || "")}</textarea></label>
-          ${(t.slots || []).some((s) => s.key === "main") && t.bg === "ai" ? `<label class="row lb"><input type="checkbox" id="bgBlend" ${sc.bg.blend ? "checked" : ""}> 产品融入场景（AI 把产品画进去，更真实，但产品可能变样）</label>` : ""}
+          ${(t.slots || []).some((s) => s.key === "main") && t.bg === "ai" ? `<label class="row lb"><input type="checkbox" id="bgBlend" ${sc.bg.blend ? "checked" : ""}> AI 直接把产品画进场景（A 方式：更自然，但产品可能变样；勾了就不再做下面的“融入背景”）</label>` : ""}
           <div class="row"><button class="sm blue" data-act="genOne" ${/排队|生成中/.test(st) ? "disabled" : ""}>${sc.bg.key ? "重新生成" : "生成背景"}</button>${sc.bg.key ? '<button class="sm" data-act="asStyle" title="后面生成的背景都参考这张的配色和光线">设为风格参考</button>' : ""}</div>
           ${st ? `<div class="issue tag ${/失败/.test(st) ? "bad" : "blue"}">${esc(st)}</div>` : ""}` : ""}
         ${sc.bg.mode === "upload" ? '<div class="row"><button class="sm" data-act="uploadBg">选择背景图</button></div>' : ""}
+        ${harmHtml(sc)}
         <label class="row lb">底色 <input type="color" id="bgColor" value="${sc.bg.color || ST.theme(p, brand())[t.bgColor === "white" ? "card" : t.bgColor] || "#ffffff"}"> <button class="sm" data-act="bgColorReset" ${sc.bg.color ? "" : "disabled"}>用风格默认</button></label>
       </div>
       <div class="sec"><h3>产品投影</h3>
@@ -354,6 +395,28 @@
     const q = (s) => box.querySelector(s);
     if (q("#bgMode")) q("#bgMode").value = sc.bg.mode;
     if (q("#shDir")) q("#shDir").value = (sc.shadow && sc.shadow.dir) || "b";
+  }
+
+  /** 右边“背景”里的融入背景（B 方式）一栏 */
+  function harmHtml(sc) {
+    const h = (ed.last && ed.last.harm) || {};
+    if (!h.can) return "";
+    const p = P();
+    const st = hgen.get(sc.id) || "";
+    const hm = sc.harm || {};
+    const busy = /排队|中$|中…/.test(st) && !/失败/.test(st);
+    const has = hm.key && !h.stale;
+    let line = "";
+    if (st) line = `<div class="issue tag ${/失败/.test(st) ? "bad" : "blue"}">${esc(st)}</div>`;
+    else if (h.stale) line = '<div class="muted">产品挪过、换过图或背景，原来融入的图不能用了，现在显示原贴图。点“重新融入”。</div>';
+    else if (hm.status === "fallback") line = `<div class="muted">上次没融入成功：${esc(hm.note || "")}</div>`;
+    else if (has) line = `<div class="muted">${h.used ? "现在显示融入后的图" : "现在显示原贴图"}${hm.note ? "；" + esc(hm.note) : ""}</div>`;
+    else line = '<div class="muted">程序已经把产品贴好；融入 = AI 只加阴影、反光、调光线，产品本身不变，做完会检查产品有没有变样。</div>';
+    return `<div class="harm"><div class="row"><b>产品融入背景</b>${has ? `<span class="sp pills"><span class="pill ${hm.on ? "on" : ""}" data-act="harmView" data-v="1">融入后</span><span class="pill ${hm.on ? "" : "on"}" data-act="harmView" data-v="0">原贴图</span></span>` : ""}</div>
+      ${line}
+      <div class="row"><button class="sm blue" data-act="harmOne" ${busy ? "disabled" : ""}>${hm.key || hm.status ? "重新融入" : "融入背景"}</button>
+        <select id="harmSite" title="用哪个 AI 画"><option value="">自动（按 AI 分工轮流）</option><option value="gemini" ${harmSite === "gemini" ? "selected" : ""}>Gemini</option><option value="copilot" ${harmSite === "copilot" ? "selected" : ""}>Copilot</option></select></div>
+      <label class="row lb"><input type="checkbox" id="harmAuto" ${p.harmAuto !== false ? "checked" : ""}> 生成背景后自动融入</label></div>`;
   }
 
   function bindRight() {
@@ -383,6 +446,8 @@
       else if (el.id === "tplSel") { P().screens[ed.si] = APP.changeTpl(sc, el.value); ed.sel = null; }
       else if (el.id === "bgMode") sc.bg.mode = el.value;
       else if (el.id === "bgBlend") sc.bg.blend = el.checked;
+      else if (el.id === "harmSite") { harmSite = el.value; try { localStorage.setItem("st:harmSite", harmSite); } catch {} return; }
+      else if (el.id === "harmAuto") P().harmAuto = el.checked;
       else if (el.id === "shDir") sc.shadow = { ...(sc.shadow || { op: 0.35 }), dir: el.value };
       APP.commit();
       refresh();
@@ -401,7 +466,7 @@
     for (const sc of P().screens) {
       const el = document.querySelector(`[data-thumb="${sc.id}"] .busy`);
       if (!el) continue;
-      const st = gen.get(sc.id) || "";
+      const st = gen.get(sc.id) || hgen.get(sc.id) || "";
       el.hidden = !st;
       el.textContent = st.slice(0, 20);
       el.className = "busy" + (/失败/.test(st) ? " fail" : "");
@@ -418,6 +483,7 @@
       <span class="lb" style="margin-left:8px">平台</span><span class="pills">${p.platforms.map((id) => { const x = ST.platformOf(p, id); return `<span class="pill ${id === (ed.pf || p.platform) ? "on" : ""}" data-epf="${id}">${esc(x.name)}<small>${x.w}${x.h ? "×" + x.h : ""}</small></span>`; }).join("")}</span>
       <span class="sp row">
         <button class="sm blue" data-act="genAll" ${needBg ? "" : "disabled"}>生成全部背景${needBg ? `（${needBg}）` : ""}</button>
+        <button class="sm" data-act="harmAll" title="有背景图、有产品图的屏：AI 只调光影让产品融进背景，产品不变">全部融入背景</button>
         ${p.langs.length ? `<button class="sm" data-act="trAll" ${miss ? "" : "disabled"}>翻译${miss ? `（缺 ${miss} 条）` : "（都翻好了）"}</button>` : ""}
         <button class="sm ${ed.preview ? "primary" : ""}" data-act="preview">整页预览</button>
         <button class="sm" data-act="undo" ${APP.undo.length ? "" : "disabled"} title="Ctrl+Z">撤销</button><button class="sm" data-act="redo" ${APP.redo.length ? "" : "disabled"} title="Ctrl+Y">重做</button>
@@ -515,6 +581,9 @@
       },
       genOne: () => APP.genBg(cur()),
       genAll: () => APP.genAllBg(),
+      harmAll: () => APP.harmAll(),
+      harmOne: () => APP.harmScreen(cur()),
+      harmView: async (el) => { const sc = cur(); if (!sc.harm) return; sc.harm.on = el.dataset.v === "1"; await APP.save(true); refresh(); },
       asStyle: async () => { const p = P(); const b = await ST.db.getBlob(cur().bg.key); p.style.styleRef = `${p.id}:styleref`; await ST.saveImage(p.style.styleRef, b); APP.save(); APP.toast("已设为风格参考：之后生成的背景都参考它的配色和光线"); },
       uploadBg: () => document.getElementById("bgInput").click(),
       bgColorReset: () => { const sc = cur(); APP.mark(); delete sc.bg.color; APP.commit(); refresh(); },

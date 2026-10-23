@@ -114,7 +114,7 @@ app.post("/api/tasks", async (c) => {
     fs.writeFileSync(path.join(FILES_DIR, rel), Buffer.from(im.b64 || "", "base64"));
     images.push({ file: rel, name: im.name || `图片${i + 1}.${ext}` });
   }
-  const row = queue.enqueue({ kind: b.kind === "vision" ? "text" : b.kind, label: b.label || "手动任务", ownerType: b.ownerType === "project" ? "project" : "manual", ownerId: b.ownerType === "project" ? String(b.ownerId || "") : "manual", payload: { prompt: b.prompt, material: b.material || undefined, images, sites: b.sites || undefined } });
+  const row = queue.enqueue({ kind: b.kind === "vision" ? "text" : b.kind, label: b.label || "手动任务", ownerType: b.ownerType === "project" ? "project" : "manual", ownerId: b.ownerType === "project" ? String(b.ownerId || "") : "manual", payload: { prompt: b.prompt, material: b.material || undefined, images, sites: Array.isArray(b.sites) && b.sites.length ? b.sites.filter((x) => SITE_NAMES[x]) : undefined, role: queue.MODULES[b.role] ? b.role : undefined, rotate: Number(b.rotate) || undefined } });
   return c.json({ ok: true, id: row.id });
 });
 app.get("/api/tasks/:id/result", (c) => c.json({ task: queue.get(Number(c.req.param("id"))), result: queue.rawResult(Number(c.req.param("id"))) }));
