@@ -13,6 +13,9 @@ import * as dstore from "./detail/store.js";
 import * as auto from "./detail/auto.js";
 import * as importer from "./detail/importer.js";
 import * as mainImg from "./main/index.js";
+import { projectName } from "./naming.js";
+import * as lib from "./library.js";
+import * as libsend from "./libsend.js";
 
 export const app = new Hono();
 
@@ -157,8 +160,29 @@ app.get("/api/analyses/:id/report", (c) => {
 });
 
 // ------------------------------------------------------------ 详情页：项目、图片、设置
+// ------------------------------------------------------------ 素材中心
+app.get("/api/library", (c) => c.json(lib.list({ grp: c.req.query("grp") || "", tag: c.req.query("tag") || "", source: c.req.query("source") || "" })));
+// 放一张图进来：请求体就是图片，?grp=&tag=&source=&name=
+app.post("/api/library", async (c) => {
+  const buf = Buffer.from(await c.req.arrayBuffer());
+  if (!buf.length) return c.json({ error: "没有图片" }, 400);
+  if (buf.length > 50 * 1024 * 1024) return c.json({ error: "图片太大（超过 50 MB）" }, 400);
+  try { return c.json({ item: await lib.add(buf, { grp: c.req.query("grp"), tag: c.req.query("tag"), source: c.req.query("source"), name: c.req.query("name") }) }); }
+  catch (e) { return c.json({ error: e.message }, 400); }
+});
+app.get("/api/library/:id/file", (c) => { const r = lib.raw(c.req.param("id")); return r ? sendFile(c, lib.filePath(r), c.req.query("dl") ? { "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(r.name)}` } : {}) : c.text("404", 404); });
+app.get("/api/library/:id/thumb", (c) => { const id = c.req.param("id"); const t = lib.thumbPath(id); if (fs.existsSync(t)) return sendFile(c, t); const r = lib.raw(id); return r ? sendFile(c, lib.filePath(r)) : c.text("404", 404); });
+app.post("/api/library/delete", async (c) => { const b = await c.req.json(); return c.json({ removed: lib.remove(b.ids) }); });
+app.post("/api/library/send", async (c) => { try { return c.json(await libsend.send(await c.req.json())); } catch (e) { return c.json({ error: e.message }, 400); } });
+app.post("/api/library/zip", async (c) => {
+  const b = await c.req.json();
+  const buf = await libsend.zip(b.ids);
+  return new Response(buf, { headers: { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent("素材中心.zip")}` } });
+});
+// 新项目的名字：前缀-名字月-日-序号（三个模块一起数）
+app.post("/api/project-name", async (c) => { const b = await c.req.json().catch(() => ({})); return c.json({ name: projectName(b.kind, b.name) }); });
 // ------------------------------------------------------------ 主图（在服务器上做，网页只发操作）
-app.post("/api/main", async (c) => { const b = await c.req.json().catch(() => ({})); const p = mainImg.newProject(b); dstore.putProject(p); return c.json({ id: p.id, project: dstore.getProject(p.id) }); });
+app.post("/api/main", async (c) => { const b = await c.req.json().catch(() => ({})); const p = mainImg.newProject({ ...b, name: projectName("main", b.name), fixedName: true }); dstore.putProject(p); return c.json({ id: p.id, project: dstore.getProject(p.id) }); });
 app.post("/api/main/:id/op", async (c) => {
   try { const p = await mainImg.op(c.req.param("id"), await c.req.json()); return c.json({ project: p }); }
   catch (e) { return c.json({ error: String(e.message || e) }, 400); }

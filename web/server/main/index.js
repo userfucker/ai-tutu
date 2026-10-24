@@ -15,6 +15,7 @@ import * as Q from "../queue.js";
 import * as store from "../detail/store.js";
 import { getST, kit } from "../detail/runtime.js";
 import { FILES_DIR } from "../config.js";
+import * as lib from "../library.js";
 
 const running = new Set(); // 正在做的“项目:主图/产品”
 const SITE_OK = ["gemini", "copilot"]; // 画图可以临时指定的网站（空 = 按 AI 分工轮流）
@@ -22,7 +23,7 @@ const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "
 
 export function newProject(o = {}) {
   const ST = getST();
-  return { id: ST.uid("m"), kind: "main", name: o.name || `主图 ${ST.bj().slice(5, 16)}`, info: { name: "" }, size: 800, products: [], cur: "", styles: ["studio"], custom: "", customOn: false, count: 1, scale: 0.85, blend: true, mode: "scene", placement: "free", placeRef: "", items: [] }; // 默认 AI 直接画场景（Lee 2026-10-24）
+  return { id: ST.uid("m"), kind: "main", fixedName: !!o.fixedName, name: o.name || `主图 ${ST.bj().slice(5, 16)}`, info: { name: "" }, size: 800, products: [], cur: "", styles: ["studio"], custom: "", customOn: false, count: 1, scale: 0.85, blend: true, mode: "scene", placement: "free", placeRef: "", items: [] }; // 默认 AI 直接画场景（Lee 2026-10-24）
 }
 
 // ------------------------------------------------------------ 改项目（同步：读最新 → 改 → 存）
@@ -229,13 +230,15 @@ export async function op(pid, b) {
   if (!p0 || p0.kind !== "main") throw new Error("没有这个主图项目");
   const iid = b.iid, prid = b.prid;
   switch (b.op) {
-    case "set": return edit(pid, (p) => { for (const k of SET_KEYS) if (k in (b.fields || {})) p[k] = b.fields[k]; });
+    case "set": return edit(pid, (p) => { if ("mode" in (b.fields || {})) p.modeSet = true; for (const k of SET_KEYS) if (k in (b.fields || {}) && !(k === "name" && p.fixedName)) p[k] = b.fields[k]; });
     case "addProduct": {
       const img = await ST.imgOf(b.key);
       if (!img) throw new Error("图片打不开");
       const pr = { id: b.id || ST.uid("pr"), name: String(b.name || "产品图").slice(0, 80), key: b.key, w: img.naturalWidth || img.width, h: img.naturalHeight || img.height, cut: "", cutBox: null, white: "", holes: false, edgeWhite: ST.edgeIsWhite(img), job: "" };
       const p = edit(pid, (q) => { q.products.push(pr); if (!q.cur) q.cur = pr.id; });
       if (pr.edgeWhite) runProduct(pid, pr.id, "direct");
+      // 上传的产品图也放进素材中心（从素材中心发过来的就不用了）
+      if (!b.fromLibrary) { const f = store.getBlob(b.key); if (f) lib.add(f.buf, { grp: p.name, source: "main", tag: "原图", name: pr.name, used: { type: "main", id: pid, name: p.name } }).catch(() => {}); }
       return p;
     }
     case "holes": { const p = editProduct(pid, prid, (pr) => { pr.holes = !!b.holes; }); runProduct(pid, prid, "direct"); return p; }
@@ -274,7 +277,17 @@ export async function op(pid, b) {
       return edit(pid, (p) => { drop(p); p.placeRef = key; p.placeRefName = it.styleName; p.placement = "ref"; p.mode = "scene"; });
     }
     case "view": return editItem(pid, iid, (it) => { if (!it.harm) return false; it.harm.on = !!b.on; });
-    case "accept": return editItem(pid, iid, (it) => { it.state = b.ok ? "ok" : "pending"; });
+    case "accept": {
+      const p = editItem(pid, iid, (it) => { it.state = b.ok ? "ok" : "pending"; });
+      // 采用的主图放进素材中心（按项目的尺寸，和下载的一样）
+      const it = p && b.ok && p.items.find((x) => x.id === iid);
+      if (it) {
+        const c = await ST.mainCompose(p, it, p.size || 800);
+        const buf = Buffer.from(await (await ST.toBlob(c.canvas, "image/jpeg", 0.92)).arrayBuffer());
+        await lib.add(buf, { grp: p.name, source: "main", tag: "主图", name: `${p.name}_${it.styleName}.jpg`, used: { type: "main", id: pid, name: p.name } }).catch(() => {});
+      }
+      return p;
+    }
     case "adjust": {
       const pos = b.pos || {};
       const p = editItem(pid, iid, (it) => { it.pos = { x: ST.clamp(+pos.x || 0.5, 0.05, 0.95), y: ST.clamp(+pos.y || 0.53, 0.05, 0.95), s: ST.clamp(+pos.s || 0.85, 0.2, 0.98) }; });
@@ -300,6 +313,11 @@ export async function op(pid, b) {
 
 /** 服务器启动时：上次没做完的主图接着做 */
 export function resumeAll() {
+  // 主图默认改成“AI 直接画场景”（Lee 2026-10-24）：以前建的项目也改过来（之后手动切换过的会记 modeSet，不再动）
+  if (!store.getMeta("mainModeMig2", false)) {
+    for (const s of store.listProjects("main")) edit(s.id, (p) => { if (p.modeSet) return false; p.mode = "scene"; p.placement = p.placement || "free"; });
+    store.setMeta("mainModeMig2", true);
+  }
   for (const s of store.listProjects("main")) {
     const p = store.getProject(s.id);
     for (const it of p.items || []) if (it.job && !/失败/.test(it.job)) runItem(p.id, it.id, it.what || "full", true);

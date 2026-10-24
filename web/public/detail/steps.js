@@ -18,7 +18,7 @@
       main.innerHTML = `
         <div class="head"><div><h1>① 新建项目</h1><div class="muted">选平台、语言和风格。这些以后随时可以回来改。</div></div><div class="sp"><button class="primary" data-go="assets">下一步：上传素材 →</button></div></div>
         <div class="card"><div class="form">
-          <label class="f">项目名称<input id="fName" value="${esc(p.name)}"></label>
+          <label class="f">项目名称<input id="fName" value="${esc(p.name)}" ${p.fixedName ? 'readonly title="项目名称建好以后不能改"' : ""}></label>
           <label class="f">主语言（AI 先用这个语言写文案）<select id="fLang">${ST.LANGS.map((l) => `<option value="${l.code}" ${l.code === p.lang ? "selected" : ""}>${esc(l.name)}（${esc(l.native)}）</option>`).join("")}</select></label>
           <label class="f">品牌<span class="row nw"><select id="fBrand" class="grow"><option value="">不用品牌（用风格默认配色）</option>${APP.brands.map((b) => `<option value="${b.id}" ${b.id === p.brandId ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select><button class="sm" data-act="settings">管理品牌</button></span></label>
           <label class="f">单位显示<select id="fUnits"><option value="auto">自动（英语显示公制+英制，其他公制）</option><option value="metric">公制（cm、kg）</option><option value="imperial">英制（in、lb）</option><option value="both">都显示</option></select></label>
@@ -41,7 +41,7 @@
         APP.render();
       };
       main.oninput = (e) => {
-        if (e.target.id === "fName") { p.name = e.target.value || "未命名"; document.getElementById("projName").value = p.name; }
+        if (e.target.id === "fName" && !p.fixedName) { p.name = e.target.value || "未命名"; document.getElementById("projName").value = p.name; }
         APP.save();
       };
       main.onchange = (e) => {
@@ -73,6 +73,7 @@
         const key = `${p.id}:${id}-orig`;
         await ST.saveImage(key, blob);
         const white = ST.edgeIsWhite(img);
+        if (!o.fromLibrary) APP.toLibrary(blob, { tag: "原图", name: f.name || "" }); // 上传的图也放进素材中心
         p.assets.push({ id, name: f.name || "图片", tag: o.tag || (white ? "white" : "other"), note: o.note || "", group: o.group ? o.group(f) : "", key, w: img.naturalWidth, h: img.naturalHeight, white: "", cut: "", cutBox: null, edgeWhite: white });
         n++;
       } catch (e) { APP.toast(`${f.name} 打不开：${e.message}`, true); }
@@ -254,7 +255,7 @@
       }));
       main.innerHTML = `
         <div class="head"><div><h1>② 素材</h1><div class="muted">上传产品图，给每张图打标签（程序靠标签决定哪张图放进哪一屏）。产品要贴到背景上，所以白底主图、角度图、规格图最好都抠成透明底。</div></div>
-          <div class="sp"><button data-act="pickFiles">上传图片</button><button data-act="pickTaobao">从淘宝采集导入</button><button class="blue" data-act="cutAll" ${p.assets.some((a) => !a.cut && ["white", "angle", "spec", "package"].includes(a.tag)) ? "" : "disabled"}>全部抠图</button><button class="primary" data-go="info">下一步：产品信息 →</button></div></div>
+          <div class="sp"><button data-act="pickLib">从素材中心选</button><button data-act="pickFiles">上传图片</button><button data-act="pickTaobao">从淘宝采集导入</button><button class="blue" data-act="cutAll" ${p.assets.some((a) => !a.cut && ["white", "angle", "spec", "package"].includes(a.tag)) ? "" : "disabled"}>全部抠图</button><button class="primary" data-go="info">下一步：产品信息 →</button></div></div>
         ${await APP.pendingHtml()}
         ${p.assets.length ? `<div class="assets">${cards.join("")}</div>` : `<div class="empty" id="dropZone">把图片拖到这里，或者点“上传图片”，或者按 Ctrl+V 粘贴<br><span class="muted">白底主图、多角度图、细节图、规格图（每个颜色一张）、包装图、真实场景图都可以</span></div>`}
         <div class="note" style="margin-top:14px">“全部抠图”：白底图直接去白底，背景复杂的图交给 AI 先出白底图再去白底。白色、透明、反光的产品边缘可能抠不干净，可以点“修边”手动处理。</div>
@@ -285,6 +286,18 @@
     },
     act: {
       pickFiles: () => document.getElementById("assetInput").click(),
+      pickLib: async () => {
+        const list = await LIB.pick({ title: "从素材中心选素材" });
+        if (!list || !list.length) return;
+        const TAG = { 白底图: "white", SKU图: "spec", 主图: "angle" };
+        let n = 0;
+        for (const x of list) {
+          const b = await LIB.blob(x.id);
+          n += await APP.addAssetFiles([new File([b], x.name, { type: b.type })], { fromLibrary: true, tag: TAG[x.tag] });
+        }
+        APP.toast(`从素材中心放进来 ${n} 张`);
+        APP.render();
+      },
       pickTaobao: () => document.getElementById("tbInput").click(),
       cutAi: (el) => APP.cutAsset(P().assets.find((x) => x.id === el.closest("[data-aid]").dataset.aid), "ai"),
       cutDirect: (el) => APP.cutAsset(P().assets.find((x) => x.id === el.closest("[data-aid]").dataset.aid), "direct"),
@@ -317,12 +330,20 @@
       },
     },
   };
+  // Ctrl+V：② 素材里粘贴 = 加素材，④ 参考详情图里粘贴 = 加参考图（Lee 2026-10-24）
   document.addEventListener("paste", async (e) => {
-    if (APP.step !== "assets" || !APP.project || /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
-    const fl = [...(e.clipboardData && e.clipboardData.files) || []];
+    if (!APP.project || /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+    const fl = [...(e.clipboardData && e.clipboardData.files) || []].filter((f) => /^image\//.test(f.type));
     if (!fl.length) return;
-    const n = await APP.addAssetFiles(fl);
-    if (n) { APP.toast(`粘贴了 ${n} 张图`); APP.render(); }
+    if (APP.step === "assets") {
+      const n = await APP.addAssetFiles(fl);
+      if (n) { APP.toast(`粘贴了 ${n} 张图`); APP.render(); }
+    } else if (APP.step === "ref") {
+      e.preventDefault();
+      await APP.setRefImages(fl);
+      APP.toast(`粘贴了 ${fl.length} 张参考图`);
+      APP.render();
+    }
   });
 
   // ================================================================ ③ 产品信息和卖点
@@ -464,14 +485,14 @@
       const p = P();
       if (!p.ref) {
         main.innerHTML = `<div class="head"><div><h1>④ 参考详情图（可选）</h1><div class="muted">导入一套别人的详情页（长图或多张图），自动切成一屏一屏，AI 学它的排版顺序和风格。只学排版，不用它的图片和文字。</div></div><div class="sp"><button class="primary" data-go="outline">跳过，下一步：提纲 →</button></div></div>
-          <div class="empty" id="refDrop">把参考详情图拖到这里（可以多张，按顺序拼起来），或者 <button data-act="refPick">选择图片</button><br><span class="muted">淘宝采集插件导出的 zip 里的“详情图”，可以在“② 素材 → 从淘宝采集导入”里直接导进来</span></div>
+          <div class="empty" id="refDrop">把参考详情图拖到这里（可以多张，按顺序拼起来），或者 <button data-act="refPick">选择图片</button> / <button data-act="refLib">从素材中心选</button>，或者按 Ctrl+V 粘贴<br><span class="muted">淘宝采集插件导出的 zip 里的“详情图”，可以在“② 素材 → 从淘宝采集导入”里直接导进来</span></div>
           <input type="file" id="refInput" accept="image/*" multiple hidden>`;
       } else {
         const url = await ST.urlOf(p.ref.key);
         const seg = await segments(p);
         const an = p.ref.analysis || [];
         main.innerHTML = `<div class="head"><div><h1>④ 参考详情图</h1><div class="muted">红色虚线是切线：点图片空白处加一条，拖动调整位置，点 ✕ 删除。切好以后让 AI 分析每一屏。</div></div>
-          <div class="sp"><button data-act="refPick">换参考图</button><button data-act="refAuto">重新自动切</button><button class="danger" data-act="refClear">不用参考图</button><button class="blue" data-act="refAnalyze">AI 分析每一屏</button><button class="primary" data-act="refToOutline" ${an.length ? "" : "disabled"}>按参考图列提纲 →</button></div></div>
+          <div class="sp"><button data-act="refLib">从素材中心选</button><button data-act="refPick">换参考图</button><button data-act="refAuto">重新自动切</button><button class="danger" data-act="refClear">不用参考图</button><button class="blue" data-act="refAnalyze">AI 分析每一屏</button><button class="primary" data-act="refToOutline" ${an.length ? "" : "disabled"}>按参考图列提纲 →</button></div></div>
           <div class="refwrap"><div class="refbox" id="refBox"><img src="${url}" id="refImg" draggable="false">${p.ref.cuts.map((y, n) => `<div class="cut" data-cut="${n}" style="top:${(y / p.ref.h) * 100}%"><span class="n">${n + 2}</span><span class="x" data-delcut="${n}">✕</span></div>`).join("")}</div>
           <div class="seglist">${seg.urls.map((u, n) => { const a = an[n]; return `<div class="seg"><img src="${u}"><div class="col"><b>第 ${n + 1} 屏${a ? ` · ${esc(a.purpose || "")}` : ""}</b>${a ? `<span class="row"><span class="tag blue">${esc((ST.TPL[a.template] || {}).name || a.template || "")}</span>${(a.colors || []).map((c) => `<span title="${esc(c)}" style="width:14px;height:14px;border-radius:3px;display:inline-block;background:${esc(c)};border:1px solid var(--line)"></span>`).join("")}</span><span class="muted">${esc(a.layout || "")}</span><span class="muted">${esc(a.style || "")}</span>` : '<span class="muted">还没分析</span>'}</div></div>`; }).join("")}</div></div>
           <input type="file" id="refInput" accept="image/*" multiple hidden>`;
@@ -522,6 +543,14 @@
     },
     act: {
       refPick: () => document.getElementById("refInput").click(),
+      refLib: async () => {
+        const list = await LIB.pick({ title: "从素材中心选参考详情图（按选的顺序拼起来）" });
+        if (!list || !list.length) return;
+        const fl = [];
+        for (const x of list) { const b = await LIB.blob(x.id); fl.push(new File([b], x.name, { type: b.type })); }
+        await APP.setRefImages(fl);
+        APP.render();
+      },
       refAuto: async () => {
         const p = P();
         const img = await ST.imgOf(p.ref.key);

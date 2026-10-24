@@ -5,6 +5,7 @@
  */
 import { getST } from "./runtime.js";
 import * as store from "./store.js";
+import { projectName } from "../naming.js";
 
 export function newProject(o = {}) {
   const ST = getST();
@@ -58,7 +59,8 @@ export async function importZip(buf, o = {}) {
   const imgs = files.filter((f) => f.name.startsWith(root) && ST.isImageName(f.name)).sort((a, b) => a.name.localeCompare(b.name, "zh", { numeric: true }));
   const inDir = (re) => imgs.filter((f) => re.test(rel(f)));
   const title = data && data.item && data.item.title;
-  const p = newProject({ ...o, name: o.name || (title ? title.slice(0, 30) : "") || (root ? root.replace(/\/$/, "").split("/").pop() : "") || undefined });
+  const p = newProject({ ...o, name: projectName("detail", o.name || (title ? title.slice(0, 20) : "") || (root ? root.replace(/\/$/, "").split("/").pop() : "")) });
+  p.fixedName = true; // 新规则的名字，不能改
   const known = /^(主图|3比4主图|SKU图|我选的图片|详情图[^/]*)\//;
   const main = inDir(/^主图\//), main34 = inDir(/^3比4主图\//), picked = inDir(/^我选的图片\//), sku = inDir(/^SKU图\//);
   const desc = inDir(/^详情图[^/]*\//);

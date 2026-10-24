@@ -78,6 +78,8 @@
           const r = await ST.exportZip(p, { langs: X.langs, platforms: X.pfs, long: X.long, slices: X.slices, texts: X.texts, format: X.format, brand: APP.brandOf(),
             onProgress: (msg, v) => { X.msg = msg; X.progress = v; const bar = document.querySelector(".progress i"); if (bar) bar.style.width = Math.round(v * 100) + "%"; const m = document.querySelector('[data-act="xExport"] + .muted'); if (m) m.textContent = msg; } });
           APP.download(r.blob, `详情页_${ST.safeName(p.name, 30)}_${ST.stamp()}.zip`);
+          // 长图放进素材中心（详情图）
+          for (const f of r.files.filter((x) => /\/长图(-\d+)?\.\w+$/.test(x.name)).slice(0, 4)) APP.toLibrary(f.blob, { tag: "详情图", name: `${p.name}_${f.name.split("/").slice(-3).join("_")}` });
           X.msg = `导出完成：${r.count} 个文件${r.notes.length ? `，${r.notes.length} 张超过大小限制（见 zip 里的“注意.txt”）` : ""}`;
         } catch (e) { X.msg = "导出失败：" + e.message; APP.toast(X.msg, true); }
         X.exporting = false;

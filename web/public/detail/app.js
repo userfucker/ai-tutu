@@ -78,8 +78,14 @@ var APP = (globalThis.APP = {
   };
 
   // ------------------------------------------------------------ 项目
+  /** 新项目的名字：问用户起个名字，服务器加上“详情图-”和“月-日-序号”（Lee 2026-10-24），取消返回 null */
+  APP.askProjectName = async (tip) => {
+    const n = await APP.ask(`新项目名称${tip ? "（" + tip + "）" : ""}：只填名字，比如“钱包”，会自动变成“详情图-钱包10-24-1”，建好以后不能改`, "", "如：钱包");
+    if (n === null) return null;
+    return (await APP.api("POST", "/api/project-name", { kind: "detail", name: n })).name;
+  };
   APP.newProject = (o = {}) => ({
-    id: ST.uid("p"), name: o.name || `新项目 ${ST.bj().slice(5)}`, created: Date.now(), updated: Date.now(),
+    id: ST.uid("p"), name: o.name || `新项目 ${ST.bj().slice(5)}`, fixedName: !!o.fixedName, created: Date.now(), updated: Date.now(),
     platform: "taobao-m", platforms: ["taobao-m"], lang: "zh-CN", langs: [], tone: "minimal", brandId: "", units: "auto",
     assets: [], info: { name: "", category: "", brand: "", material: "", size: "", weight: "", colors: "", package: "", audience: "", scenes: "", extra: "", params: [], dims: { l: "", w: "", h: "", unit: "cm" }, tr: {} },
     points: [], reviews: { raw: "", concerns: [] }, ref: null, screens: [], style: { styleRef: "" },
@@ -148,12 +154,13 @@ var APP = (globalThis.APP = {
     $("steps").innerHTML = p && APP.step !== "home" ? STEPS.map(([id, name], i) => `<button data-go="${id}" class="${APP.step === id ? "on" : ""}"><b>${i ? "①②③④⑤⑥⑦"[i - 1] : "⚡"}</b>${name}</button>`).join("") : "";
     $("projName").hidden = !p || APP.step === "home";
     if (p && document.activeElement !== $("projName")) $("projName").value = p.name;
+    if (p) { $("projName").readOnly = !!p.fixedName; $("projName").title = p.fixedName ? "项目名称建好以后不能改" : ""; }
     const view = APP.steps[APP.step] || APP.steps.home;
     $("main").className = view.wide ? "wide" : "";
     view.render($("main"));
     document.title = p && APP.step !== "home" ? `${p.name} · 详情页` : "详情页 · AI图图 工作台";
   };
-  $("projName").addEventListener("input", () => { if (APP.project) { APP.project.name = $("projName").value || "未命名"; APP.save(); } });
+  $("projName").addEventListener("input", () => { if (APP.project && !APP.project.fixedName) { APP.project.name = $("projName").value || "未命名"; APP.save(); } });
   document.addEventListener("click", (e) => {
     const g = e.target.closest("[data-go]");
     if (g && !g.closest("#modal")) { APP.go(g.dataset.go); return; }
@@ -371,7 +378,11 @@ var APP = (globalThis.APP = {
       };
     },
     act: {
-      newProj: async () => { APP.project = APP.newProject(); APP.undo = []; APP.redo = []; await APP.save(true); APP.go("setup"); },
+      newProj: async () => {
+        const name = await APP.askProjectName();
+        if (name === null) return;
+        APP.project = APP.newProject({ name, fixedName: true }); APP.undo = []; APP.redo = []; await APP.save(true); APP.go("setup");
+      },
       openProj: (el) => APP.open(el.dataset.id),
       delProj: async (el) => {
         const p = await ST.db.getProject(el.dataset.id);
@@ -383,8 +394,8 @@ var APP = (globalThis.APP = {
       },
       copyProj: async (el) => {
         const src = await ST.db.getProject(el.dataset.id);
-        const name = await APP.ask("新项目名称（排版、背景、风格都沿用，素材和文案换成新产品的）", src.name.replace(/（.*?）$/, "") + "（新产品）");
-        if (!name) return;
+        const name = await APP.askProjectName("排版、背景、风格都沿用，素材和文案换成新产品的");
+        if (name === null) return;
         const p = await APP.cloneLayout(src, name);
         APP.toast("已复制，接下来上传新产品的素材");
         APP.project = p;
@@ -447,7 +458,7 @@ var APP = (globalThis.APP = {
 
   /** 复制排版到一个新项目：屏幕结构、背景图、调整、风格保留；素材、产品信息、文案清空 */
   APP.cloneLayout = async (src, name) => {
-    const p = APP.newProject({ name });
+    const p = APP.newProject({ name, fixedName: true });
     Object.assign(p, { platform: src.platform, platforms: [...src.platforms], lang: src.lang, langs: [...src.langs], tone: src.tone, brandId: src.brandId, units: src.units });
     for (const sc of src.screens) {
       const n = ST.newScreen(sc.tpl);
@@ -471,6 +482,12 @@ var APP = (globalThis.APP = {
     return p;
   };
 
+  /** 放进素材中心（不等结果，失败也不打扰） */
+  APP.toLibrary = (blob, o = {}) => {
+    const p = APP.project;
+    const q = new URLSearchParams({ grp: o.grp || (p && p.name) || "详情页", tag: o.tag || "原图", source: "detail", name: o.name || "" });
+    return fetch("/api/library?" + q, { method: "POST", body: blob, credentials: "same-origin" }).catch(() => {});
+  };
   APP.download = (blob, name) => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);

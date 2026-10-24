@@ -59,7 +59,7 @@ var ST = globalThis.ST || (globalThis.ST = {});
     const out = await ai.image(ST.P.harmonize(p, ratio), [{ blob: baseBlob, name: "原图.jpg" }], `融入背景：${what}`, 0);
     const cv = await fit(out, W, H);
     const blob = await ST.toBlob(cv, "image/jpeg", 0.92);
-    if (!o.judge) return { ok: true, blob, choice: "ai", why: "", note: "" }; // 不自动审核（Lee 2026-10-24）：直接用 AI 图，要审核点“AI 审核”
+    if (!o.judge) return { ok: true, blob, choice: "ai", judged: false, why: "", note: "" }; // 不自动审核（Lee 2026-10-24）：直接用 AI 图，要审核点“AI 审核”
     const box = b ? { x: Math.max(0, b.x), y: Math.max(0, b.y), w: Math.max(4, Math.min(W - Math.max(0, b.x), b.w)), h: Math.max(4, Math.min(H - Math.max(0, b.y), b.h)) } : null;
     const diff = box ? ST.regionDiff(canvas, cv, box) : { shape: 0, color: 0 };
     return { ok: true, blob, ...(await ST.pickBetter(p, baseBlob, blob, ai, what, diff.shape > GROSS_SHAPE || diff.color > GROSS_COLOR)) };
@@ -106,7 +106,7 @@ var ST = globalThis.ST || (globalThis.ST = {});
     await ST.saveImage(key, res.blob);
     const old = sc.harm && sc.harm.key;
     if (old && old !== key) { ST.forget && ST.forget(old); ST.db.delBlob(old); }
-    sc.harm = { key, sig: r.harm.sig, on: res.choice === "ai", status: "ok", choice: res.choice, why: res.why, note: res.note, t: Date.now() };
+    sc.harm = { key, sig: r.harm.sig, on: res.choice === "ai", status: "ok", ...(res.judged === false ? {} : { choice: res.choice, why: res.why }), note: res.note, t: Date.now() }; // 没审核就不写“审核选了…”
     return { ok: true, choice: res.choice, why: res.why, note: res.note };
   };
 })();

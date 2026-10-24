@@ -72,6 +72,8 @@
 
   // ------------------------------------------------------------ 融入背景（B 方式）
   /** 融入一屏：程序贴好的图交给 AI 调光影，检查产品没变样；i = 一批里的第几个（Gemini / Copilot 轮流） */
+  /** 等 AI 的时候项目可能被重新读过（服务器推送）：结果写到现在这份项目里的同一屏 */
+  const liveCopy = (sc) => { const live = P() && P().screens.find((x) => x.id === sc.id); if (live && live !== sc) live.harm = sc.harm; };
   APP.harmScreen = async (sc, i = 0, quiet) => {
     const p = P();
     if (/排队|中/.test(hgen.get(sc.id) || "")) return;
@@ -86,6 +88,7 @@
         image: (prompt, imgs, label, n) => { hgen.set(sc.id, n ? "融入：重做中" : "融入中"); refresh(); return APP.aiImage(prompt, imgs.map((x) => ({ ...x, max: 1536 })), label, { role: "dt_blend", sites, rotate: i + n }); },
         json: (prompt, imgs, label) => { hgen.set(sc.id, "融入：检查中"); refresh(); return APP.aiJson(prompt, imgs.map((x) => ({ ...x, max: 1024 })), label, { role: "dt_check", rotate: i }); },
       });
+      liveCopy(sc);
       hgen.delete(sc.id);
       await APP.save(true);
       if (r.ok) APP.toast(`第 ${no} 屏融入背景完成：${ST.harmText(sc.harm)}`, !!r.note);
@@ -103,6 +106,7 @@
     refresh();
     try {
       const r = await ST.judgeScreen(p, sc, { json: (prompt, imgs, label) => APP.aiJson(prompt, imgs.map((x) => ({ ...x, max: 1024 })), label, { role: "dt_check" }) });
+      liveCopy(sc);
       hgen.delete(sc.id);
       await APP.save(true);
       APP.toast(`第 ${p.screens.indexOf(sc) + 1} 屏：${ST.harmText(sc.harm)}`, !!r.note);

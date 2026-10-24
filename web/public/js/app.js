@@ -36,6 +36,7 @@ var W = (globalThis.W = { pages: {}, status: null, cur: null, params: [] });
   };
   W.modal = (title, html, o = {}) => new Promise((resolve) => {
     const wrap = $("modalWrap"), m = $("modal");
+    m.className = o.big ? "big" : "";
     m.innerHTML = `<div class="mh"><h2>${W.esc(title)}</h2><button class="ghost sp" data-ret="">✕</button></div>${html}`;
     wrap.hidden = false;
     const done = (v) => { wrap.hidden = true; m.innerHTML = ""; m.onclick = null; resolve(v); };
@@ -63,8 +64,9 @@ var W = (globalThis.W = { pages: {}, status: null, cur: null, params: [] });
   // ------------------------------------------------------------ 路由：#/页面/参数
   W.go = (hash) => { if (location.hash === hash) W.render(); else location.hash = hash; };
   W.render = async () => {
-    const parts = (location.hash.replace(/^#\/?/, "") || "analysis").split("/");
-    const name = W.pages[parts[0]] ? parts[0] : "analysis";
+    const first = (document.querySelector("#nav a[data-nav]") || {}).dataset?.nav || "analysis"; // 没指定页面：打开左边第一个
+    const parts = (location.hash.replace(/^#\/?/, "") || first).split("/");
+    const name = W.pages[parts[0]] ? parts[0] : first;
     W.cur = name;
     W.params = parts.slice(1).map(decodeURIComponent);
     document.querySelectorAll("#nav a").forEach((a) => a.classList.toggle("on", a.dataset.nav === name));
@@ -90,7 +92,7 @@ var W = (globalThis.W = { pages: {}, status: null, cur: null, params: [] });
   W.connectEvents = () => {
     if (es) es.close();
     es = new EventSource("/api/events");
-    for (const type of ["status", "task", "analysis", "project"]) {
+    for (const type of ["status", "task", "analysis", "project", "library"]) {
       es.addEventListener(type, (ev) => { let d; try { d = JSON.parse(ev.data); } catch { return; } (handlers[type] || []).forEach((fn) => fn(d)); });
     }
     es.onerror = () => { /* 浏览器会自动重连 */ };

@@ -14,6 +14,7 @@ import * as Q from "../queue.js";
 import * as store from "./store.js";
 import { getST, kit } from "./runtime.js";
 import { FILES_DIR } from "../config.js";
+import * as lib from "../library.js";
 
 export const STEPS = ["识别素材", "抠图", "卖点", "参考图", "提纲和文案", "背景", "检查背景", "融入背景", "翻译", "检查修正", "导出"];
 const running = new Map(); // 项目编号 → { stop }
@@ -323,6 +324,12 @@ async function exportProject(p) {
   const ST = getST();
   ST.platformOverrides = (store.getMeta("settings", {}) || {}).platformOverrides || {};
   const r = await ST.exportZip(p, { langs: [p.lang, ...p.langs], platforms: p.platforms, long: true, slices: true, texts: true, format: "jpeg", brand: brandOf(p) });
+  // 主平台、主语言的长图放进素材中心（详情图）
+  const pf0 = ST.platformOf(p, p.platforms[0]);
+  const dir0 = `${ST.safeName(pf0.name)}_${pf0.w}${pf0.h ? "x" + pf0.h : ""}/${ST.lang(p.lang).name}/长图`;
+  for (const f of r.files.filter((x) => x.name.startsWith(dir0))) {
+    await lib.add(Buffer.from(await f.blob.arrayBuffer()), { grp: p.name, source: "detail", tag: "详情图", name: `${p.name}_${f.name.split("/").pop()}`, used: { type: "detail", id: p.id, name: p.name } }).catch(() => {});
+  }
   const rel = `exports/${p.id}.zip`;
   fs.mkdirSync(path.join(FILES_DIR, "exports"), { recursive: true });
   fs.writeFileSync(path.join(FILES_DIR, rel), Buffer.from(await r.blob.arrayBuffer()));

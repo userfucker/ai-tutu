@@ -275,6 +275,8 @@
     const name = $("projName");
     name.hidden = false;
     if (document.activeElement !== name) name.value = p.name || "";
+    name.readOnly = !!p.fixedName;
+    name.title = p.fixedName ? "项目名称建好以后不能改" : "";
     const prods = await Promise.all((p.products || []).map(async (pr) => {
       const st = pr.job || "";
       return `<div class="mcard ${pr.id === (curProduct() || {}).id ? "cur" : ""}" data-prid="${pr.id}"><div class="pic ${pr.cut ? "checker dark" : ""}" data-act="useProduct"><img src="${await ST.urlOf(pr.cut || pr.key)}" alt="">
@@ -291,9 +293,9 @@
     const pend = p.items.filter((x) => x.state !== "ok"), done = p.items.filter((x) => x.state === "ok");
     $("main").innerHTML = `
       <div class="card"><div class="head"><div><h3>① 产品图</h3><div class="muted">上传白底图（白底的会自动去白底；不是白底的点“AI 抠图”）。抠好的图放在深色格子上，有没有白边一眼能看出来；手腕绳、提手围成的圈里有白色，勾“镂空的白色也抠掉”。</div></div>
-        <div class="sp"><button data-act="addProducts">上传产品图</button></div></div>
+        <div class="sp"><button data-act="fromLib">从素材中心选</button><button data-act="addProducts">上传产品图</button></div></div>
         <label class="row lb" style="margin-bottom:10px">产品名称（可以不填，告诉 AI 这是什么）<input id="pName" value="${esc((p.info && p.info.name) || "")}" placeholder="如：男士保温杯" style="width:240px"></label>
-        ${prods.length ? `<div class="mcards">${prods.join("")}</div>` : '<div class="empty" id="dropZone">把白底图拖到这里，或者点“上传产品图”</div>'}</div>
+        ${prods.length ? `<div class="mcards">${prods.join("")}</div>` : '<div class="empty" id="dropZone">把白底图拖到这里、按 Ctrl+V 粘贴，或者点“上传产品图”“从素材中心选”</div>'}</div>
       <div class="card"><div class="head"><div><h3>② 背景风格</h3><div class="muted">可以多选，每种风格各画几张。</div></div>
         <div class="sp"><button data-act="learnStyle" title="上传一张你喜欢的主图或场景图，AI 识别它的背景风格，存起来以后都能用">上传图片识别风格</button></div></div>
         <div class="lb">预设</div><div class="stypills">${ST.MAIN_STYLES.map((s) => `<span class="stypill noimg ${sel.has(s.id) ? "on" : ""}" data-sty="${s.id}" title="${esc(s.prompt)}">${esc(s.name)}</span>`).join("")}</div>
@@ -324,7 +326,11 @@
   const ACT = {
     home: () => { location.hash = ""; },
     newProj: async () => {
-      const r = await fetch("/api/main", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", credentials: "same-origin" });
+      let name = null;
+      const ok = await APP.modal(`<input id="npName" style="width:100%" placeholder="如：钱包"><div class="muted" style="margin-top:6px">只填名字，会自动变成“主图-钱包10-24-1”（月-日-当天第几个项目），建好以后不能改。</div>
+        <div class="mf"><button data-ret="">取消</button><button class="primary" data-ret="ok">新建</button></div>`, { title: "新建主图项目", onOpen: (m) => { const i = m.querySelector("#npName"); i.focus(); i.onkeydown = (e) => { if (e.key === "Enter") m.querySelector('[data-ret="ok"]').click(); }; }, check: (v, m) => { name = m.querySelector("#npName").value.trim(); } });
+      if (ok !== "ok") return;
+      const r = await fetch("/api/main", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }), credentials: "same-origin" });
       const d = await r.json();
       if (!r.ok) return APP.toast(d.error || "新建失败", true);
       location.hash = "#p=" + d.id;
@@ -336,6 +342,15 @@
       renderHome();
     },
     addProducts: async () => addProducts(await pick("image/*", true)),
+    fromLib: async () => {
+      const list = await LIB.pick({ title: "从素材中心选产品图（白底图最好）" });
+      if (!list || !list.length) return;
+      const r = await fetch("/api/library/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: "main", projectId: P().id, ids: list.map((x) => x.id) }), credentials: "same-origin" });
+      const d = await r.json();
+      if (!r.ok) return APP.toast(d.error || "没放进来", true);
+      APP.toast(`从素材中心放进来 ${list.length} 张`);
+      pull();
+    },
     useProduct: (el) => setFields({ cur: prodOf(el).id }),
     cutAi: (el) => op({ op: "cutAi", prid: prodOf(el).id }),
     delProduct: async (el) => { if (await confirm("删除这张产品图？", "删除", true)) op({ op: "delProduct", prid: prodOf(el).id }); },
@@ -414,7 +429,7 @@
     const p = P();
     if (!p) return;
     const t = e.target;
-    if (t.id === "projName") setSoon({ name: t.value });
+    if (t.id === "projName") { if (!p.fixedName) setSoon({ name: t.value }); }
     else if (t.id === "pName") setSoon({ info: { ...(p.info || {}), name: t.value } });
     else if (t.id === "custom") setSoon({ custom: t.value });
     else if (t.id === "scale") { $("scaleV").textContent = t.value + "%"; setSoon({ scale: +t.value / 100 }); }

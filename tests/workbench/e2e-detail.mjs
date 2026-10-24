@@ -105,6 +105,8 @@ try {
   // 手动流程
   await page.click('[data-act="home"]');
   await page.click('[data-act="newProj"]');
+  await page.fill('#askInput', '背包');
+  await page.click('#modal [data-ret="ok"]');
   await page.waitForSelector('text=① 新建项目');
   await page.click('#steps [data-go="assets"]');
   await page.setInputFiles('#assetInput', { name: '背包.png', mimeType: 'image/png', buffer: fs.readFileSync(imgFile) });

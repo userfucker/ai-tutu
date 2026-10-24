@@ -136,3 +136,20 @@ a.btn.primary { background: var(--ink, #18181b); color: #fff; border-color: tran
 .role.following .lst { opacity: .45; pointer-events: none; }
 .role .follow { font-size: 12.5px; color: var(--sub); }
 .modgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 14px; margin-top: 10px; }
+/* 素材中心 */
+#modal.big { max-width: min(1100px, 96vw); }
+.libwrap { display: flex; gap: 14px; align-items: flex-start; }
+.libgroups { width: 230px; flex: none; padding: 8px; max-height: 78vh; overflow-y: auto; position: sticky; top: 10px; }
+.lgi { padding: 7px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; display: flex; flex-direction: column; gap: 1px; word-break: break-all; }
+.lgi:hover { background: var(--soft); }
+.lgi.on { background: #eef4ff; color: #1d4ed8; font-weight: 600; }
+.libbar { margin-bottom: 10px; padding: 8px 10px; background: var(--soft); border-radius: 10px; }
+.libgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.lit { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 8px; position: relative; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+.lit.on { border-color: #2563eb; box-shadow: 0 0 0 2px #dbe7ff; }
+.lit .lck { position: absolute; left: 12px; top: 12px; width: 18px; height: 18px; z-index: 1; }
+.lit .lpic { aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: #f2f3f5; cursor: zoom-in; }
+.lit .lpic img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.lit .lname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.lit .lused a { color: #2563eb; }
+@media (max-width: 760px) { .libwrap { flex-direction: column; } .libgroups { width: 100%; position: static; max-height: 200px; } }

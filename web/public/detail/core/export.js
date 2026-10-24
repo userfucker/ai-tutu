@@ -98,7 +98,7 @@ ST.exportZip = async (project, o) => {
   }
   if (notes.length) files.push({ name: "注意.txt", blob: new Blob(["﻿以下图片压到最低质量还是超过平台大小限制，上传前请检查：\r\n" + notes.join("\r\n")], { type: "text/plain" }) });
   if (o.onProgress) o.onProgress("打包 zip…", 1);
-  return { blob: await ST.makeZip(files), notes, count: files.length };
+  return { blob: await ST.makeZip(files), notes, count: files.length, files };
 };
 
 /** 项目备份：project.json + 所有图片 */

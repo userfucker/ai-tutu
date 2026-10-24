@@ -63,7 +63,11 @@ try {
   await page.click('a[href="/main/"]');
   await page.waitForSelector('[data-act="newProj"]');
   await page.click('[data-act="newProj"]');
+  await page.fill('#npName', '钱包');
+  await page.click('#modal [data-ret="ok"]');
   await page.waitForSelector('text=① 产品图');
+  const md = (() => { const d = new Date(Date.now() + 8 * 3600e3); return `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`; })();
+  check('新建项目：名字是“主图-钱包月-日-1”，不能改', (await page.inputValue('#projName')) === `主图-钱包${md}-1` && (await page.getAttribute('#projName', 'readonly')) !== null, await page.inputValue('#projName'));
   const fc = page.waitForEvent('filechooser');
   await page.click('[data-act="addProducts"]');
   await (await fc).setFiles({ name: '白底.png', mimeType: 'image/png', buffer: product('#ffffff') });
@@ -201,6 +205,34 @@ try {
   const detailList = await api('GET', '/api/projects');
   const mainList = await api('GET', '/api/projects?kind=main');
   check('主图项目和详情页项目分开', detailList.list.length === 0 && mainList.list.length === 1 && mainList.list[0].done === 1, JSON.stringify(mainList.list));
+  // 素材中心：上传的产品图、采用的主图都自动放进来了
+  await page.goto(BASE + '/#/library');
+  await page.waitForSelector('.lit');
+  const libAll = (await api('GET', '/api/library')).items;
+  check('素材中心：产品图（原图）和采用的主图自动放进来了', libAll.some((x) => x.tag === '原图' && x.source === 'main') && libAll.some((x) => x.tag === '主图' && x.source === 'main'));
+  check('素材中心：每张图显示尺寸和文件大小，上面显示一共多大', /\d+×\d+ · \d+(\.\d)? (KB|MB)/.test(await page.textContent('.lit')) && /一共 \d+ 张 · 占/.test(await page.textContent('.head')));
+  const fc3 = page.waitForEvent('filechooser');
+  await page.click('[data-act="upload"]');
+  await (await fc3).setFiles({ name: '新产品.png', mimeType: 'image/png', buffer: product('#ffffff') });
+  await page.waitForFunction((n) => document.querySelectorAll('.lit').length === n + 1, libAll.length);
+  check('素材中心：上传图片', true);
+  await page.click('.lit:has-text("新产品.png") .lck');
+  await page.waitForSelector('.libbar:has-text("已选 1 张")');
+  await page.click('[data-act="toDetail"]');
+  await page.fill('#lsName', '新产品');
+  await page.click('#libLayer [data-ret="ok"]');
+  await page.waitForSelector('#libLayer:has-text("已经放进")');
+  await page.click('#libLayer [data-ret=""]');
+  const dl3 = (await api('GET', '/api/projects')).list;
+  check('素材中心：发送到详情页（新建项目“详情图-新产品…”）', dl3.length === 1 && /^详情图-新产品\d\d-\d\d-2$/.test(dl3[0].name) && dl3[0].assets === 1, JSON.stringify(dl3.map((x) => x.name)));
+  await page.screenshot({ path: path.join(out, '5-library.png'), fullPage: true });
+  await page.waitForSelector('.libbar:has-text("已选 1 张")'); // 发完还选着
+  await page.click('[data-act="del"]');
+  await page.click('#modal [data-ret="yes"]');
+  await page.waitForFunction((n) => document.querySelectorAll('.lit').length === n, libAll.length);
+  check('素材中心：批量删除', true);
+  await api('DELETE', `/api/projects/${dl3[0].id}`);
+
   // 工作台“主图”列表：点名称打开，后面只有“删除”
   await page.goto(BASE + '/#/main');
   await page.waitForSelector('td a[href^="/main/#p="]');
