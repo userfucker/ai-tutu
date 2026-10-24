@@ -39,6 +39,11 @@ export function summary(p) {
     const pr = (p.products || []).find((x) => x.id === p.cur) || (p.products || [])[0];
     return { id: p.id, kind: "main", name: p.name, updated: p.updated, created: p.created, rev: p.rev || 0, size: p.size, firstAsset: pr ? pr.cut || pr.key : "", items: (p.items || []).length, done: (p.items || []).filter((x) => x.state === "ok").length };
   }
+  if (p.kind === "cutout") { // 抠白底图项目
+    const f = (p.files || [])[0];
+    const done = (p.jobs || []).filter((j) => j.status === "done");
+    return { id: p.id, kind: "cutout", name: p.name, updated: p.updated, created: p.created, rev: p.rev || 0, files: (p.files || []).length, done: done.length, running: (p.jobs || []).filter((j) => j.status === "queued" || j.status === "running").length, firstAsset: done[0] ? done[0].outKey : f ? f.curKey || f.key : "" };
+  }
   return {
     id: p.id, kind: "detail", name: p.name, updated: p.updated, created: p.created, platform: p.platform, platforms: p.platforms, lang: p.lang, langs: p.langs,
     screens: (p.screens || []).length, assets: (p.assets || []).length, thumb: p.thumb || "", rev: p.rev || 0,

@@ -66,6 +66,13 @@ class Bridge extends EventEmitter {
         return;
       }
       if (m.type === "progress") { const p = conn.pending.get(m.id); if (p && p.onProgress) p.onProgress(m); return; }
+      // 插件把图片发到素材中心（淘宝采集、AI图图 插件）：交给 library 处理，回 libraryResult
+      if (m.type === "library") {
+        const reply = (data) => { try { ws.send(JSON.stringify({ type: "libraryResult", id: m.id, ...data })); } catch {} };
+        if (!this.listenerCount("library")) return reply({ ok: false, error: "工作台不收图片" });
+        this.emit("library", { app: conn.app, name: conn.name, items: m.items || [], reply });
+        return;
+      }
       if (m.type === "result") {
         const p = conn.pending.get(m.id);
         if (!p) return;

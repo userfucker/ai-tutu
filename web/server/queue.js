@@ -55,6 +55,8 @@ export const MODULES = {
   dt_blend: { name: "产品融入背景（画图）", group: "详情页", follow: "image" },
   // 审核（原贴图和 AI 图哪张好）：默认只用豆包，豆包没连上直接报错，不换别的 AI（Lee 2026-10-24：省 AI 次数）。follow read = ai-web 1.4.0 起能发图片
   dt_check: { name: "审核融入的图（看图，默认豆包）", group: "详情页", follow: "read", def: ["doubao"], noWait: true },
+  // 抠白底图（网页版，Lee 2026-10-24）
+  ct_draw: { name: "抠白底 / 精修出图（画图）", group: "抠白底图", follow: "image" },
   // 主图（Lee 2026-10-23）
   mn_style: { name: "识别背景风格（看图）", group: "主图", follow: "vision" },
   mn_cut: { name: "AI 抠图（画图）", group: "主图", follow: "image" },
@@ -329,7 +331,7 @@ async function run(row, payload, conn, site) {
     } else if (conn.app === "aitutu") {
       const prompt = payload.material ? `${payload.prompt}\n\n【材料】\n${payload.material}` : payload.prompt;
       const kind = row.kind === "image" ? "image" : "text";
-      r = await bridge.call(conn.id, site, "run", { kind, prompt, images: readImages(payload.images), newChat: payload.newChat !== false }, { timeout: 15 * 60000, onProgress });
+      r = await bridge.call(conn.id, site, "run", { kind, prompt, images: readImages(payload.images), newChat: payload.newChat !== false, model: site === "gemini" && payload.model ? payload.model : undefined }, { timeout: 15 * 60000, onProgress });
       if (r.ok && kind === "image") {
         const ext = /png/.test(r.data.mime || "") ? "png" : "jpg";
         const rel = `tasks/${row.id}.${ext}`;

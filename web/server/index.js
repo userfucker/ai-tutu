@@ -9,6 +9,8 @@ import { broadcast } from "./events.js";
 import * as analysis from "./analysis/pipeline.js";
 import * as detailAuto from "./detail/auto.js";
 import * as mainImg from "./main/index.js";
+import * as cutout from "./cutout/index.js";
+import * as lib from "./library.js";
 import * as queue from "./queue.js";
 
 const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST });
@@ -27,6 +29,9 @@ console.log(`  数据目录：${DATA_DIR}`);
 analysis.resumeAll();
 detailAuto.resumeAll();
 mainImg.resumeAll();
+cutout.resumeAll();
+// 插件发来的图片 → 素材中心
+bridge.on("library", ({ app, items, reply }) => { lib.addFromPlugin(app, items).then((r) => reply({ ok: true, ...r }), (e) => reply({ ok: false, error: String(e.message || e) })); });
 queue.tick();
 
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { console.log("正在停止…"); server.close(); process.exit(0); });

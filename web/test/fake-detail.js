@@ -59,7 +59,7 @@ function answer(badBg, prompt, nImages, harmBad) {
   return { text: "好的：\n```json\n" + JSON.stringify(out) + "\n```", codes: [JSON.stringify(out)] };
 }
 const aiImage = (prompt, images, harmBad) => {
-  if (/isolated on a pure white background/.test(prompt) || /different camera angle/.test(prompt)) return product("#ffffff");
+  if (/isolated on a pure white background/.test(prompt) || /different camera angle/.test(prompt) || /a refined e-commerce product photo/.test(prompt)) return product("#ffffff");
   // AI 直接画场景：harmBad = 产品画没了
   if (/featuring EXACTLY the product in the uploaded image \(a cut-out PNG/.test(prompt) && !harmBad) return png(800, 800, (g, w, h) => { g.fillStyle = "#d9c2a5"; g.fillRect(0, 0, w, h); g.fillStyle = "#2a5db0"; g.fillRect(260, 160, 280, 480); });
   // 融入背景：正常就原样还回去（产品没变）；harmBad = 产品被 AI 画没了（测重做、退回原贴图）
@@ -77,7 +77,7 @@ export function fakeDetailAI(o = {}) {
     asked,
     async onCmd(m) {
       if (m.cmd !== "run") return { error: "不支持" };
-      asked.push({ kind: m.args.kind, prompt: m.args.prompt, images: (m.args.images || []).length });
+      asked.push({ kind: m.args.kind, prompt: m.args.prompt, images: (m.args.images || []).length, model: m.args.model || "", site: m.site });
       await new Promise((r) => setTimeout(r, 5));
       if (m.args.kind === "image") return { b64: aiImage(m.args.prompt, m.args.images, o.harmBad).toString("base64"), mime: "image/png" };
       return answer(badBg, m.args.prompt, (m.args.images || []).length, o.harmBad);

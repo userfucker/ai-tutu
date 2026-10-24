@@ -127,3 +127,26 @@ export function markUsed(ids, use) {
     S.setUsed.run(JSON.stringify(used.slice(-20)), id);
   }
 }
+
+/**
+ * 插件发来的一批图（淘宝采集：选好的主图 / SKU 图 / 详情图；AI图图 插件：做好的图）。
+ * items = [{ b64, mime, tag 或 kind（main / main34 / sku / desc / picked / page）, grp, name }]
+ * 淘宝发来的用时间戳命名：同一批共用一个时间，后面是序号，从 1 开始（20261024153012-1.jpg，Lee 2026-10-24）
+ */
+const KIND_TAG = { main: "主图", main34: "主图", sku: "SKU图", desc: "详情图", picked: "原图", page: "原图", label: "原图" };
+export async function addFromPlugin(app, items) {
+  const s = stamp();
+  const out = [];
+  let n = 0, failed = 0;
+  for (const it of items) {
+    try {
+      const buf = Buffer.from(String(it.b64 || ""), "base64");
+      if (!buf.length) { failed++; continue; }
+      const ext = extOf(mimeOf(buf) || it.mime || "");
+      const tag = TAGS.includes(it.tag) ? it.tag : KIND_TAG[it.kind] || "原图";
+      const name = app === "taobao" ? `${s}-${++n}.${ext}` : it.name || "";
+      out.push(await add(buf, { grp: it.grp || (app === "taobao" ? "淘宝采集" : "AI图图 插件"), source: app === "taobao" ? "taobao" : "aitutu", tag, name }));
+    } catch { failed++; }
+  }
+  return { added: out.length, failed };
+}

@@ -112,8 +112,8 @@
   /** 发到主图制作 / 详情页：新建（填名字）或已有项目。成功返回 { projectId, name, url } */
   async function sendDialog(ids, to) {
     if (!ids || !ids.length) return null;
-    const { list } = await api("GET", `/api/projects${to === "main" ? "?kind=main" : ""}`);
-    const prefix = to === "main" ? "主图" : "详情图";
+    const { list } = await api("GET", `/api/projects${to === "detail" ? "" : "?kind=" + to}`);
+    const prefix = { main: "主图", detail: "详情图", cutout: "白底图" }[to];
     let res = null;
     const r = await layer(`
       <div class="lb">

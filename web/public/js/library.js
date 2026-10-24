@@ -37,6 +37,7 @@
             <label class="row"><input type="checkbox" id="libAll" ${list.length && list.every((x) => S.sel.has(x.id)) ? "checked" : ""}> 全选（${list.length}）</label>
             <span class="muted">${n ? `已选 ${n} 张 · ${fmt(selSize)}` : "勾选图片后可以发送、下载、删除"}</span>
             <span class="sp row">
+              <button class="sm" data-act="toCutout" ${n ? "" : "disabled"}>发送到抠白底图</button>
               <button class="sm" data-act="toMain" ${n ? "" : "disabled"}>发送到主图制作</button>
               <button class="sm" data-act="toDetail" ${n ? "" : "disabled"}>发送到详情页</button>
               <button class="sm" data-act="zip" ${n ? "" : "disabled"}>打包下载</button>
@@ -99,8 +100,8 @@
           i.type = "file"; i.accept = "image/*"; i.multiple = true;
           i.onchange = () => addFiles(i.files);
           i.click();
-        } else if (act === "toMain" || act === "toDetail") {
-          const r = await LIB.sendDialog(ids, act === "toMain" ? "main" : "detail");
+        } else if (act === "toMain" || act === "toDetail" || act === "toCutout") {
+          const r = await LIB.sendDialog(ids, { toMain: "main", toDetail: "detail", toCutout: "cutout" }[act]);
           if (r) { await load(); draw(main); }
         } else if (act === "zip") {
           const r = await fetch("/api/library/zip", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }), credentials: "same-origin" });

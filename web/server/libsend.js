@@ -5,6 +5,7 @@
 import * as lib from "./library.js";
 import * as store from "./detail/store.js";
 import * as mainImg from "./main/index.js";
+import * as cutout from "./cutout/index.js";
 import { newProject as newDetail } from "./detail/importer.js";
 import { getST } from "./detail/runtime.js";
 import { projectName } from "./naming.js";
@@ -46,6 +47,20 @@ export async function send(b) {
     store.putProject(p);
     lib.markUsed(ids, { type: "detail", id: p.id, name: p.name });
     return { projectId: p.id, name: p.name, url: `/detail/#p=${encodeURIComponent(p.id)}` };
+  }
+  if (b.to === "cutout") {
+    let p = b.projectId ? store.getProject(b.projectId) : null;
+    if (b.projectId && (!p || p.kind !== "cutout")) throw new Error("没有这个抠白底图项目");
+    if (!p) { p = cutout.newProject({ name: projectName("cutout", b.name), fixedName: true }); store.putProject(p); }
+    for (const id of ids) {
+      const f = lib.read(id);
+      const fid = ST.uid("f");
+      const key = `${p.id}:${fid}-orig`;
+      store.putBlob(key, f.buf, f.mime);
+      await cutout.op(p.id, { op: "addFile", id: fid, key, name: f.row.name, w: f.row.w, h: f.row.h, fromLibrary: true });
+    }
+    lib.markUsed(ids, { type: "cutout", id: p.id, name: p.name });
+    return { projectId: p.id, name: store.getProject(p.id).name, url: `/cutout/#p=${encodeURIComponent(p.id)}` };
   }
   throw new Error("不知道发到哪里：" + b.to);
 }
