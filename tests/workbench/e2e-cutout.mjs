@@ -52,11 +52,11 @@ try {
   await page.goto(BASE + '/');
   await page.waitForSelector('#nav a');
   check('工作台左边菜单顺序：抠白底图、主图制作、详情页、素材中心、竞品分析……', (await page.$$eval('#nav a[data-nav]', (as) => as.map((a) => a.textContent.trim().replace(/\s*\d*$/, '')).join('、'))).startsWith('抠白底图、主图制作、详情页、素材中心、竞品分析、任务中心、AI 连接、设置'));
-  check('打开工作台默认是抠白底图', await page.isVisible('a[href="/cutout/"]'));
-  await page.click('a[href="/cutout/"]');
-  await page.click('[data-act="newProj"]');
+  check('打开工作台默认是抠白底图，右上角是“新建项目”（没有“打开”）', await page.isVisible('[data-new="cutout"]') && !(await page.locator('a:text("打开抠白底图")').count()));
+  await page.click('[data-new="cutout"]');
   await page.fill('#npName', '钱包');
   await page.click('#modal [data-ret="ok"]');
+  await page.waitForURL(/\/cutout\/#p=/);
   await page.waitForSelector('[data-act="start"]');
   check('新建项目：名字是“白底图-钱包月-日-1”', (await page.inputValue('#projName')) === `白底图-钱包${md}-1`, await page.inputValue('#projName'));
   const fc = page.waitForEvent('filechooser');
@@ -108,6 +108,22 @@ try {
   // （假 AI 两次给的是同一张图，素材中心同一组里一样的图只存一份）
   check('做好的白底图自动放进素材中心（白底图），原图也在', lib.filter((x) => x.tag === '白底图' && x.source === 'cutout').length >= 1 && p.jobs.every((j) => j.libId) && lib.filter((x) => x.tag === '原图' && x.source === 'cutout').length === 2);
   await page.screenshot({ path: path.join(out, '2-done.png'), fullPage: true });
+
+  // 看大图：滚轮缩放、拖动、PNG 深色底
+  await page.click('.job img[data-view="out"] >> nth=0');
+  await page.waitForSelector('#vwLayer .vwimg');
+  await page.waitForFunction(() => document.querySelector('#vwLayer .vwimg').naturalWidth > 0);
+  const tf0 = await page.$eval('#vwLayer .vwimg', (e) => e.style.transform);
+  await page.mouse.move(700, 400);
+  await page.mouse.wheel(0, -300);
+  await sleep(200);
+  const tf1 = await page.$eval('#vwLayer .vwimg', (e) => e.style.transform);
+  check('点结果图看大图，滚轮可以放大', tf0 !== tf1 && /scale\(/.test(tf1), `${tf0} → ${tf1}`);
+  const cur = await page.$eval('#vwLayer .vwimg', (e) => getComputedStyle(e).cursor);
+  await page.mouse.down(); await page.mouse.move(600, 350, { steps: 4 }); await page.mouse.up();
+  check('鼠标是抓手，可以拖动', cur === 'grab' && (await page.$eval('#vwLayer .vwimg', (e) => e.style.transform)) !== tf1, cur);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.getElementById('vwLayer'));
 
   // 重做
   const n0 = asks.length;

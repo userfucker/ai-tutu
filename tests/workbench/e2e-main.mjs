@@ -58,13 +58,12 @@ const idle = () => page.waitForFunction(() => !document.querySelector('.mcard[da
 
 try {
   await page.goto(BASE + '/#/main');
-  await page.waitForSelector('a[href="/main/"]');
-  check('工作台左边有“主图”栏目', (await page.locator('#nav [data-nav="main"]').count()) === 1);
-  await page.click('a[href="/main/"]');
-  await page.waitForSelector('[data-act="newProj"]');
-  await page.click('[data-act="newProj"]');
+  await page.waitForSelector('[data-new="main"]');
+  check('工作台左边有“主图制作”栏目，右上角是“新建项目”', (await page.locator('#nav [data-nav="main"]').count()) === 1);
+  await page.click('[data-new="main"]');
   await page.fill('#npName', '钱包');
   await page.click('#modal [data-ret="ok"]');
+  await page.waitForURL(/\/main\/#p=/);
   await page.waitForSelector('text=① 产品图');
   const md = (() => { const d = new Date(Date.now() + 8 * 3600e3); return `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`; })();
   check('新建项目：名字是“主图-钱包月-日-1”，不能改', (await page.inputValue('#projName')) === `主图-钱包${md}-1` && (await page.getAttribute('#projName', 'readonly')) !== null, await page.inputValue('#projName'));
@@ -73,6 +72,15 @@ try {
   await (await fc).setFiles({ name: '白底.png', mimeType: 'image/png', buffer: product('#ffffff') });
   await page.waitForSelector('.mcard[data-prid] .tag.ok');
   check('上传白底图：自动去白底', true);
+  await page.click('.mcard[data-prid] .pic');
+  await page.waitForSelector('#vwLayer [data-vw="dark"]:not([hidden])');
+  const bg0 = await page.$eval('#vwLayer .vwimg', (e) => e.className);
+  await page.click('#vwLayer [data-vw="dark"]');
+  const bg1 = await page.$eval('#vwLayer .vwimg', (e) => e.className);
+  await page.click('#vwLayer [data-vw="dark"]');
+  const bg2 = await page.$eval('#vwLayer .vwimg', (e) => e.className);
+  check('产品图点开看大图；抠好的 PNG 可以一键换深色底，再点换回来', /light/.test(bg0) && /dark/.test(bg1) && /light/.test(bg2), [bg0, bg1, bg2].join(' / '));
+  await page.click('#vwLayer .vwclose');
   check('默认做法：AI 直接画场景、AI 自由摆放', await page.isVisible('[data-mode="scene"].on') && await page.isVisible('[data-place="free"].on'));
   await page.click('[data-sty="marble"]');
   await page.selectOption('#count', '1');

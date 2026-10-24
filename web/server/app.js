@@ -182,6 +182,8 @@ app.post("/api/library/zip", async (c) => {
 });
 // 新项目的名字：前缀-名字月-日-序号（三个模块一起数）
 app.post("/api/project-name", async (c) => { const b = await c.req.json().catch(() => ({})); return c.json({ name: projectName(b.kind, b.name) }); });
+// 新建详情页项目（工作台“详情页”里的“新建项目”）
+app.post("/api/detail", async (c) => { const b = await c.req.json().catch(() => ({})); const p = importer.newProject({ name: projectName("detail", b.name) }); p.fixedName = true; dstore.putProject(p); return c.json({ id: p.id, name: p.name }); });
 // ------------------------------------------------------------ 抠白底图（在服务器上做，网页只发操作）
 app.post("/api/cutout", async (c) => { const b = await c.req.json().catch(() => ({})); const p = cutout.newProject({ name: projectName("cutout", b.name), fixedName: true }); dstore.putProject(p); return c.json({ id: p.id, project: dstore.getProject(p.id) }); });
 app.post("/api/cutout/:id/op", async (c) => {

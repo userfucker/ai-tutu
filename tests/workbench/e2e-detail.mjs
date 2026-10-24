@@ -53,9 +53,9 @@ page.on('console', (m) => { if (m.type() === 'error' && !/favicon|404/.test(m.te
 try {
   // 工作台里的“详情页”概况
   await page.goto(BASE + '/#/detail');
-  await page.waitForSelector('a[href="/detail/"]');
-  check('工作台的“详情页”页面有入口', true);
-  await page.click('a[href="/detail/"]');
+  await page.waitForSelector('[data-new="detail"]');
+  check('工作台的“详情页”页面：右上角是“新建项目”', true);
+  await page.goto(BASE + '/detail/');
   await page.waitForSelector('text=我的项目');
   check('打开 /detail/，显示我的项目', true);
   await page.waitForFunction(() => /AI/.test(document.querySelector('#aiChip').textContent));
@@ -188,6 +188,21 @@ try {
   const zp = path.join(out, 'manual.zip');
   await d.saveAs(zp);
   check('手动：网页里导出 zip', fs.statSync(zp).size > 20000);
+  // 工作台“详情页”→ 新建项目：填名字，直接打开新项目（到 ① 新建项目）
+  await page.goto(BASE + '/#/detail');
+  await page.click('[data-new="detail"]');
+  await page.fill('#npName', '拖鞋');
+  await page.click('#modal [data-ret="ok"]');
+  await page.waitForSelector('text=① 新建项目', { timeout: 15000 });
+  check('工作台“新建项目”：一步建好并打开（详情图-拖鞋…）', /^详情图-拖鞋\d\d-\d\d-\d+$/.test(await page.inputValue('#projName')), await page.inputValue('#projName'));
+  // 素材看大图：滚轮缩放
+  await page.click('#steps [data-go="assets"]');
+  await page.setInputFiles('#assetInput', { name: '白底.png', mimeType: 'image/png', buffer: fs.readFileSync(imgFile) });
+  await page.waitForSelector('.asset [data-act="viewAsset"]');
+  await page.click('.asset [data-act="viewAsset"]');
+  await page.waitForSelector('#vwLayer .vwimg');
+  check('素材点开是可以缩放拖动的大图', await page.isVisible('#vwLayer [data-vw="in"]'));
+  await page.keyboard.press('Escape');
   check('全程没有页面报错', errors.length === 0, errors.join(' | '));
 } catch (e) {
   check('出错：' + e.message.split('\n')[0], false, errors.join(' | '));

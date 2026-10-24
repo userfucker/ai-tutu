@@ -111,7 +111,7 @@ var APP = (globalThis.APP = {
     APP.settings.lastProject = id;
     APP.saveSettings();
     if (p.auto && (p.auto.status === "running" || p.auto.status === "exporting")) return APP.go("auto");
-    APP.go(step || (p.auto && p.auto.status === "review" ? "auto" : p.screens.length ? "edit" : p.assets.length ? "info" : "assets"));
+    APP.go(step || (p.auto && p.auto.status === "review" ? "auto" : p.screens.length ? "edit" : p.assets.length ? "info" : "setup")); // 刚新建的项目先到 ① 新建项目（选平台、语言）
   };
 
   // ------------------------------------------------------------ 撤销 / 重做（编辑和提纲用）

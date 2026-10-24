@@ -279,7 +279,7 @@
     name.title = p.fixedName ? "项目名称建好以后不能改" : "";
     const prods = await Promise.all((p.products || []).map(async (pr) => {
       const st = pr.job || "";
-      return `<div class="mcard ${pr.id === (curProduct() || {}).id ? "cur" : ""}" data-prid="${pr.id}"><div class="pic ${pr.cut ? "checker dark" : ""}" data-act="useProduct"><img src="${await ST.urlOf(pr.cut || pr.key)}" alt="">
+      return `<div class="mcard ${pr.id === (curProduct() || {}).id ? "cur" : ""}" data-prid="${pr.id}"><div class="pic ${pr.cut ? "checker dark" : ""}" data-act="viewProduct" title="点一下看大图"><img src="${await ST.urlOf(pr.cut || pr.key)}" alt="">
         ${st ? `<span class="st tag ${/失败/.test(st) ? "bad" : "blue"}">${esc(st)}</span>` : pr.cut ? '<span class="st tag ok">已抠图</span>' : '<span class="st tag warn">没抠图</span>'}</div>
         <div class="acts"><button class="sm" data-act="useProduct">${pr.id === (curProduct() || {}).id ? "正在用" : "用这张"}</button>
         ${!pr.cut || pr.white ? `<button class="sm" data-act="cutAi" ${st && !/失败/.test(st) ? "disabled" : ""}>AI 抠图</button>` : ""}
@@ -375,13 +375,23 @@
     judge: (el) => op({ op: "judge", iid: itemOf(el).id }),
     placeRef: async (el) => { const p = await op({ op: "placeRef", iid: itemOf(el).id }); if (p) APP.toast("以后“AI 直接画场景”都照这张的摆法放（在“③ 生成 → 摆放”里可以改回去）"); },
     clearPlace: (el, e) => { e.stopPropagation(); op({ op: "placeRef", clear: true }); },
+    // 看大图（滚轮缩放、拖动、← → 切换所有画好的主图）
     view: async (el) => {
-      const it = itemOf(el);
-      if (!(it.mode === "scene" ? it.scene : it.bg)) return;
-      const c = await compose(it, 900);
-      const url = URL.createObjectURL(await ST.toBlob(c.canvas, "image/jpeg", 0.9));
-      await APP.modal(`<img src="${url}" style="max-width:100%;max-height:72vh;display:block;margin:0 auto;border-radius:8px">`, { title: `${it.styleName}（${it.mode === "scene" ? "AI 直接画" : c.used ? "AI 图" : "原贴图"}）`, big: true });
-      URL.revokeObjectURL(url);
+      const it0 = itemOf(el);
+      const ready = (it) => (it.mode === "scene" ? it.scene : it.bg);
+      if (!ready(it0)) return;
+      const list = P().items.filter(ready);
+      const out = [];
+      for (const it of list) {
+        const c = await compose(it, 1000);
+        out.push({ src: URL.createObjectURL(await ST.toBlob(c.canvas, "image/jpeg", 0.92)), name: `${it.styleName}（${it.mode === "scene" ? "AI 直接画" : c.used ? "AI 图" : "原贴图"}）`, png: false });
+      }
+      VIEWER.open(out, list.indexOf(it0));
+    },
+    viewProduct: async (el) => {
+      const prs = P().products;
+      const i = prs.findIndex((x) => x.id === el.closest("[data-prid]").dataset.prid);
+      VIEWER.open(await Promise.all(prs.map(async (pr) => ({ src: await ST.urlOf(pr.cut || pr.key), name: pr.name, png: !!pr.cut, info: `${pr.w}×${pr.h}${pr.cut ? " · 抠好的 PNG" : ""}` }))), i);
     },
     dlOne: async (el) => {
       const p = P(), it = itemOf(el);

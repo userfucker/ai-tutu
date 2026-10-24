@@ -296,8 +296,10 @@
       const p = P();
       const x = pendOf(el);
       const a = p.assets.find((y) => y.id === x.from);
-      const urls = [a ? await ST.urlOf(a.cut || a.key) : "", await ST.urlOf(x.key)];
-      APP.modal(`<div class="row" style="align-items:flex-start">${urls.map((u, i) => (u ? `<div class="grow col"><span class="muted">${i ? `AI 画的（${esc(x.note || "")}）` : "原来的素材"}</span><img src="${u}" style="max-width:100%;max-height:62vh;object-fit:contain;border-radius:8px"></div>` : "")).join("")}</div>`, { title: "对比看看", big: true });
+      // 看大图：先 AI 画的，← 看原来的素材
+      const list = [{ src: await ST.urlOf(x.key), name: `AI 画的（${x.note || ""}）`, png: false }];
+      if (a) list.unshift({ src: await ST.urlOf(a.cut || a.key), name: "原来的素材", png: !!a.cut });
+      VIEWER.open(list, list.length - 1);
     },
     jobAgain: (el) => { const j = jobOf(el); if (j && j.again) j.again(); },
     jobDel: (el) => { const j = jobOf(el); if (j) jobs.splice(jobs.indexOf(j), 1); rerender(); },

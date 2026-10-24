@@ -153,3 +153,6 @@ a.btn.primary { background: var(--ink, #18181b); color: #fff; border-color: tran
 .lit .lname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 .lit .lused a { color: #2563eb; }
 @media (max-width: 760px) { .libwrap { flex-direction: column; } .libgroups { width: 100%; position: static; max-height: 200px; } }
+.lit .fmt { font-weight: 600; padding: 0 5px; border-radius: 4px; background: #eef1f5; color: #475467; font-size: 11px; }
+.lit .fmt-png { background: #e7f5ee; color: #15803d; }
+.lit .fmt-jpg { background: #eef4ff; color: #1d4ed8; }

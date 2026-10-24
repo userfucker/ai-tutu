@@ -89,7 +89,7 @@
       onOpen: (L) => {
         const draw = () => {
           const list = data.items.filter((x) => (!grp || x.grp === grp) && (!tag || x.tag === tag));
-          L.querySelector("#lgGrid").innerHTML = list.map((x) => `<div class="lcell ${sel.has(x.id) ? "on" : ""}" data-id="${x.id}" title="${esc(x.grp)} · ${esc(x.name)}"><img loading="lazy" src="/api/library/${x.id}/thumb" alt=""><span class="ck"></span><div class="ln">${esc(x.tag)} · ${x.w}×${x.h}</div></div>`).join("") || '<div class="muted">这里没有图。</div>';
+          L.querySelector("#lgGrid").innerHTML = list.map((x) => `<div class="lcell ${sel.has(x.id) ? "on" : ""}" data-id="${x.id}" title="${esc(x.grp)} · ${esc(x.name)}"><img loading="lazy" src="/api/library/${x.id}/thumb" alt=""><span class="ck"></span><div class="ln">${esc(({ "image/jpeg": "JPG", "image/png": "PNG", "image/webp": "WebP", "image/gif": "GIF" })[x.mime] || "")} · ${esc(x.tag)} · ${x.w}×${x.h}</div></div>`).join("") || '<div class="muted">这里没有图。</div>';
           L.querySelector("#lgN").textContent = sel.size ? `已选 ${sel.size} 张` : "";
           L.querySelector("#lgOk").disabled = !sel.size;
         };

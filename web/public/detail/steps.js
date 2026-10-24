@@ -325,8 +325,9 @@
       },
       viewAsset: async (el) => {
         const a = P().assets.find((x) => x.id === el.closest("[data-aid]").dataset.aid);
-        const urls = await Promise.all([a.key, a.white, a.cut].filter(Boolean).map((k) => ST.urlOf(k)));
-        APP.modal(`<div class="row" style="align-items:flex-start">${urls.map((u, i) => `<div class="grow col"><span class="muted">${["原图", a.white ? "AI 白底图" : "抠好的图", "抠好的图"][i]}</span><img src="${u}" class="${i && u === urls[urls.length - 1] && a.cut ? "checker" : ""}" style="max-width:100%;max-height:60vh;object-fit:contain;border-radius:8px"></div>`).join("")}</div><div class="muted" style="margin-top:8px">${a.w}×${a.h}</div>`, { title: a.name, big: true });
+        // 看大图：原图 / AI 白底图 / 抠好的图，← → 切换；抠好的 PNG 可以换深色底看白边
+        const list = [[a.key, "原图", false], [a.white, "AI 白底图", false], [a.cut, "抠好的图（透明 PNG）", true]].filter((x) => x[0]);
+        VIEWER.open(await Promise.all(list.map(async ([k, n, png]) => ({ src: await ST.urlOf(k), name: `${a.name} · ${n}`, png, info: `${a.w}×${a.h}` }))), a.cut ? list.length - 1 : 0);
       },
     },
   };

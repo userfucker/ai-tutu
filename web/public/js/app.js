@@ -61,6 +61,21 @@ var W = (globalThis.W = { pages: {}, status: null, cur: null, params: [] });
   };
   W.confirm = async (msg, yes = "确定", danger) => (await W.modal("请确认", `<p>${W.esc(msg)}</p><div class="mf"><button data-ret="">取消</button><button class="${danger ? "danger" : "primary"}" data-ret="yes">${W.esc(yes)}</button></div>`)) === "yes";
 
+  /** 新建项目（抠白底图 / 主图制作 / 详情页共用）：填名字 → 建好 → 直接打开（Lee 2026-10-24：不要先“打开”再“新建”） */
+  const NEW = { cutout: ["抠白底图", "白底图", "/api/cutout", "/cutout/"], main: ["主图", "主图", "/api/main", "/main/"], detail: ["详情页", "详情图", "/api/detail", "/detail/"] };
+  W.newProject = async (kind) => {
+    const [title, prefix, url, page] = NEW[kind];
+    let name = null;
+    const ok = await W.modal(`新建${title}项目`, `<input id="npName" style="width:100%" placeholder="如：钱包"><div class="muted" style="margin-top:6px">只填名字，会自动变成“${prefix}-钱包10-24-1”（月-日-当天第几个项目），建好以后不能改。</div>
+      <div class="mf"><button data-ret="">取消</button><button class="primary" data-ret="ok">新建并打开</button></div>`, {
+      onOpen: (m) => { const i = m.querySelector("#npName"); i.focus(); i.onkeydown = (e) => { if (e.key === "Enter") m.querySelector('[data-ret="ok"]').click(); }; },
+      check: (v, m) => { name = m.querySelector("#npName").value.trim(); },
+    });
+    if (ok !== "ok") return;
+    const d = await W.api("POST", url, { name });
+    location.href = `${page}#p=${encodeURIComponent(d.id)}`;
+  };
+
   // ------------------------------------------------------------ 路由：#/页面/参数
   W.go = (hash) => { if (location.hash === hash) W.render(); else location.hash = hash; };
   W.render = async () => {

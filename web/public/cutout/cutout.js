@@ -257,16 +257,12 @@
           <button class="sm danger" data-act="delJob">删除</button></div></div></div>`;
   }
 
-  // 看大图：做好的图左右切换
-  async function viewer(startId, which) {
-    const list = (P.jobs || []).filter((j) => (which === "out" ? j.outKey : which === "ai" ? j.aiKey : j.inKey));
-    let i = Math.max(0, list.findIndex((j) => j.id === startId));
+  // 看大图：滚轮缩放、拖动、← → 切换；做好的 PNG 可以换深色底看白边（lib/viewer.js）
+  function viewer(startId, which) {
     const key = (j) => (which === "out" ? j.outKey : which === "ai" ? j.aiKey : j.inKey);
-    const html = () => `<div style="text-align:center"><img src="${blobUrl(key(list[i]))}" class="${which === "out" ? "checker" : ""}" style="max-width:100%;max-height:72vh;border-radius:8px"></div><div class="row" style="margin-top:8px"><b>${esc(list[i].outName || list[i].name)}</b><span class="sp muted">${i + 1} / ${list.length}（← → 切换）</span></div>`;
-    const k = (e) => { if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return; i = (i + (e.key === "ArrowLeft" ? -1 : 1) + list.length) % list.length; const b = document.querySelector("#modal .vbox"); if (b) b.innerHTML = html(); };
-    document.addEventListener("keydown", k);
-    await modal(`<div class="vbox">${html()}</div>`, { title: which === "ai" ? "AI 原图" : which === "in" ? "交给 AI 的图" : "做好的图", big: true });
-    document.removeEventListener("keydown", k);
+    const list = (P.jobs || []).filter(key);
+    const label = which === "ai" ? "AI 原图" : which === "in" ? "交给 AI 的图" : "做好的图";
+    VIEWER.open(list.map((j) => ({ src: blobUrl(key(j)), name: `${j.outName || j.name} · ${label}`, png: which === "out" && j.ext === ".png", info: which === "out" && j.w ? `${j.w}×${j.h}` : "", download: blobUrl(key(j)) })), Math.max(0, list.findIndex((j) => j.id === startId)));
   }
 
   async function manageTpls() {

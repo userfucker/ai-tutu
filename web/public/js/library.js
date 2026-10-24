@@ -47,7 +47,7 @@
             <input type="checkbox" class="lck" data-ck="${x.id}" ${S.sel.has(x.id) ? "checked" : ""}>
             <div class="lpic" data-view="${x.id}"><img loading="lazy" src="/api/library/${x.id}/thumb" alt=""></div>
             <div class="lname" title="${esc(x.name)}">${esc(x.name)}</div>
-            <div class="muted">${x.w}×${x.h} · ${fmt(x.size)}</div>
+            <div class="muted"><b class="fmt fmt-${fmtOf(x).toLowerCase()}">${fmtOf(x)}</b> · ${x.w}×${x.h} · ${fmt(x.size)}</div>
             <div class="row" style="gap:4px"><span class="tag">${esc(x.tag)}</span><span class="tag">${esc(x.sourceName)}</span></div>
             ${x.used.length ? `<div class="muted lused">用在：${x.used.map((u) => USED[u.type] ? `<a href="${USED[u.type][1]}${encodeURIComponent(u.id)}" target="_blank">${esc(u.name || USED[u.type][0])}</a>` : esc(u.name)).join("、")}</div>` : ""}
           </div>`).join("")}</div>` : `<div class="empty" id="libDrop">${d.total.n ? "这个筛选下没有图。" : "还没有图。点右上角“上传图片”，或者把图片拖进来、按 Ctrl+V 粘贴。"}</div>`}
@@ -64,21 +64,12 @@
     draw(document.getElementById("main"));
   }
 
-  async function view(id) {
+  const FMT = { "image/jpeg": "JPG", "image/png": "PNG", "image/webp": "WebP", "image/gif": "GIF" };
+  const fmtOf = (x) => FMT[x.mime] || (x.mime || "").replace("image/", "").toUpperCase() || "?";
+  /** 看大图：滚轮缩放、拖动、← → 切换；PNG 可以一键换深色底（lib/viewer.js） */
+  function view(id) {
     const list = shown();
-    let i = Math.max(0, list.findIndex((x) => x.id === id));
-    const html = () => { const x = list[i]; return `<div style="text-align:center"><img src="/api/library/${x.id}/file" style="max-width:100%;max-height:70vh;object-fit:contain;border-radius:8px;background:#f2f3f5"></div>
-      <div class="row" style="margin-top:8px"><b>${esc(x.name)}</b><span class="muted">${x.w}×${x.h} · ${fmt(x.size)} · ${esc(x.tag)} · ${esc(x.grp)}</span>
-      <span class="sp row"><span class="muted">${i + 1} / ${list.length}（← → 切换）</span><a href="/api/library/${x.id}/file?dl=1"><button class="sm">下载</button></a></span></div>`; };
-    const key = (e) => {
-      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-      i = (i + (e.key === "ArrowLeft" ? -1 : 1) + list.length) % list.length;
-      const m = document.querySelector("#modal .libview");
-      if (m) m.innerHTML = html();
-    };
-    document.addEventListener("keydown", key);
-    await W.modal("看大图", `<div class="libview">${html()}</div>`, { big: true });
-    document.removeEventListener("keydown", key);
+    VIEWER.open(list.map((x) => ({ src: `/api/library/${x.id}/file`, download: `/api/library/${x.id}/file?dl=1`, name: x.name, png: x.mime === "image/png", info: `${fmtOf(x)} · ${x.w}×${x.h} · ${fmt(x.size)} · ${x.tag} · ${x.grp}` })), Math.max(0, list.findIndex((x) => x.id === id)));
   }
 
   W.pages.library = {
