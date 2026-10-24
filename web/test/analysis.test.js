@@ -231,7 +231,7 @@ test("分模块指定 AI：问大家只给 Kimi，评价只给 DeepSeek，设置
   // 恢复默认：模块都跟着走
   await api("DELETE", "/api/roles");
   const st2 = (await api("GET", "/api/status")).body;
-  assert.ok(Object.values(st2.follows).every(Boolean));
+  assert.ok(Object.entries(st2.follows).every(([k, v]) => v || st2.modules[k].def), "没有自己默认值的模块都跟着走");
 });
 
 test("报告 2.0：只勾选的模块；最多 3 个商品；标题 / 主图 / 属性 / 时间分布 / 回购 / 追评 / 回答质量", async () => {

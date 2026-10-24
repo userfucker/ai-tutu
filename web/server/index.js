@@ -8,6 +8,7 @@ import { PORT, HOST, VERSION, DATA_DIR } from "./config.js";
 import { broadcast } from "./events.js";
 import * as analysis from "./analysis/pipeline.js";
 import * as detailAuto from "./detail/auto.js";
+import * as mainImg from "./main/index.js";
 import * as queue from "./queue.js";
 
 const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST });
@@ -25,6 +26,7 @@ console.log(`  数据目录：${DATA_DIR}`);
 
 analysis.resumeAll();
 detailAuto.resumeAll();
+mainImg.resumeAll();
 queue.tick();
 
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { console.log("正在停止…"); server.close(); process.exit(0); });

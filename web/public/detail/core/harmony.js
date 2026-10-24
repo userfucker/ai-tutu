@@ -2,15 +2,14 @@
  * 详情页 · 产品融入背景（B 方式，Lee 2026-10-23）
  *
  * 程序先把产品贴到背景上（就是平常看到的那张），再交给 AI 只调光影：加接触阴影、投影、反光，让光线颜色和背景一致。
- * 产品本身不许变。做完先用程序比一比产品那块（挪了、变形了差别会很大），再让会看图的 AI 对比一次；
- * 变样了就重做一次（要求更保守），还变样就放弃，继续用原贴图。原贴图一直保留，可以随时切换（screen.harm.on）。
+ * 产品本身不许变。做完让审核 AI（默认豆包）比一比原贴图和 AI 图哪张好，默认用它选的；两张都留着，随时可以切换（screen.harm.on）。
  *
  * 网页和服务器（全自动）共用。ai = { image(prompt, images, label, n), json(prompt, images, label, n) }，images = [{ blob, name }]
  */
 var ST = globalThis.ST || (globalThis.ST = {});
 (() => {
-  // 产品那块每个像素平均差多少算“变样了”（0～255）：形状纹理差（去掉整体变亮变暗、偏色以后）超过 42，或者颜色直接差超过 70
-  const SHAPE_LIMIT = 42, COLOR_LIMIT = 70;
+  // 产品那块每个像素平均差（0～255）大到这个程度，基本是产品画没了 / 换了东西（只在审核没做成时用来兜底）
+  const GROSS_SHAPE = 60, GROSS_COLOR = 90;
 
   /** 这一屏融入的状态：{ can（能不能融入）, used（现在显示的是融入后的）, stale（产品挪过，融入的图作废了） } */
   ST.harmState = async (p, sc) => {
@@ -49,35 +48,44 @@ var ST = globalThis.ST || (globalThis.ST = {});
   };
 
   /**
-   * 融入一张贴好产品的图（详情页的一屏、主图都用它）。canvas = 程序贴好的图，box = 产品在图上的位置（像素）。
-   * 成功 { ok: true, blob, note }；两次都变样 { ok: false, why }
+   * 融入一张贴好产品的图（详情页的一屏、主图都用它）。canvas = 程序贴好的图（原贴图），box = 产品在图上的位置（像素）。
+   * AI 调光影画一次（不重做），再让审核 AI 比一比原贴图和 AI 图哪张好（Lee 2026-10-24）：
+   *  - 审核选哪张默认用哪张，两张都留着可以切换；
+   *  - 审核没做成（指定的 AI 没连上、回复不对）默认用 AI 图，除非程序看出产品那块几乎全变了（产品画没了）。
+   * 返回 { ok: true, blob（AI 图）, choice: "ai" | "orig", why（审核理由）, note }
    */
   ST.harmonizeCanvas = async (p, canvas, b, ai, what) => {
     const W = canvas.width, H = canvas.height;
     const baseBlob = await ST.toBlob(canvas, "image/jpeg", 0.92);
     const ratio = closestAiRatio(W, H);
     const box = b ? { x: Math.max(0, b.x), y: Math.max(0, b.y), w: Math.max(4, Math.min(W - Math.max(0, b.x), b.w)), h: Math.max(4, Math.min(H - Math.max(0, b.y), b.h)) } : null;
-    let why = "";
-    for (let n = 0; n < 2; n++) {
-      const out = await ai.image(ST.P.harmonize(p, ratio, n > 0), [{ blob: baseBlob, name: "原图.jpg" }], `融入背景：${what}${n ? "（重做）" : ""}`, n);
-      const cv = await fit(out, W, H);
-      const diff = box ? ST.regionDiff(canvas, cv, box) : { shape: 0, color: 0 };
-      if (diff.shape > SHAPE_LIMIT || diff.color > COLOR_LIMIT) { why = `产品那块变化太大（形状 ${Math.round(diff.shape)}，颜色 ${Math.round(diff.color)}）`; continue; }
-      const blob = await ST.toBlob(cv, "image/jpeg", 0.92);
-      let note = "";
-      try {
-        const chk = await ai.json(ST.P.sameProduct(p), [{ blob: baseBlob, name: "原图.jpg" }, { blob, name: "调整后.jpg" }], `检查产品有没有变样：${what}${n ? "（重做）" : ""}`, n);
-        if (chk && (chk.same === false || chk.same === "false")) { why = `AI 检查：${String(chk.why || "产品变样了").slice(0, 40)}`; continue; }
-      } catch (e) {
-        if (e && (e.stopped || /已停止/.test(e.message || ""))) throw e;
-        note = `AI 检查没做成（${String((e && e.message) || e).slice(0, 30)}），程序比过产品那块，没问题`;
-      }
-      return { ok: true, blob, note };
+    const out = await ai.image(ST.P.harmonize(p, ratio), [{ blob: baseBlob, name: "原图.jpg" }], `融入背景：${what}`, 0);
+    const cv = await fit(out, W, H);
+    const blob = await ST.toBlob(cv, "image/jpeg", 0.92);
+    const diff = box ? ST.regionDiff(canvas, cv, box) : { shape: 0, color: 0 };
+    const gross = diff.shape > GROSS_SHAPE || diff.color > GROSS_COLOR;
+    try {
+      const r = await ai.json(ST.P.pickBetter(p), [{ blob: baseBlob, name: "1-原贴图.jpg" }, { blob, name: "2-AI图.jpg" }], `审核融入的图：${what}`, 0);
+      const better = String(r && (r.better ?? r.pick ?? "")).replace(/\D/g, "");
+      if (better === "1" || better === "2") return { ok: true, blob, choice: better === "1" ? "orig" : "ai", why: String((r && r.why) || "").slice(0, 200), note: "" };
+      throw new Error("审核回复里没有选 1 还是 2");
+    } catch (e) {
+      if (e && (e.stopped || /已停止/.test(e.message || ""))) throw e;
+      const msg = String((e && e.message) || e).slice(0, 80);
+      return gross
+        ? { ok: true, blob, choice: "orig", why: "", note: `审核没做成（${msg}）；程序看产品那块变化很大，先用原贴图` }
+        : { ok: true, blob, choice: "ai", why: "", note: `审核没做成（${msg}），默认用 AI 图` };
     }
-    return { ok: false, why };
   };
 
-  /** 融入一屏。成功：sc.harm = { key, sig, on: true, status: "ok" }；放弃：{ on: false, status: "fallback", note: 原因 } */
+  /** 审核结果写成一句话（网页上显示） */
+  ST.harmText = (hm) => {
+    if (!hm || !hm.key) return hm && hm.note ? hm.note : "";
+    const pick = hm.choice ? `审核选了${hm.choice === "ai" ? " AI 图" : "原贴图"}${hm.why ? "：" + hm.why : ""}` : "";
+    return [pick, hm.note].filter(Boolean).join("；");
+  };
+
+  /** 融入一屏：sc.harm = { key（AI 图）, sig, on（true = 用 AI 图）, choice, why（审核理由）, note } */
   ST.harmonize = async (p, sc, ai) => {
     const pf = ST.platformOf(p, p.platform);
     const r = await ST.renderScreen(p, sc, { platform: pf, lang: p.lang, pxWidth: 1000, only: "base" });
@@ -85,21 +93,11 @@ var ST = globalThis.ST || (globalThis.ST = {});
     const k = r.k;
     const b = r.harm.box;
     const res = await ST.harmonizeCanvas(p, r.canvas, b ? { x: b.x * k, y: b.y * k, w: b.w * k, h: b.h * k } : null, ai, `第 ${p.screens.indexOf(sc) + 1} 屏`);
-    const why = res.why;
-    if (res.ok) {
-      const key = `${p.id}:harm-${sc.id}-${Date.now()}`;
-      await ST.saveImage(key, res.blob);
-      const old = sc.harm && sc.harm.key;
-      if (old && old !== key) { ST.forget && ST.forget(old); ST.db.delBlob(old); }
-      sc.harm = { key, sig: r.harm.sig, on: true, status: "ok", note: res.note, t: Date.now() };
-      return { ok: true, note: res.note };
-    }
-    const prev = sc.harm || {};
-    if (prev.key && prev.sig === r.harm.sig && prev.status === "ok") sc.harm = { ...prev, note: `这次没成功（${why}），还用上一次融入的图` };
-    else {
-      if (prev.key) { ST.forget && ST.forget(prev.key); ST.db.delBlob(prev.key); }
-      sc.harm = { key: "", sig: r.harm.sig, on: false, status: "fallback", note: why + "；用原贴图", t: Date.now() };
-    }
-    return { ok: false, why };
+    const key = `${p.id}:harm-${sc.id}-${Date.now()}`;
+    await ST.saveImage(key, res.blob);
+    const old = sc.harm && sc.harm.key;
+    if (old && old !== key) { ST.forget && ST.forget(old); ST.db.delBlob(old); }
+    sc.harm = { key, sig: r.harm.sig, on: res.choice === "ai", status: "ok", choice: res.choice, why: res.why, note: res.note, t: Date.now() };
+    return { ok: true, choice: res.choice, why: res.why, note: res.note };
   };
 })();

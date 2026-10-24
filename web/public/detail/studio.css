@@ -247,3 +247,4 @@ input[type=range] { width: 100%; }
 .closeup .cbox .h-nw { left: 0; top: 0; cursor: nwse-resize; } .closeup .cbox .h-n { left: 50%; top: 0; cursor: ns-resize; } .closeup .cbox .h-ne { left: 100%; top: 0; cursor: nesw-resize; }
 .closeup .cbox .h-e { left: 100%; top: 50%; cursor: ew-resize; } .closeup .cbox .h-se { left: 100%; top: 100%; cursor: nwse-resize; } .closeup .cbox .h-s { left: 50%; top: 100%; cursor: ns-resize; }
 .closeup .cbox .h-sw { left: 0; top: 100%; cursor: nesw-resize; } .closeup .cbox .h-w { left: 0; top: 50%; cursor: ew-resize; }
+.proj .pname { cursor: pointer; } .proj .pname:hover { color: var(--accent); text-decoration: underline; }

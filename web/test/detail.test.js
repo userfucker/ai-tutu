@@ -35,7 +35,7 @@ before(async () => {
   for (let i = 0; i < 150 && !/插件口令 (\w+)/.test(out); i++) await sleep(100);
   token = /插件口令 (\w+)/.exec(out)[1];
   await api("POST", "/api/auth/setup", { password: "1234" });
-  await api("PUT", "/api/roles", { roles: { text: ["gemini"], vision: ["gemini"], image: ["gemini"] } });
+  await api("PUT", "/api/roles", { roles: { text: ["gemini"], vision: ["gemini"], image: ["gemini"], dt_check: ["gemini"] } });
   plugin = await connect(`ws://127.0.0.1:${PORT}/ext`, { token, name: "测试电脑", version: "0.8.0", app: "aitutu", sites: [{ site: "gemini", name: "Gemini", open: true, ready: true }] }, ai.onCmd);
 });
 after(() => { if (plugin) plugin.close(); srv.kill(); if (process.env.KEEP) console.log("数据留在", dataDir); else fs.rmSync(dataDir, { recursive: true, force: true }); });
@@ -88,9 +88,9 @@ test("一键全自动：做完导出 zip，等审核", async () => {
   // 融入背景（B 方式）：有 AI 背景、有主产品图的屏都融入了，原贴图保留（harm.on 可以切换）
   const harmed = p.screens.filter((s) => s.harm && s.harm.status === "ok");
   assert.ok(harmed.length >= 1, "至少一屏融入了背景");
-  assert.ok(harmed.every((s) => s.harm.on && s.harm.key && s.harm.sig), "融入后的图存好了，默认显示融入后");
+  assert.ok(harmed.every((s) => s.harm.on && s.harm.key && s.harm.sig && s.harm.choice === "ai" && /白边/.test(s.harm.why)), "审核选了 AI 图，默认显示融入后，理由记下来了");
   assert.ok(asked.some((a) => a.kind === "image" && /Edit the uploaded image/.test(a.prompt) && a.images === 1), "AI 调光影（只发贴好的那一张）");
-  assert.ok(asked.some((a) => /调整光影后的图/.test(a.prompt) && a.images === 2), "AI 对比检查产品有没有变样");
+  assert.ok(asked.some((a) => /哪张更适合当电商图片/.test(a.prompt) && a.images === 2), "审核 AI 比一比原贴图和 AI 图");
   assert.ok(p.auto.log.some((l) => /融入背景完成/.test(l)));
   assert.ok(Object.keys(p.screens[0].text.title || {}).includes("en"), "翻译成英语了");
   assert.equal(p.auto.exportFile, `exports/${pid}.zip`);
@@ -131,7 +131,7 @@ test("中途停止、再开始：做过的不重复问 AI", async () => {
   assert.ok(list.every((x) => x.firstAsset && x.auto));
 });
 
-test("融入背景：AI 把产品画变样了 → 重做一次 → 还不行就用原贴图", async () => {
+test("融入背景：审核选了原贴图 → 不重做，默认用原贴图，AI 图也留着可以切换", async () => {
   aiOpts.harmBad = true;
   try {
     const r = await api("POST", "/api/projects/import", tbZip(), true);
@@ -142,10 +142,24 @@ test("融入背景：AI 把产品画变样了 → 重做一次 → 还不行就�
     const tries = asked.slice(before).filter((a) => /Edit the uploaded image/.test(a.prompt));
     const can = p.screens.filter((s) => s.harm);
     assert.ok(can.length >= 1);
-    assert.equal(tries.length, can.length * 2, "每屏重做了一次");
-    assert.ok(tries.some((a) => /extremely conservative/.test(a.prompt)), "重做时要求更保守");
-    assert.ok(can.every((s) => s.harm.status === "fallback" && !s.harm.on && !s.harm.key), "放弃了，用原贴图");
-    assert.ok(p.auto.log.some((l) => /融入背景放弃，用原贴图：产品那块变化太大/.test(l)));
-    assert.equal(p.auto.status, "review", "全自动照样做完");
+    assert.equal(tries.length, can.length, "每屏只画一次，不重做");
+    assert.ok(can.every((s) => s.harm.choice === "orig" && !s.harm.on && s.harm.key), "默认原贴图，AI 图留着");
+    assert.ok(p.auto.log.some((l) => /融入背景完成：用原贴图（审核：第 2 张产品不见了）/.test(l)));
   } finally { aiOpts.harmBad = false; }
+});
+
+test("融入背景：审核的豆包没连上 → 不换别的 AI，直接报错，默认用 AI 图", async () => {
+  await api("PUT", "/api/roles", { roles: { text: ["gemini"], vision: ["gemini"], image: ["gemini"], dt_check: ["doubao"] } });
+  try {
+    const r = await api("POST", "/api/projects/import", tbZip(), true);
+    const id = r.body.id;
+    const before = asked.length;
+    await api("POST", `/api/projects/${id}/auto`, {});
+    const p = await waitAuto(id, ["review"]);
+    assert.equal(asked.slice(before).filter((a) => /哪张更适合/.test(a.prompt)).length, 0, "没有拿别的 AI 去审核");
+    const can = p.screens.filter((s) => s.harm);
+    assert.ok(can.length >= 1 && can.every((s) => s.harm.on && s.harm.choice === "ai" && /豆包没连上/.test(s.harm.note)), JSON.stringify(can.map((s) => s.harm)));
+    const tasks = (await api("GET", `/api/tasks?ownerId=${id}&status=failed`)).body.tasks;
+    assert.ok(tasks.some((t) => /审核/.test(t.label) && /豆包没连上/.test(t.error)), "任务中心里能看到报错");
+  } finally { await api("PUT", "/api/roles", { roles: { text: ["gemini"], vision: ["gemini"], image: ["gemini"], dt_check: ["gemini"] } }); }
 });

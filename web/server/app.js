@@ -12,6 +12,7 @@ import * as analysis from "./analysis/pipeline.js";
 import * as dstore from "./detail/store.js";
 import * as auto from "./detail/auto.js";
 import * as importer from "./detail/importer.js";
+import * as mainImg from "./main/index.js";
 
 export const app = new Hono();
 
@@ -156,6 +157,12 @@ app.get("/api/analyses/:id/report", (c) => {
 });
 
 // ------------------------------------------------------------ 详情页：项目、图片、设置
+// ------------------------------------------------------------ 主图（在服务器上做，网页只发操作）
+app.post("/api/main", async (c) => { const b = await c.req.json().catch(() => ({})); const p = mainImg.newProject(b); dstore.putProject(p); return c.json({ id: p.id, project: dstore.getProject(p.id) }); });
+app.post("/api/main/:id/op", async (c) => {
+  try { const p = await mainImg.op(c.req.param("id"), await c.req.json()); return c.json({ project: p }); }
+  catch (e) { return c.json({ error: String(e.message || e) }, 400); }
+});
 app.get("/api/projects", (c) => c.json({ list: dstore.listProjects(c.req.query("kind") === "main" ? "main" : "detail") }));
 app.get("/api/projects/:id", (c) => { const p = dstore.getProject(c.req.param("id")); return p ? c.json({ project: p }) : c.json({ error: "项目不存在" }, 404); });
 app.put("/api/projects/:id", async (c) => {

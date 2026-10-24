@@ -38,7 +38,7 @@ export const tbZip = () => zip([
 ]);
 
 // ---------------------------------------------------------------- 假 AI图图（Gemini）：按提示词回 JSON / 画图
-function answer(badBg, prompt, nImages) {
+function answer(badBg, prompt, nImages, harmBad) {
   let out;
   if (/逐张判断/.test(prompt)) out = { assets: Array.from({ length: nImages }, (_, i) => ({ i: i + 1, tag: i === 0 ? "white" : i === 1 ? "angle" : "spec", note: ["正面", "侧面", "蓝色"][i] || "", group: i === 2 ? "蓝色" : "" })), product: { name: "保温杯", category: "水杯", audience: "上班族", scenes: "办公室" } };
   else if (/买家评价和问答/.test(prompt)) out = { concerns: [{ text: "担心漏水", count: 3 }], points: ["双层密封不漏水"] };
@@ -49,7 +49,8 @@ function answer(badBg, prompt, nImages) {
     { template: "features3", purpose: "卖点", title: "三大卖点", items: [{ title: "不漏水", desc: "双层密封", icon: "shield" }, { title: "保温久", desc: "12 小时", icon: "clock" }, { title: "轻便", desc: "只有 300 克", icon: "feather" }], bg: "light studio" },
     { template: "params", purpose: "参数", title: "产品参数" },
   ] };
-  else if (/调整光影后的图/.test(prompt)) out = { same: true, why: "" };
+  else if (/哪张更适合当电商图片/.test(prompt)) out = harmBad ? { better: 1, why: "第 2 张产品不见了" } : { better: 2, why: "去掉了白边，光线更自然" };
+  else if (/是不是同一个产品/.test(prompt)) out = { ok: !harmBad, why: harmBad ? "产品不见了" : "" };
   else if (/总结背景风格/.test(prompt)) out = { name: "暖色木桌", desc: "温暖的木桌，早晨阳光", prompt: "warm wooden table, soft morning sunlight, cozy home" };
   else if (/背景图（按顺序）/.test(prompt)) out = { bad: badBg() ? [{ i: 1, why: "有文字" }] : [] };
   else if (/重写下面这一屏/.test(prompt)) { const cur = JSON.parse(/【当前文案】\n(.*)\n/.exec(prompt)[1]); out = { ...cur, title: "品质之选保温杯" }; }
@@ -59,6 +60,8 @@ function answer(badBg, prompt, nImages) {
 }
 const aiImage = (prompt, images, harmBad) => {
   if (/isolated on a pure white background/.test(prompt) || /different camera angle/.test(prompt)) return product("#ffffff");
+  // AI 直接画场景：harmBad = 产品画没了
+  if (/featuring EXACTLY the product in the uploaded image \(a cut-out PNG/.test(prompt) && !harmBad) return png(800, 800, (g, w, h) => { g.fillStyle = "#d9c2a5"; g.fillRect(0, 0, w, h); g.fillStyle = "#2a5db0"; g.fillRect(260, 160, 280, 480); });
   // 融入背景：正常就原样还回去（产品没变）；harmBad = 产品被 AI 画没了（测重做、退回原贴图）
   if (/Edit the uploaded image/.test(prompt) && images && images[0] && !harmBad) return Buffer.from(images[0].b64, "base64");
   return png(768, 1024, (g, w, h) => { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, "#f3e9dc"); gr.addColorStop(1, "#d9c2a5"); g.fillStyle = gr; g.fillRect(0, 0, w, h); });
@@ -77,7 +80,7 @@ export function fakeDetailAI(o = {}) {
       asked.push({ kind: m.args.kind, prompt: m.args.prompt, images: (m.args.images || []).length });
       await new Promise((r) => setTimeout(r, 5));
       if (m.args.kind === "image") return { b64: aiImage(m.args.prompt, m.args.images, o.harmBad).toString("base64"), mime: "image/png" };
-      return answer(badBg, m.args.prompt, (m.args.images || []).length);
+      return answer(badBg, m.args.prompt, (m.args.images || []).length, o.harmBad);
     },
   };
 }

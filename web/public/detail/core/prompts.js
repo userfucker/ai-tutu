@@ -221,18 +221,18 @@ ST.P = (() => {
       ].filter(Boolean).join("\n");
     },
     /** 融入背景（B 方式）：程序已经把产品贴好了，AI 只调光影 */
-    harmonize(p, ratio, strict) {
+    harmonize(p, ratio) {
       const name = (p.info && p.info.name) || "";
       return [
         `Edit the uploaded image and return the whole edited image, aspect ratio ${ratio}. It is an e-commerce picture: a product${name ? ` ("${name}", Chinese name)` : ""} was pasted onto a background photo, so it looks stuck on.`,
         "Make it look like one real photo:",
         "- Add realistic contact shadows and cast shadows that match the light direction of the background; add subtle reflections if the surface is glossy.",
         "- Adjust the product's lighting, color temperature and edge blending slightly to match the scene; ambient light may spill onto the product.",
+        "- Clean up cut-out leftovers: remove white fringes around the product edges and white patches inside openings (e.g. inside a wrist strap loop or handle) so the background shows through.",
         "Strict rules:",
         "- Do NOT change the product: same position, size, angle, shape, proportions, colors, materials, patterns, printed text and logos. Do not redraw or redesign it, do not add or remove parts.",
         "- Keep the composition, framing and the background content the same. Do not crop, zoom or move anything.",
         "- Do not add any text, letters, logos, watermarks, people or other products.",
-        strict ? "- Last time the product was changed. This time be extremely conservative: only add shadows around the product and very slight light matching." : "",
         "Reply with the image only.",
       ].filter(Boolean).join("\n");
     },
@@ -256,14 +256,37 @@ ST.P = (() => {
         '只回复一个 JSON 代码块，格式：{"name":"","desc":"","prompt":""}',
       ].join("\n");
     },
-    /** 检查融入后产品有没有变样 */
-    sameProduct(p) {
+    /** 审核：原贴图和 AI 调光影后的图，哪张好（Lee 2026-10-24：抠图残留的白边、白块被 AI 去掉算变好） */
+    pickBetter(p) {
+      const name = (p.info && p.info.name) || "";
       return [
-        "第 1 张图是原图（产品是程序直接贴上去的），第 2 张图是 AI 调整光影后的图。",
-        "只允许改：阴影、反光、光线、颜色冷暖的轻微变化、产品边缘的融合。",
-        "不允许改：产品的位置、大小、角度、形状、比例、颜色、材质、图案、上面的文字和 logo、零件数量；背景的构图。",
-        `请仔细对比产品${p.info && p.info.name ? `（${p.info.name}）` : ""}，判断有没有不允许的变化。`,
-        '只回复一个 JSON 代码块，格式：{"same":true,"why":""}；有变化就 same 为 false，why 写哪里变了（中文，20 个字以内）。',
+        "第 1 张是原贴图：产品是程序从白底图抠出来、直接贴到背景上的。抠图可能残留白边、镂空处（比如手腕绳、提手围成的圈里）的白块，产品看起来像“贴上去的”。",
+        "第 2 张是 AI 调整光影后的图。",
+        `请判断哪张更适合当电商图片${name ? `（产品是：${name}）` : ""}。`,
+        "- 第 2 张如果去掉了抠图残留的白边、白块，或者阴影、反光、光线更自然、产品和背景融为一体，这是变好了，选 2。",
+        "- 只有这些情况才算第 2 张不好、选 1：产品被换成别的东西；logo、文字变了或错了；零件少了或多了；形状、比例明显变了；产品颜色明显变了；画面有明显的瑕疵或变形。",
+        '只回复一个 JSON 代码块，格式：{"better":2,"why":"理由"}。better 填 1 或 2；why 用中文说清楚为什么（选 1 的话说清楚第 2 张哪里不对）。',
+      ].join("\n");
+    },
+    /** AI 直接画场景（把抠好的透明 PNG 发给 AI，一步画出带产品的场景图） */
+    mainScene(p, style) {
+      const name = (p.info && p.info.name) || "";
+      return [
+        "Generate one image: a photorealistic e-commerce main product photo, square 1:1, featuring EXACTLY the product in the uploaded image (a cut-out PNG with transparent background).",
+        `- Same product${name ? ` ("${name}", Chinese name)` : ""}: shape, proportions, colors, materials, patterns, printed text, logos and number of parts must stay identical; do not redesign it. Remove any leftover white fringes from the cut-out.`,
+        `- Scene: ${style}.`,
+        "- Composition: the product centered, large (about 85% of the frame), standing naturally on a surface, realistic contact shadows, reflections and lighting matching the scene.",
+        "- Absolutely NO text, letters, logos or watermarks other than what is printed on the product itself. No people, no other products.",
+        "Reply with the image only.",
+      ].join("\n");
+    },
+    /** 审核“AI 直接画”的场景图：产品有没有被改 */
+    sceneCheck(p) {
+      const name = (p.info && p.info.name) || "";
+      return [
+        `第 1 张是产品原图（抠好的产品${name ? `：${name}` : ""}），第 2 张是 AI 照着它画的电商场景图。`,
+        "请判断第 2 张里的产品是不是同一个产品：形状、比例、颜色、材质、logo 和文字、零件数量有没有被改；去掉白边、加阴影反光不算改。",
+        '只回复一个 JSON 代码块，格式：{"ok":true,"why":"理由"}。ok 为 false 时，why 用中文说清楚哪里被改了。',
       ].join("\n");
     },
   };

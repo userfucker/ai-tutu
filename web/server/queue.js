@@ -53,23 +53,25 @@ export const MODULES = {
   // 详情页（Lee 2026-10-23）：多张图一起画时，在勾选的网站之间轮流分
   dt_angle: { name: "多角度图、细节特写（画图）", group: "详情页", follow: "image" },
   dt_blend: { name: "产品融入背景（画图）", group: "详情页", follow: "image" },
-  dt_check: { name: "检查产品有没有变样（看图）", group: "详情页", follow: "vision" },
+  // 审核（原贴图和 AI 图哪张好）：默认只用豆包，豆包没连上直接报错，不换别的 AI（Lee 2026-10-24：省 AI 次数）。follow read = ai-web 1.4.0 起能发图片
+  dt_check: { name: "审核融入的图（看图，默认豆包）", group: "详情页", follow: "read", def: ["doubao"], noWait: true },
   // 主图（Lee 2026-10-23）
   mn_style: { name: "识别背景风格（看图）", group: "主图", follow: "vision" },
+  mn_cut: { name: "AI 抠图（画图）", group: "主图", follow: "image" },
   mn_bg: { name: "画主图背景（画图）", group: "主图", follow: "image" },
   mn_blend: { name: "产品融入背景（画图）", group: "主图", follow: "image" },
-  mn_check: { name: "检查产品有没有变样（看图）", group: "主图", follow: "vision" },
+  mn_check: { name: "审核融入的图（看图，默认豆包）", group: "主图", follow: "read", def: ["doubao"], noWait: true },
 };
 export const baseRole = (role) => (MODULES[role] ? MODULES[role].follow : role);
 export function roles() {
   const saved = kvGet("aiRoles") || {};
   const out = { ...DEFAULT_ROLES };
   for (const k of Object.keys(DEFAULT_ROLES)) if (Array.isArray(saved[k])) out[k] = saved[k];
-  for (const [k, m] of Object.entries(MODULES)) out[k] = Array.isArray(saved[k]) ? saved[k] : out[m.follow];
+  for (const [k, m] of Object.entries(MODULES)) out[k] = Array.isArray(saved[k]) ? saved[k] : m.def ? [...m.def] : out[m.follow];
   return out;
 }
 /** 哪些模块是“跟着走”的（没单独设置） */
-export const follows = () => { const saved = kvGet("aiRoles") || {}; return Object.fromEntries(Object.keys(MODULES).map((k) => [k, !Array.isArray(saved[k])])); };
+export const follows = () => { const saved = kvGet("aiRoles") || {}; return Object.fromEntries(Object.keys(MODULES).map((k) => [k, !Array.isArray(saved[k]) && !MODULES[k].def])); };
 // 老版本存的分工：写文字换成新的默认（国内模型），千问去掉（2026-10-21）
 if (kvGet("rolesVer") !== 2) {
   const old = kvGet("aiRoles");
@@ -230,6 +232,7 @@ export function tick() {
           if (pick) break;
         }
         if (pick) run(row, payload, pick.conn, pick.site);
+        else if ((payload.noWait || (MODULES[role] && MODULES[role].noWait)) && !canAny(role, order)) failNow(row, noConnMsg(role, order));
         else waitWhy(row, role, order);
       }
     } while (again);
@@ -237,6 +240,21 @@ export function tick() {
 }
 setInterval(tick, 2000).unref();
 const badSites = new Map(); // 任务编号 → 失败过的网站
+/** 勾选的网站里有没有连着、能做这种任务的（忙不忙不管） */
+function canAny(role, order) {
+  const br = baseRole(role);
+  return order.some((site) => bridge.connsFor(site).some((c) => !(c.app === "aiweb" && br !== "text" && !(br === "read" && verAtLeast(c.version, "1.4.0")))));
+}
+function noConnMsg(role, order) {
+  const names = order.map((s) => SITE_NAMES[s] || s).join("、") || "（一个都没勾）";
+  return `${names}没连上：${order.includes("doubao") || order.includes("kimi") || order.includes("deepseek") || order.includes("glm") ? "让 ai-web（1.4.0 以上）连到工作台，" : ""}或者在“AI 连接 → AI 分工 → ${MODULES[role] ? MODULES[role].name : role}”里换别的 AI`;
+}
+/** 不等了，直接算失败（审核这类任务：指定的 AI 没连上就报错，不排队干等） */
+function failNow(row, msg) {
+  Object.assign(row, { status: "failed", error: msg, finished: Date.now(), progress: null });
+  save(row);
+  emitter.emit(`end:${row.id}`);
+}
 /** 任务派不出去时，在“说明”里写清楚为什么（没有能做的 AI 连着），别让人干等 */
 const HOW = {
   text: "让 ai-web 连到工作台（在 ai-web 的服务器下拉框里选工作台），或者在“AI 连接 → AI 分工”里给写文字勾上 Gemini / Copilot",

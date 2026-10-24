@@ -3,7 +3,7 @@
  *
  * 1 识别素材（AI 看图打标签、猜产品信息）→ 2 抠图（白底直接去白底，其他交给 AI 出白底图）→ 3 卖点（评价挖掘 + AI 补充）
  * → 4 参考图（有的话 AI 分析每一屏）→ 5 提纲和文案 → 6 背景（先出一张当风格参考）→ 7 AI 检查背景（有字、有人、有产品的重画一次）
- * → 8 融入背景（B 方式：程序贴好产品，AI 只调光影，检查产品没变样；原贴图保留，可以切换）
+ * → 8 融入背景（B 方式：程序贴好产品，AI 只调光影，审核 AI 比一比哪张好；两张都保留，可以切换）
  * → 9 翻译 → 10 检查违禁词、放不下的文字，AI 改写 → 11 导出 zip，等人审核。
  *
  * 每一步做之前看项目里是不是已经有了（有就跳过），AI 任务都带固定的 key，所以中途停了、服务器重启了，重新开始不会重复做。
@@ -251,13 +251,13 @@ async function stepCheckBg(p, c) {
   p.auto.bgChecked = true;
   store.putProject(p);
 }
-/** 融入背景：有背景图、有主产品图的屏都做（同一个布局做过、放弃过的不再做）；几屏同时做，Gemini / Copilot 轮流 */
+/** 融入背景：有背景图、有主产品图的屏都做；几屏同时做，Gemini / Copilot 轮流画，审核默认豆包（没连上就默认用 AI 图） */
 async function stepHarmony(p, c) {
   const ST = getST();
   const list = [];
   for (const sc of p.screens) {
     const h = await ST.harmState(p, sc);
-    if (h.can && !(sc.harm && sc.harm.sig === h.sig && (sc.harm.status === "fallback" || sc.harm.key))) list.push({ sc, sig: h.sig });
+    if (h.can && !(sc.harm && sc.harm.sig === h.sig && (sc.harm.status === "fallback" || sc.harm.key))) list.push({ sc, sig: h.sig }); // 同一个布局做过的不再做
   }
   const imgs = (list2) => Promise.all(list2.map((x) => c.img(x.blob, x.name, 1536)));
   await Promise.all(list.map(({ sc, sig }, i) => ST.harmonize(p, sc, {
@@ -266,8 +266,7 @@ async function stepHarmony(p, c) {
   }).then((r) => {
     store.putProject(p);
     const no = p.screens.indexOf(sc) + 1;
-    if (r.ok) log(p, `第 ${no} 屏融入背景完成${r.note ? "（" + r.note + "）" : ""}`);
-    else if (!r.skip) log(p, `第 ${no} 屏融入背景放弃，用原贴图：${r.why}`);
+    if (r.ok) log(p, `第 ${no} 屏融入背景完成：用${r.choice === "ai" ? " AI 图" : "原贴图"}${r.why ? "（审核：" + r.why + "）" : ""}${r.note ? "（" + r.note + "）" : ""}`);
   }).catch((e) => { if (e instanceof Stopped) throw e; log(p, `第 ${p.screens.indexOf(sc) + 1} 屏融入背景没成功，用原贴图：${e.message}`); })));
 }
 async function stepTranslate(p, c, tag = "") {

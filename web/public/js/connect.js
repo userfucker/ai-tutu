@@ -84,7 +84,8 @@
     const fol = mod && s.follows && s.follows[role];
     const folName = mod ? String(s.roleNames[mod.follow] || mod.follow).replace(/（.*$/, "") : "";
     return `<div class="role ${fol ? "following" : ""}" data-role="${role}"><b>${esc(name)}</b>
-      ${mod ? `<label class="row follow" style="margin-top:4px"><input type="checkbox" ${fol ? "checked" : ""} onchange="this.closest('.role').classList.toggle('following', this.checked)"> 跟“${esc(folName)}”一样</label>` : ""}
+      ${mod && mod.def ? `<div class="muted" style="margin-top:4px">只用勾上的网站，没连上就报错（不换别的）</div>` : ""}
+      ${mod && !mod.def ? `<label class="row follow" style="margin-top:4px"><input type="checkbox" ${fol ? "checked" : ""} onchange="this.closest('.role').classList.toggle('following', this.checked)"> 跟“${esc(folName)}”一样</label>` : ""}
       <div class="lst">${all.map((site) => `<div class="it ${cur.includes(site) ? "" : "off"}" data-site="${site}">
       <input type="checkbox" ${cur.includes(site) ? "checked" : ""} onchange="this.parentNode.classList.toggle('off', !this.checked)"><span class="grow"><span class="dot ${online.has(site) ? "ok" : ""}"></span>${esc(s.siteNames[site] || site)}</span>
       <button class="sm ghost" data-act="up">↑</button><button class="sm ghost" data-act="down">↓</button></div>`).join("")}</div></div>`;

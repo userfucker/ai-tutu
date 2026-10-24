@@ -55,8 +55,8 @@ test("角度列表和提示词", () => {
   assert.equal(ST.ANGLES.map((a) => a.name).join(","), ["主视图", "左视图", "右视图", "后视图", "俯视图", "底视图", "45°侧面"].join(","));
   const p = { info: { name: "保温杯" } };
   assert.match(ST.P.angleView(p, { note: "" }, "45", "1:1"), /three-quarter view, 45 degrees/);
-  assert.match(ST.P.harmonize(p, "3:4", true), /extremely conservative/);
-  assert.match(ST.P.sameProduct(p), /保温杯/);
+  assert.match(ST.P.pickBetter(p), /保温杯/);
+  assert.match(ST.P.harmonize(p, "1:1"), /white patches inside openings/);
 });
 
 test("文字对比度：深背景自动换白字；背景花时按设置加底 / 不处理就提示看不清", async () => {

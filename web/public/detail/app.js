@@ -351,11 +351,11 @@ var APP = (globalThis.APP = {
         const a = p.auto;
         return `<div class="proj"><input type="checkbox" class="ck" data-sel="${p.id}" ${APP.homeSel.has(p.id) ? "checked" : ""}>
           <div class="thumb" data-act="openProj" data-id="${p.id}" style="background-image:url('${thumb ? ST.urlFor(thumb) : ""}')"></div>
-          <div class="body"><b title="${esc(p.name)}">${esc(p.name)}</b>
+          <div class="body"><b class="pname" data-act="openProj" data-id="${p.id}" title="打开">${esc(p.name)}</b>
           <span class="muted">${esc(pf.name)} · ${esc(ST.lang(p.lang).name)}${(p.langs || []).length ? ` +${p.langs.length} 种语言` : ""} · ${p.screens} 屏</span>
           <span class="muted">更新于 ${ST.bj(p.updated)}</span>
           ${a ? `<span><span class="astat ${a.status}">${esc(APP.AUTO_NAMES[a.status] || a.status)}</span> <span class="muted">${esc(a.status === "running" ? a.msg || "" : "")}</span></span>` : ""}</div>
-          <div class="acts"><button class="sm primary" data-act="openProj" data-id="${p.id}">打开</button>
+          <div class="acts">
           ${a && (a.status === "running" || a.status === "exporting") ? `<button class="sm" data-act="stopAuto" data-id="${p.id}">停止全自动</button>` : `<button class="sm blue" data-act="startAuto" data-id="${p.id}" title="服务器上自动做完：识别素材、抠图、卖点、提纲、背景、翻译、检查，导出后等你审核">一键全自动</button>`}
           ${a && a.exportFile ? `<a class="sm btnlink" href="/api/projects/${p.id}/export">下载 zip</a>` : ""}
           <button class="sm" data-act="copyProj" data-id="${p.id}" title="排版、背景、风格都保留，换新产品的素材和文案">复制成新产品</button><button class="sm danger" data-act="delProj" data-id="${p.id}">删除</button></div></div>`;
