@@ -21,3 +21,5 @@
 /* 抠好的图放在深色格子上，白边一眼看得出来 */
 .mcard .pic.dark { background-color: #3a3d44; background-image: linear-gradient(45deg, #2c2f35 25%, transparent 25%), linear-gradient(-45deg, #2c2f35 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #2c2f35 75%), linear-gradient(-45deg, transparent 75%, #2c2f35 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
 .warntext { color: #b45309 !important; }
+.pill .placeimg { width: 20px; height: 20px; border-radius: 4px; object-fit: cover; vertical-align: middle; margin-right: 4px; }
+.pill .x { color: var(--mute); margin-left: 4px; }

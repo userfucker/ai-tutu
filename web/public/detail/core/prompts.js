@@ -269,16 +269,24 @@ ST.P = (() => {
       ].join("\n");
     },
     /** AI 直接画场景（把抠好的透明 PNG 发给 AI，一步画出带产品的场景图） */
-    mainScene(p, style) {
+    /** placement：free = AI 自由摆放；same = 和产品图一样的角度朝向；ref = 照第 2 张图里的摆法（Lee 2026-10-24） */
+    mainScene(p, style, placement = "free", hasStyleRef) {
       const name = (p.info && p.info.name) || "";
+      const place = {
+        free: "- Placement: you may choose a natural, attractive way to place the product (standing, lying flat, slightly angled, etc.) and a pleasing camera angle; the product itself must stay identical.",
+        same: "- Placement: keep the product's orientation, viewing angle and pose exactly as in the uploaded product image; do not rotate it, lay it down or show it from another side.",
+        ref: "- Placement: place the product in the same pose, orientation, camera angle and position in the frame as in the SECOND uploaded image (placement reference only — use the new scene below, not that background).",
+      }[placement] || "";
       return [
-        "Generate one image: a photorealistic e-commerce main product photo, square 1:1, featuring EXACTLY the product in the uploaded image (a cut-out PNG with transparent background).",
+        "Generate one image: a photorealistic e-commerce main product photo, square 1:1, featuring EXACTLY the product in the first uploaded image (a cut-out PNG with transparent background).",
         `- Same product${name ? ` ("${name}", Chinese name)` : ""}: shape, proportions, colors, materials, patterns, printed text, logos and number of parts must stay identical; do not redesign it. Remove any leftover white fringes from the cut-out.`,
         `- Scene: ${style}.`,
-        "- Composition: the product centered, large (about 85% of the frame), standing naturally on a surface, realistic contact shadows, reflections and lighting matching the scene.",
+        place,
+        "- Composition: the product large (about 85% of the frame) and the clear focus, realistic contact shadows, reflections and lighting matching the scene.",
+        hasStyleRef ? `- Match the background style, colors and lighting of the ${placement === "ref" ? "THIRD" : "SECOND"} uploaded image (style reference only; do not copy anything from it).` : "",
         "- Absolutely NO text, letters, logos or watermarks other than what is printed on the product itself. No people, no other products.",
         "Reply with the image only.",
-      ].join("\n");
+      ].filter(Boolean).join("\n");
     },
     /** 审核“AI 直接画”的场景图：产品有没有被改 */
     sceneCheck(p) {

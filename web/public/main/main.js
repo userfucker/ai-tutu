@@ -14,7 +14,8 @@
   const APP = (globalThis.APP = { project: null });
   const P = () => APP.project;
   const SIZES = [800, 1000];
-  const MODES = [["paste", "先画背景再融入", "产品最稳：程序贴产品，AI 只调光影"], ["scene", "AI 直接画场景", "把抠好的透明 PNG 发给 AI，一步画出带产品的场景（更自然，产品可能被改一点）"]];
+  const MODES = [["scene", "AI 直接画场景", "把抠好的透明 PNG 发给 AI，一步画出带产品的场景（最自然）"], ["paste", "先画背景再融入", "产品最稳：AI 画空背景，程序贴产品，AI 只调光影"]];
+  const PLACES = [["free", "AI 自由发挥", "让 AI 自己决定怎么摆（立着、平放、斜着……）"], ["same", "和产品图一样", "保持产品图里的角度和朝向"]];
   const SITES = [["", "自动（按 AI 分工轮流）"], ["gemini", "Gemini"], ["copilot", "Copilot"]];
   const ls = { get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
   let site = ls.get("st:mainSite", "");
@@ -233,19 +234,27 @@
     const c = ready && !scene ? await compose(it, 64) : null;
     const busy = st && !/失败/.test(st);
     const has = hm.key && c && !c.stale;
-    let line = "";
+    let line = "", warn = false;
     if (!busy) {
-      if (scene) line = it.judge ? (it.judge.ok ? "审核：产品没被改" : "审核：产品可能被改了——" + it.judge.why) + (it.judge.note ? "；" + it.judge.note : "") : "";
+      if (scene) {
+        const j = it.judge;
+        if (j) { warn = j.ok === false; line = j.ok === null ? j.note : (j.ok ? "AI 审核：产品没被改" : "AI 审核：产品可能被改了——") + (j.why ? (j.ok ? "（" + j.why + "）" : j.why) : ""); }
+        if (it.placement === "ref") line = ["摆放照参考图", line].filter(Boolean).join("；");
+        else if (it.placement === "same") line = ["摆放和产品图一样", line].filter(Boolean).join("；");
+      }
       else if (c && c.stale) line = "产品改过了，显示原贴图；点“重新融入”";
-      else if (has) line = ST.harmText(hm);
+      else if (has) line = (hm.on ? "AI 图" : "原贴图") + (ST.harmText(hm) ? "；" + ST.harmText(hm) : "");
       else if (it.bg) line = "原贴图（没有融入）";
     }
     return `<div class="mcard" data-iid="${it.id}">
       <div class="pic" data-act="view">${url ? `<img src="${url}" alt="">` : ""}${st ? `<span class="st tag ${/失败/.test(st) ? "bad" : "blue"}">${esc(st)}</span>` : ""}</div>
       <div class="row"><b>${esc(it.styleName)}${scene ? ' <span class="muted">AI 直接画</span>' : ""}</b>${has ? `<span class="sp pills"><span class="pill ${hm.on ? "on" : ""}" data-act="harmView" data-v="1">AI 图</span><span class="pill ${hm.on ? "" : "on"}" data-act="harmView" data-v="0">原贴图</span></span>` : ""}</div>
-      ${line ? `<div class="muted ${scene && it.judge && !it.judge.ok ? "warntext" : ""}">${esc(line)}</div>` : ""}
+      ${line ? `<div class="muted ${warn ? "warntext" : ""}">${esc(line)}</div>` : ""}
       <div class="acts">
-        ${it.state === "ok" ? `<button class="sm primary" data-act="dlOne">下载</button><button class="sm" data-act="unaccept">取消采用</button>` : `<button class="sm primary" data-act="accept" ${ready && !busy ? "" : "disabled"}>采用</button>`}
+        <button class="sm" data-act="dlOne" ${ready ? "" : "disabled"}>下载</button>
+        <button class="sm" data-act="judge" ${ready && !busy && (scene || hm.key) ? "" : "disabled"} title="让审核 AI（默认豆包）看一眼：${scene ? "产品有没有被改" : "原贴图和 AI 图哪张好"}">AI 审核</button>
+        ${it.state === "ok" ? `<button class="sm" data-act="unaccept">取消采用</button>` : `<button class="sm primary" data-act="accept" ${ready && !busy ? "" : "disabled"}>采用</button>`}
+        <button class="sm" data-act="placeRef" ${ready ? "" : "disabled"} title="以后用“AI 直接画场景”时，产品都照这张的摆法放">用这个摆放</button>
         ${scene ? "" : `<button class="sm" data-act="adjust" ${ready && !busy ? "" : "disabled"}>调整产品</button>
         <button class="sm" data-act="reblend" ${ready && !busy ? "" : "disabled"}>${hm.key ? "重新融入" : "融入背景"}</button>`}
         <button class="sm" data-act="redraw" ${busy ? "disabled" : ""}>${/失败/.test(st) ? "重试" : scene ? "重画" : "重画背景"}</button>
@@ -278,6 +287,7 @@
     const sel = new Set(p.styles || []);
     const myPills = await Promise.all(myStyles.map(async (s) => `<span class="stypill ${sel.has("my:" + s.id) ? "on" : ""}" data-sty="my:${s.id}" title="${esc(s.desc || s.prompt)}">${s.ref ? `<img src="${await ST.urlOf(s.ref)}" alt="">` : ""}${esc(s.name)}<span class="x" data-act="delStyle" data-sid="${s.id}" title="删除这个风格">✕</span></span>`));
     const n = chosenStyles(p).length * (p.count || 1);
+    const placeUrl = p.placeRef ? await ST.urlOf(p.placeRef) : "";
     const pend = p.items.filter((x) => x.state !== "ok"), done = p.items.filter((x) => x.state === "ok");
     $("main").innerHTML = `
       <div class="card"><div class="head"><div><h3>① 产品图</h3><div class="muted">上传白底图（白底的会自动去白底；不是白底的点“AI 抠图”）。抠好的图放在深色格子上，有没有白边一眼能看出来；手腕绳、提手围成的圈里有白色，勾“镂空的白色也抠掉”。</div></div>
@@ -291,14 +301,15 @@
         <label class="row lb" style="margin-top:10px"><input type="checkbox" id="customOn" ${p.customOn ? "checked" : ""}> 自己写</label>
         <textarea id="custom" rows="2" placeholder="中文或英文都行，如：浅灰色水泥台面，旁边有一盆绿植，早晨的阳光" ${p.customOn ? "" : "hidden"}>${esc(p.custom || "")}</textarea></div>
       <div class="card"><h3>③ 生成</h3><div class="mrow">
-        <span class="lb">做法</span><span class="pills">${MODES.map(([v, t, tip]) => `<span class="pill ${(p.mode || "paste") === v ? "on" : ""}" data-mode="${v}" title="${esc(tip)}">${t}</span>`).join("")}</span>
+        <span class="lb">做法</span><span class="pills">${MODES.map(([v, t, tip]) => `<span class="pill ${(p.mode === "paste" ? "paste" : "scene") === v ? "on" : ""}" data-mode="${v}" title="${esc(tip)}">${t}</span>`).join("")}</span>
         <span class="lb">尺寸</span><span class="pills">${SIZES.map((s) => `<span class="pill ${p.size === s ? "on" : ""}" data-size="${s}">${s}×${s}</span>`).join("")}</span>
+        ${p.mode !== "paste" ? `<span class="lb">摆放</span><span class="pills">${PLACES.map(([v, t, tip]) => `<span class="pill ${(p.placement || "free") === v ? "on" : ""}" data-place="${v}" title="${esc(tip)}">${t}</span>`).join("")}${p.placeRef ? `<span class="pill ${p.placement === "ref" ? "on" : ""}" data-place="ref" title="照这张图里的摆法"><img src="${esc(placeUrl)}" class="placeimg" alt="">照“${esc(p.placeRefName || "")}”那张摆<span class="x" data-act="clearPlace" title="不用这张了">✕</span></span>` : ""}</span>` : ""}
         <label class="row lb">每种风格 <select id="count">${[1, 2, 3, 4].map((k) => `<option ${(p.count || 1) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张</label>
-        ${p.mode === "scene" ? "" : `<label class="row lb">产品大小 <input type="range" id="scale" min="40" max="95" value="${Math.round((p.scale || 0.85) * 100)}"><span id="scaleV">${Math.round((p.scale || 0.85) * 100)}%</span></label>
+        ${p.mode !== "paste" ? "" : `<label class="row lb">产品大小 <input type="range" id="scale" min="40" max="95" value="${Math.round((p.scale || 0.85) * 100)}"><span id="scaleV">${Math.round((p.scale || 0.85) * 100)}%</span></label>
         <label class="row lb"><input type="checkbox" id="blend" ${p.blend !== false ? "checked" : ""}> 融入背景（AI 只调光影）</label>`}
         <label class="row lb">用哪个 AI <select id="site">${SITES.map(([v, t]) => `<option value="${v}" ${v === site ? "selected" : ""}>${t}</option>`).join("")}</select></label>
         <button class="primary" data-act="generate" ${n && curProduct() ? "" : "disabled"}>生成 ${n} 张</button></div>
-        <div class="note" style="margin-top:10px">${p.mode === "scene" ? "AI 直接画：把抠好的透明 PNG 发给 AI，一步画出带产品的场景，最自然；产品可能被 AI 改一点，审核 AI 会看一眼并写出来（只提示，不拦）。" : "先画背景再融入：AI 画空背景 → 程序把抠好的 PNG 贴到中间 → AI 调光影融入 → 审核 AI（默认豆包）比一比原贴图和 AI 图，默认用它选的，两张都留着可以切换。"}
+        <div class="note" style="margin-top:10px">${p.mode !== "paste" ? "AI 直接画：把抠好的透明 PNG 发给 AI，一步画出带产品的场景，最自然；产品可能被 AI 改一点，不放心就点图片下面的“AI 审核”。喜欢哪张的摆法，点那张的“用这个摆放”。" : "先画背景再融入：AI 画空背景 → 程序把抠好的 PNG 贴到中间 → AI 调光影融入，直接显示 AI 图（原贴图留着可以切换，想让 AI 判断哪张好点“AI 审核”）。"}
           在服务器上做，关掉网页也不停。默认不加文字。</div></div>
       ${pend.length ? `<div class="card pendbox"><div class="head"><div><h3>待确认（${pend.length}）</h3><div class="muted">看过点“采用”；不满意可以调整产品、重新融入、重画背景，或者不要。</div></div></div>
         <div class="mcards">${(await Promise.all(pend.map(itemCard))).join("")}</div></div>` : ""}
@@ -346,6 +357,9 @@
     reblend: (el) => op({ op: "reblend", iid: itemOf(el).id, site }),
     redraw: (el) => op({ op: "redraw", iid: itemOf(el).id, site }),
     delItem: (el) => op({ op: "delItem", iid: itemOf(el).id }),
+    judge: (el) => op({ op: "judge", iid: itemOf(el).id }),
+    placeRef: async (el) => { const p = await op({ op: "placeRef", iid: itemOf(el).id }); if (p) APP.toast("以后“AI 直接画场景”都照这张的摆法放（在“③ 生成 → 摆放”里可以改回去）"); },
+    clearPlace: (el, e) => { e.stopPropagation(); op({ op: "placeRef", clear: true }); },
     view: async (el) => {
       const it = itemOf(el);
       if (!(it.mode === "scene" ? it.scene : it.bg)) return;
@@ -389,6 +403,8 @@
     }
     const sz = e.target.closest("[data-size]");
     if (sz && P()) { setFields({ size: +sz.dataset.size }); return; }
+    const pl = e.target.closest("[data-place]");
+    if (pl && P()) { setFields({ placement: pl.dataset.place }); return; }
     const md = e.target.closest("[data-mode]");
     if (md && P()) { setFields({ mode: md.dataset.mode }); return; }
     const open = e.target.closest("[data-open]");

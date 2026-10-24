@@ -2,7 +2,7 @@
  * 详情页 · 产品融入背景（B 方式，Lee 2026-10-23）
  *
  * 程序先把产品贴到背景上（就是平常看到的那张），再交给 AI 只调光影：加接触阴影、投影、反光，让光线颜色和背景一致。
- * 产品本身不许变。做完让审核 AI（默认豆包）比一比原贴图和 AI 图哪张好，默认用它选的；两张都留着，随时可以切换（screen.harm.on）。
+ * 产品本身不许变。做完直接用 AI 图；原贴图一直留着，随时可以切换（screen.harm.on）。想让 AI 帮着判断，点“AI 审核”（默认豆包）比一比哪张好。
  *
  * 网页和服务器（全自动）共用。ai = { image(prompt, images, label, n), json(prompt, images, label, n) }，images = [{ blob, name }]
  */
@@ -49,33 +49,42 @@ var ST = globalThis.ST || (globalThis.ST = {});
 
   /**
    * 融入一张贴好产品的图（详情页的一屏、主图都用它）。canvas = 程序贴好的图（原贴图），box = 产品在图上的位置（像素）。
-   * AI 调光影画一次（不重做），再让审核 AI 比一比原贴图和 AI 图哪张好（Lee 2026-10-24）：
-   *  - 审核选哪张默认用哪张，两张都留着可以切换；
-   *  - 审核没做成（指定的 AI 没连上、回复不对）默认用 AI 图，除非程序看出产品那块几乎全变了（产品画没了）。
+   * AI 调光影画一次（不重做），默认直接用 AI 图；o.judge = true 时再让审核 AI 比一比原贴图和 AI 图哪张好（平时不自动审核，点“AI 审核”才做）。
    * 返回 { ok: true, blob（AI 图）, choice: "ai" | "orig", why（审核理由）, note }
    */
-  ST.harmonizeCanvas = async (p, canvas, b, ai, what) => {
+  ST.harmonizeCanvas = async (p, canvas, b, ai, what, o = {}) => {
     const W = canvas.width, H = canvas.height;
     const baseBlob = await ST.toBlob(canvas, "image/jpeg", 0.92);
     const ratio = closestAiRatio(W, H);
-    const box = b ? { x: Math.max(0, b.x), y: Math.max(0, b.y), w: Math.max(4, Math.min(W - Math.max(0, b.x), b.w)), h: Math.max(4, Math.min(H - Math.max(0, b.y), b.h)) } : null;
     const out = await ai.image(ST.P.harmonize(p, ratio), [{ blob: baseBlob, name: "原图.jpg" }], `融入背景：${what}`, 0);
     const cv = await fit(out, W, H);
     const blob = await ST.toBlob(cv, "image/jpeg", 0.92);
+    if (!o.judge) return { ok: true, blob, choice: "ai", why: "", note: "" }; // 不自动审核（Lee 2026-10-24）：直接用 AI 图，要审核点“AI 审核”
+    const box = b ? { x: Math.max(0, b.x), y: Math.max(0, b.y), w: Math.max(4, Math.min(W - Math.max(0, b.x), b.w)), h: Math.max(4, Math.min(H - Math.max(0, b.y), b.h)) } : null;
     const diff = box ? ST.regionDiff(canvas, cv, box) : { shape: 0, color: 0 };
-    const gross = diff.shape > GROSS_SHAPE || diff.color > GROSS_COLOR;
+    return { ok: true, blob, ...(await ST.pickBetter(p, baseBlob, blob, ai, what, diff.shape > GROSS_SHAPE || diff.color > GROSS_COLOR)) };
+  };
+  /** 审核：原贴图和 AI 图哪张好 → { choice: "ai" | "orig", why, note }。审核没做成默认 AI 图（gross = 程序看产品那块几乎全变了，就默认原贴图） */
+  ST.pickBetter = async (p, baseBlob, aiBlob, ai, what, gross) => {
     try {
-      const r = await ai.json(ST.P.pickBetter(p), [{ blob: baseBlob, name: "1-原贴图.jpg" }, { blob, name: "2-AI图.jpg" }], `审核融入的图：${what}`, 0);
+      const r = await ai.json(ST.P.pickBetter(p), [{ blob: baseBlob, name: "1-原贴图.jpg" }, { blob: aiBlob, name: "2-AI图.jpg" }], `审核融入的图：${what}`, 0);
       const better = String(r && (r.better ?? r.pick ?? "")).replace(/\D/g, "");
-      if (better === "1" || better === "2") return { ok: true, blob, choice: better === "1" ? "orig" : "ai", why: String((r && r.why) || "").slice(0, 200), note: "" };
+      if (better === "1" || better === "2") return { choice: better === "1" ? "orig" : "ai", why: String((r && r.why) || "").slice(0, 200), note: "" };
       throw new Error("审核回复里没有选 1 还是 2");
     } catch (e) {
       if (e && (e.stopped || /已停止/.test(e.message || ""))) throw e;
       const msg = String((e && e.message) || e).slice(0, 80);
-      return gross
-        ? { ok: true, blob, choice: "orig", why: "", note: `审核没做成（${msg}）；程序看产品那块变化很大，先用原贴图` }
-        : { ok: true, blob, choice: "ai", why: "", note: `审核没做成（${msg}），默认用 AI 图` };
+      return gross ? { choice: "orig", why: "", note: `审核没做成（${msg}）；程序看产品那块变化很大，先用原贴图` } : { choice: "ai", why: "", note: `审核没做成（${msg}），还用 AI 图` };
     }
+  };
+  /** 详情页一屏：点“AI 审核”时用（原贴图现画，AI 图是 sc.harm.key） */
+  ST.judgeScreen = async (p, sc, ai) => {
+    const hm = sc.harm || {};
+    if (!hm.key) throw new Error("这一屏还没融入");
+    const r = await ST.renderScreen(p, sc, { platform: ST.platformOf(p, p.platform), lang: p.lang, pxWidth: 1000, only: "base" });
+    const res = await ST.pickBetter(p, await ST.toBlob(r.canvas, "image/jpeg", 0.92), await ST.db.getBlob(hm.key), ai, `第 ${p.screens.indexOf(sc) + 1} 屏`);
+    sc.harm = { ...hm, on: res.choice === "ai", choice: res.choice, why: res.why, note: res.note };
+    return res;
   };
 
   /** 审核结果写成一句话（网页上显示） */

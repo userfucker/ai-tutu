@@ -35,7 +35,7 @@
             <button class="blue" data-act="autoApprove">${a.status === "approved" ? "改完了，重新导出" : "审核通过（按现在的内容导出）"}</button>
             <button class="sm" data-act="autoAgain" title="已经做好的保留，只补缺的；要整套重来，先到提纲里删掉屏幕">再跑一遍全自动</button></div>` : ""}
         </div>
-        ${a.status === "review" || a.status === "approved" ? '<div class="card"><h3>产品融入背景</h3><div class="muted">全自动已经把有产品的屏融入了背景（AI 只调光影），审核 AI 选了每屏用哪张。原贴图和 AI 图都保留，可以切换；切换后点上面的“审核通过”重新导出。</div><div class="hgrid" id="harmGrid">加载中…</div></div>' : ""}
+        ${a.status === "review" || a.status === "approved" ? '<div class="card"><h3>产品融入背景</h3><div class="muted">全自动已经把有产品的屏融入了背景（AI 只调光影），默认用 AI 图。原贴图也保留，可以切换；切换后点上面的“审核通过”重新导出。想让 AI 判断哪张好，到编辑页点“AI 审核”。</div><div class="hgrid" id="harmGrid">加载中…</div></div>' : ""}
         <div class="card"><h3>过程记录</h3><div class="alog" id="alog">${esc((a.log || []).join("\n")) || "（还没有）"}</div>
           <div class="muted" style="margin-top:6px">每个 AI 任务的详情在工作台的 <a href="/#/tasks" target="_blank">任务中心</a>。</div></div>`;
       const lg = main.querySelector("#alog");

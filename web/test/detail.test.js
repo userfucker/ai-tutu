@@ -88,9 +88,9 @@ test("一键全自动：做完导出 zip，等审核", async () => {
   // 融入背景（B 方式）：有 AI 背景、有主产品图的屏都融入了，原贴图保留（harm.on 可以切换）
   const harmed = p.screens.filter((s) => s.harm && s.harm.status === "ok");
   assert.ok(harmed.length >= 1, "至少一屏融入了背景");
-  assert.ok(harmed.every((s) => s.harm.on && s.harm.key && s.harm.sig && s.harm.choice === "ai" && /白边/.test(s.harm.why)), "审核选了 AI 图，默认显示融入后，理由记下来了");
+  assert.ok(harmed.every((s) => s.harm.on && s.harm.key && s.harm.sig), "默认直接用 AI 图（融入后）");
   assert.ok(asked.some((a) => a.kind === "image" && /Edit the uploaded image/.test(a.prompt) && a.images === 1), "AI 调光影（只发贴好的那一张）");
-  assert.ok(asked.some((a) => /哪张更适合当电商图片/.test(a.prompt) && a.images === 2), "审核 AI 比一比原贴图和 AI 图");
+  assert.ok(!asked.some((a) => /哪张更适合当电商图片/.test(a.prompt)), "不自动审核（Lee 2026-10-24）");
   assert.ok(p.auto.log.some((l) => /融入背景完成/.test(l)));
   assert.ok(Object.keys(p.screens[0].text.title || {}).includes("en"), "翻译成英语了");
   assert.equal(p.auto.exportFile, `exports/${pid}.zip`);
@@ -131,35 +131,18 @@ test("中途停止、再开始：做过的不重复问 AI", async () => {
   assert.ok(list.every((x) => x.firstAsset && x.auto));
 });
 
-test("融入背景：审核选了原贴图 → 不重做，默认用原贴图，AI 图也留着可以切换", async () => {
-  aiOpts.harmBad = true;
+test("AI 审核（点了才做）：dt_check 指定的 AI 能审核；指定豆包但没连上，直接报错不干等", async () => {
+  const img = [{ b64: Buffer.from("x").toString("base64"), mime: "image/png" }];
+  const waitTask = async (id) => { let t; for (let i = 0; i < 100; i++) { t = (await api("GET", `/api/tasks/${id}/result`)).body; if (["done", "failed"].includes(t.task.status)) break; await sleep(100); } return t; };
   try {
-    const r = await api("POST", "/api/projects/import", tbZip(), true);
-    const id = r.body.id;
-    const before = asked.length;
-    await api("POST", `/api/projects/${id}/auto`, {});
-    const p = await waitAuto(id, ["review"]);
-    const tries = asked.slice(before).filter((a) => /Edit the uploaded image/.test(a.prompt));
-    const can = p.screens.filter((s) => s.harm);
-    assert.ok(can.length >= 1);
-    assert.equal(tries.length, can.length, "每屏只画一次，不重做");
-    assert.ok(can.every((s) => s.harm.choice === "orig" && !s.harm.on && s.harm.key), "默认原贴图，AI 图留着");
-    assert.ok(p.auto.log.some((l) => /融入背景完成：用原贴图（审核：第 2 张产品不见了）/.test(l)));
-  } finally { aiOpts.harmBad = false; }
-});
-
-test("融入背景：审核的豆包没连上 → 不换别的 AI，直接报错，默认用 AI 图", async () => {
-  await api("PUT", "/api/roles", { roles: { text: ["gemini"], vision: ["gemini"], image: ["gemini"], dt_check: ["doubao"] } });
-  try {
-    const r = await api("POST", "/api/projects/import", tbZip(), true);
-    const id = r.body.id;
-    const before = asked.length;
-    await api("POST", `/api/projects/${id}/auto`, {});
-    const p = await waitAuto(id, ["review"]);
-    assert.equal(asked.slice(before).filter((a) => /哪张更适合/.test(a.prompt)).length, 0, "没有拿别的 AI 去审核");
-    const can = p.screens.filter((s) => s.harm);
-    assert.ok(can.length >= 1 && can.every((s) => s.harm.on && s.harm.choice === "ai" && /豆包没连上/.test(s.harm.note)), JSON.stringify(can.map((s) => s.harm)));
-    const tasks = (await api("GET", `/api/tasks?ownerId=${id}&status=failed`)).body.tasks;
-    assert.ok(tasks.some((t) => /审核/.test(t.label) && /豆包没连上/.test(t.error)), "任务中心里能看到报错");
+    const r1 = await api("POST", "/api/tasks", { kind: "vision", prompt: "请判断哪张更适合当电商图片", images: img, role: "dt_check", label: "审核测试" });
+    const t1 = await waitTask(r1.body.id);
+    assert.equal(t1.task.status, "done", "dt_check 指定了 gemini：能审核");
+    assert.match(t1.result.text, /"better":2/);
+    await api("PUT", "/api/roles", { roles: { text: ["gemini"], vision: ["gemini"], image: ["gemini"], dt_check: ["doubao"] } });
+    const r2 = await api("POST", "/api/tasks", { kind: "vision", prompt: "请判断哪张更适合当电商图片", images: img, role: "dt_check", label: "审核测试 2" });
+    const t2 = await waitTask(r2.body.id);
+    assert.equal(t2.task.status, "failed", "豆包没连上：不排队干等，也不换别的 AI");
+    assert.match(t2.task.error, /豆包没连上/);
   } finally { await api("PUT", "/api/roles", { roles: { text: ["gemini"], vision: ["gemini"], image: ["gemini"], dt_check: ["gemini"] } }); }
 });

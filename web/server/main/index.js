@@ -18,11 +18,11 @@ import { FILES_DIR } from "../config.js";
 
 const running = new Set(); // 正在做的“项目:主图/产品”
 const SITE_OK = ["gemini", "copilot"]; // 画图可以临时指定的网站（空 = 按 AI 分工轮流）
-const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode"];
+const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode", "placement"];
 
 export function newProject(o = {}) {
   const ST = getST();
-  return { id: ST.uid("m"), kind: "main", name: o.name || `主图 ${ST.bj().slice(5, 16)}`, info: { name: "" }, size: 800, products: [], cur: "", styles: ["studio"], custom: "", customOn: false, count: 1, scale: 0.85, blend: true, mode: "paste", items: [] };
+  return { id: ST.uid("m"), kind: "main", name: o.name || `主图 ${ST.bj().slice(5, 16)}`, info: { name: "" }, size: 800, products: [], cur: "", styles: ["studio"], custom: "", customOn: false, count: 1, scale: 0.85, blend: true, mode: "scene", placement: "free", placeRef: "", items: [] }; // 默认 AI 直接画场景（Lee 2026-10-24）
 }
 
 // ------------------------------------------------------------ 改项目（同步：读最新 → 改 → 存）
@@ -129,24 +129,19 @@ function runItem(pid, iid, what, resume) {
     const rot = it.rot || 0;
     const set = (patch) => { const q = editItem(pid, iid, (x) => { Object.assign(x, patch); }); if (!q) throw new Error("主图已经删掉了"); p = q; it = p.items.find((x) => x.id === iid); };
     if (it.mode === "scene") {
-      // AI 直接画场景：把抠好的透明 PNG 发过去
+      // AI 直接画场景：把抠好的透明 PNG 发过去；摆放照 it.placement（free / same / ref = 照某张图的摆法）
       const pr = ST.mainProduct(p, it.product);
       set({ job: "AI 画场景中" });
       const png = await ai.img(await ST.db.getBlob(pr.cut || pr.key), "产品.png", 1536, !!pr.cut);
+      const place = it.placement === "ref" && it.placeRef ? await ai.img(await ST.db.getBlob(it.placeRef), "摆放参考.jpg", 1024) : null;
       const ref = it.ref ? await ai.img(await ST.db.getBlob(it.ref), "风格参考.jpg", 1024) : null;
-      const blob = await ai.image("scene", ST.P.mainScene(p, it.prompt) + (ref ? "\n- Match the background style, colors and lighting of the second uploaded image (style reference only; do not copy anything from it)." : ""), [png, ref], `主图（AI 直接画）：${it.styleName}`, { role: "mn_bg", rotate: rot, site: it.site });
+      const placement = place ? "ref" : it.placement === "same" ? "same" : "free";
+      const blob = await ai.image("scene", ST.P.mainScene(p, it.prompt, placement, !!ref), [png, place, ref], `主图（AI 直接画）：${it.styleName}`, { role: "mn_bg", rotate: rot, site: it.site });
       const key = `${pid}:${iid}-scene-${Date.now()}`;
       await ST.saveImage(key, blob);
       const old = it.scene;
-      set({ scene: key, job: "审核中", judge: null });
+      set({ scene: key, job: "", judge: null });
       delBlob(old);
-      let judge;
-      try {
-        const white = await ST.mainWhite(p, 1024);
-        const r = await ai.json("judge", ST.P.sceneCheck(p), [await ai.img(await ST.toBlob(white, "image/jpeg", 0.92), "1-产品原图.jpg", 1024), await ai.img(blob, "2-场景图.jpg", 1024)], `审核场景图：${it.styleName}`, { role: "mn_check" });
-        judge = { ok: !(r.ok === false || r.ok === "false"), why: String(r.why || "").slice(0, 200) };
-      } catch (e) { judge = { ok: true, why: "", note: `审核没做成（${String(e.message || e).slice(0, 80)}）` }; }
-      set({ judge, job: "" });
       return;
     }
     if (what === "full" || !it.bg) {
@@ -164,12 +159,11 @@ function runItem(pid, iid, what, resume) {
     const c = await ST.mainCompose(p, it, 1024, false);
     const res = await ST.harmonizeCanvas(p, c.canvas, c.box, {
       image: async (prompt, imgs, label) => ai.image("blend", prompt, await Promise.all(imgs.map((x) => ai.img(x.blob, x.name, 1536))), label, { role: "mn_blend", rotate: rot, site: it.site }),
-      json: async (prompt, imgs, label) => { set({ job: "审核中" }); return ai.json("judge", prompt, await Promise.all(imgs.map((x) => ai.img(x.blob, x.name, 1024))), label, { role: "mn_check" }); },
-    }, `主图 ${it.styleName}`);
+    }, `主图 ${it.styleName}`); // 不自动审核：直接用 AI 图，要审核点“AI 审核”
     const key = `${pid}:${iid}-harm-${Date.now()}`;
     await ST.saveImage(key, res.blob);
     const old = it.harm && it.harm.key;
-    set({ harm: { key, sig: c.sig, on: res.choice === "ai", status: "ok", choice: res.choice, why: res.why, note: res.note }, job: "" });
+    set({ harm: { key, sig: c.sig, on: true, status: "ok" }, job: "" });
     delBlob(old);
   })().catch((e) => {
     if (!/主图已经删掉了/.test(e.message || "")) console.error("主图出错", e.message || e);
@@ -178,6 +172,39 @@ function runItem(pid, iid, what, resume) {
     running.delete(k);
     if (ai) ai.cleanup();
   });
+}
+
+// ------------------------------------------------------------ AI 审核（可选，点了才做；默认豆包，没连上直接报错）
+function runJudge(pid, iid) {
+  const k = `${pid}:${iid}`;
+  if (running.has(k)) return;
+  running.add(k);
+  let ai = null;
+  (async () => {
+    const ST = getST();
+    const p0 = editItem(pid, iid, (it) => { it.jn = (it.jn || 0) + 1; it.job = "AI 审核中"; });
+    if (!p0) return;
+    const p = store.getProject(pid);
+    const it = p.items.find((x) => x.id === iid);
+    ai = aiOf(pid, `${iid}-j${it.jn}`);
+    const json = async (prompt, imgs, label) => ai.json("judge", prompt, await Promise.all(imgs.map((x) => ai.img(x.blob, x.name, 1024))), label, { role: "mn_check" });
+    if (it.mode === "scene") {
+      if (!it.scene) throw new Error("还没画好");
+      const white = await ST.toBlob(await ST.mainWhite(p, 1024), "image/jpeg", 0.92);
+      let judge;
+      try {
+        const r = await json(ST.P.sceneCheck(p), [{ blob: white, name: "1-产品原图.jpg" }, { blob: await ST.db.getBlob(it.scene), name: "2-场景图.jpg" }], `AI 审核：${it.styleName}`);
+        judge = { ok: !(r.ok === false || r.ok === "false"), why: String(r.why || "").slice(0, 300) };
+      } catch (e) { judge = { ok: null, why: "", note: `审核没做成：${String(e.message || e).slice(0, 120)}` }; }
+      editItem(pid, iid, (x) => { x.judge = judge; x.job = ""; });
+      return;
+    }
+    if (!it.harm || !it.harm.key) throw new Error("还没融入，没有可以比的");
+    const c = await ST.mainCompose(p, it, 1024, false);
+    const res = await ST.pickBetter(p, await ST.toBlob(c.canvas, "image/jpeg", 0.92), await ST.db.getBlob(it.harm.key), { json: (prompt, imgs, label) => json(prompt, imgs, label) }, `主图 ${it.styleName}`);
+    editItem(pid, iid, (x) => { if (x.harm) Object.assign(x.harm, { on: res.choice === "ai", choice: res.choice, why: res.why, note: res.note }); x.job = ""; });
+  })().catch((e) => editItem(pid, iid, (x) => { x.job = "失败：" + (e.message || e); }))
+    .finally(() => { running.delete(k); if (ai) ai.cleanup(); });
 }
 
 // ------------------------------------------------------------ 网页发来的操作
@@ -228,10 +255,23 @@ export async function op(pid, b) {
       if (!styles.length) throw new Error("先选至少一种背景风格");
       const list = [];
       let n = 0;
-      for (const s of styles) for (let k = 0; k < (p0.count || 1); k++) list.push({ id: ST.uid("it"), mode: p0.mode === "scene" ? "scene" : "paste", style: s.id, styleName: s.name, prompt: s.prompt, ref: s.ref || "", product: pr.id, bg: "", pos: { x: 0.5, y: 0.53, s: p0.scale || 0.85 }, harm: null, state: "pending", t: Date.now(), rot: n++, job: "排队中", site: SITE_OK.includes(b.site) ? b.site : "" });
+      for (const s of styles) for (let k = 0; k < (p0.count || 1); k++) list.push({ id: ST.uid("it"), mode: p0.mode === "paste" ? "paste" : "scene", placement: p0.placement === "ref" && p0.placeRef ? "ref" : p0.placement === "same" ? "same" : "free", placeRef: p0.placement === "ref" ? p0.placeRef || "" : "", style: s.id, styleName: s.name, prompt: s.prompt, ref: s.ref || "", product: pr.id, bg: "", pos: { x: 0.5, y: 0.53, s: p0.scale || 0.85 }, harm: null, state: "pending", t: Date.now(), rot: n++, job: "排队中", site: SITE_OK.includes(b.site) ? b.site : "" });
       const p = edit(pid, (q) => { q.items.unshift(...list); });
       for (const it of list) runItem(pid, it.id, "full");
       return p;
+    }
+    case "judge": runJudge(pid, iid); return store.getProject(pid);
+    case "placeRef": {
+      // 用这张的摆法：把这张图复制一份当摆放参考（这张删了也不影响）
+      const it = p0.items.find((x) => x.id === iid);
+      const drop = (p) => { if (p.placeRef && !p.items.some((x) => x.placeRef === p.placeRef && x.job)) delBlob(p.placeRef); };
+      if (b.clear || !it) return edit(pid, (p) => { drop(p); p.placeRef = ""; p.placeRefName = ""; if (p.placement === "ref") p.placement = "free"; });
+      const src = it.mode === "scene" ? it.scene : (await ST.mainCompose(p0, it, 1024)).canvas;
+      const blob = typeof src === "string" ? await ST.db.getBlob(src) : await ST.toBlob(src, "image/jpeg", 0.92);
+      if (!blob) throw new Error("这张还没画好");
+      const key = `${pid}:placeref-${Date.now()}`;
+      await ST.saveImage(key, blob);
+      return edit(pid, (p) => { drop(p); p.placeRef = key; p.placeRefName = it.styleName; p.placement = "ref"; p.mode = "scene"; });
     }
     case "view": return editItem(pid, iid, (it) => { if (!it.harm) return false; it.harm.on = !!b.on; });
     case "accept": return editItem(pid, iid, (it) => { it.state = b.ok ? "ok" : "pending"; });

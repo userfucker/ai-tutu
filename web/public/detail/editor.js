@@ -95,6 +95,20 @@
     }
     refresh();
   };
+  /** AI 审核（可选）：原贴图和 AI 图哪张好，默认豆包，没连上直接报错 */
+  APP.judgeScreen = async (sc) => {
+    const p = P();
+    if (/中/.test(hgen.get(sc.id) || "")) return;
+    hgen.set(sc.id, "AI 审核中");
+    refresh();
+    try {
+      const r = await ST.judgeScreen(p, sc, { json: (prompt, imgs, label) => APP.aiJson(prompt, imgs.map((x) => ({ ...x, max: 1024 })), label, { role: "dt_check" }) });
+      hgen.delete(sc.id);
+      await APP.save(true);
+      APP.toast(`第 ${p.screens.indexOf(sc) + 1} 屏：${ST.harmText(sc.harm)}`, !!r.note);
+    } catch (e) { hgen.set(sc.id, "审核失败：" + e.message); }
+    refresh();
+  };
   APP.harmAll = async () => {
     const p = P();
     const list = [];
@@ -416,10 +430,10 @@
     else if (h.stale) line = '<div class="muted">产品挪过、换过图或背景，原来融入的图不能用了，现在显示原贴图。点“重新融入”。</div>';
     else if (hm.status === "fallback") line = `<div class="muted">上次没融入成功：${esc(hm.note || "")}</div>`;
     else if (has) line = `<div class="muted">${h.used ? "现在显示融入后的图（AI 图）" : "现在显示原贴图"}${ST.harmText(hm) ? "。" + esc(ST.harmText(hm)) : ""}</div>`;
-    else line = '<div class="muted">程序已经把产品贴好；融入 = AI 只加阴影、反光、调光线，产品本身不变；做完审核 AI（默认豆包）比一比哪张好，两张都留着可以切换。</div>';
+    else line = '<div class="muted">程序已经把产品贴好；融入 = AI 只加阴影、反光、调光线，做完直接用 AI 图（原贴图留着可以切换；想让 AI 判断哪张好，点“AI 审核”）。</div>';
     return `<div class="harm"><div class="row"><b>产品融入背景</b>${has ? `<span class="sp pills"><span class="pill ${hm.on ? "on" : ""}" data-act="harmView" data-v="1">融入后</span><span class="pill ${hm.on ? "" : "on"}" data-act="harmView" data-v="0">原贴图</span></span>` : ""}</div>
       ${line}
-      <div class="row"><button class="sm blue" data-act="harmOne" ${busy ? "disabled" : ""}>${hm.key || hm.status ? "重新融入" : "融入背景"}</button>
+      <div class="row"><button class="sm blue" data-act="harmOne" ${busy ? "disabled" : ""}>${hm.key || hm.status ? "重新融入" : "融入背景"}</button>${has ? `<button class="sm" data-act="harmJudge" ${busy ? "disabled" : ""} title="让审核 AI（默认豆包）比一比原贴图和 AI 图哪张好">AI 审核</button>` : ""}
         <select id="harmSite" title="用哪个 AI 画"><option value="">自动（按 AI 分工轮流）</option><option value="gemini" ${harmSite === "gemini" ? "selected" : ""}>Gemini</option><option value="copilot" ${harmSite === "copilot" ? "selected" : ""}>Copilot</option></select></div>
       <label class="row lb"><input type="checkbox" id="harmAuto" ${p.harmAuto !== false ? "checked" : ""}> 生成背景后自动融入</label></div>`;
   }
@@ -591,6 +605,7 @@
       genAll: () => APP.genAllBg(),
       harmAll: () => APP.harmAll(),
       harmOne: () => APP.harmScreen(cur()),
+      harmJudge: () => APP.judgeScreen(cur()),
       harmView: async (el) => { const sc = cur(); if (!sc.harm) return; sc.harm.on = el.dataset.v === "1"; await APP.save(true); refresh(); },
       asStyle: async () => { const p = P(); const b = await ST.db.getBlob(cur().bg.key); p.style.styleRef = `${p.id}:styleref`; await ST.saveImage(p.style.styleRef, b); APP.save(); APP.toast("已设为风格参考：之后生成的背景都参考它的配色和光线"); },
       uploadBg: () => document.getElementById("bgInput").click(),

@@ -35,9 +35,17 @@ const api = async (method, url, body) => {
   return r.json();
 };
 await api('POST', '/api/auth/setup', { password: '1234' });
-await api('PUT', '/api/roles', { roles: { text: ['gemini'], vision: ['gemini'], image: ['gemini'], mn_check: ['gemini'] } });
+await api('PUT', '/api/roles', { roles: { text: ['gemini'], vision: ['gemini'], image: ['gemini'] } }); // 审核用默认的豆包
 const ai = fakeDetailAI();
 const plugin = await connect(`ws://127.0.0.1:${PORT}/ext`, { token, name: '测试电脑', version: '0.8.0', app: 'aitutu', sites: [{ site: 'gemini', name: 'Gemini', open: true, ready: true }] }, ai.onCmd);
+// 假 ai-web（豆包）：AI 审核默认用它；记下每次收到的时间，看点了“AI 审核”多久才发过来
+const doubao = [];
+const plugin2 = await connect(`ws://127.0.0.1:${PORT}/ext`, { token, name: '测试电脑', version: '1.5.0', app: 'aiweb', sites: [{ site: 'doubao', name: '豆包', open: true, ready: true }] }, async (m) => {
+  if (m.cmd !== 'ask') return { error: '不支持' };
+  doubao.push({ t: Date.now(), text: m.args.text, files: (m.args.files || []).length });
+  const out = /哪张更适合/.test(m.args.text) ? { better: 2, why: '去掉了白边，光线更自然' } : { ok: true, why: '形状颜色 logo 都一样' };
+  return { answer: '```json\n' + JSON.stringify(out) + '\n```' };
+});
 
 const browser = await chromium.launch({ channel: 'chromium', headless: true });
 const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, acceptDownloads: true });
@@ -61,6 +69,7 @@ try {
   await (await fc).setFiles({ name: '白底.png', mimeType: 'image/png', buffer: product('#ffffff') });
   await page.waitForSelector('.mcard[data-prid] .tag.ok');
   check('上传白底图：自动去白底', true);
+  check('默认做法：AI 直接画场景、AI 自由摆放', await page.isVisible('[data-mode="scene"].on') && await page.isVisible('[data-place="free"].on'));
   await page.click('[data-sty="marble"]');
   await page.selectOption('#count', '1');
   await page.waitForSelector('[data-act="generate"]:has-text("生成 2 张")');
@@ -68,10 +77,53 @@ try {
   await page.click('[data-act="generate"]');
   await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 2);
   await idle();
-  const bgAsk = ai.asked.filter((a) => a.kind === 'image' && /empty background scene/.test(a.prompt));
-  check('AI 画了 2 张空背景（不带产品）', bgAsk.length === 2 && bgAsk.some((a) => /marble/.test(a.prompt)));
-  check('每张都融入了背景，审核比过原贴图和 AI 图', ai.asked.filter((a) => /Edit the uploaded image/.test(a.prompt)).length === 2 && ai.asked.filter((a) => /哪张更适合当电商图片/.test(a.prompt) && a.images === 2).length === 2);
-  check('审核选了 AI 图，理由写在卡片上', (await page.locator('.pendbox .mcard:has-text("审核选了 AI 图：去掉了白边")').count()) === 2);
+  const sc1 = ai.asked.filter((a) => /a cut-out PNG with transparent background/.test(a.prompt));
+  check('AI 直接画：把抠好的 PNG 发给 AI，让它自由摆放', sc1.length === 2 && sc1.every((a) => a.images === 1 && /you may choose a natural, attractive way/.test(a.prompt)));
+  check('不自动审核：没有问审核 AI', doubao.length === 0 && !ai.asked.some((a) => /是不是同一个产品|哪张更适合/.test(a.prompt)));
+  check('每张图下面有“下载”“AI 审核”“用这个摆放”', (await page.locator('.pendbox [data-act="dlOne"]:not([disabled])').count()) === 2 && (await page.locator('.pendbox [data-act="judge"]:not([disabled])').count()) === 2 && (await page.locator('.pendbox [data-act="placeRef"]').count()) === 2);
+  const t0 = Date.now();
+  await page.click('.pendbox [data-act="judge"] >> nth=0');
+  await page.waitForSelector('.pendbox .mcard:has-text("AI 审核：产品没被改")', { timeout: 30000 });
+  check('点“AI 审核”：马上发给豆包（产品原图 + 场景图）', doubao.length === 1 && doubao[0].files === 2 && doubao[0].t - t0 < 5000, `${doubao.length ? doubao[0].t - t0 : '-'} 毫秒`);
+  // 用这个摆放 → 再画一张照它摆
+  await page.click('.pendbox [data-act="placeRef"] >> nth=0');
+  await page.waitForSelector('[data-place="ref"].on');
+  check('用这个摆放：“摆放”里多了这张，自动选上', true);
+  await page.click('[data-sty="marble"]'); // 只留纯色渐变棚拍
+  await page.waitForSelector('[data-act="generate"]:has-text("生成 1 张")');
+  let nAsk = ai.asked.length;
+  await page.click('[data-act="generate"]');
+  await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 3);
+  await idle();
+  const sc2 = ai.asked.slice(nAsk).find((a) => /a cut-out PNG/.test(a.prompt));
+  check('照参考图摆：产品 PNG + 那张图一起发给 AI', sc2 && sc2.images === 2 && /SECOND uploaded image/.test(sc2.prompt));
+  await page.click('[data-place="same"]');
+  await page.waitForSelector('[data-place="same"].on');
+  nAsk = ai.asked.length;
+  await page.click('[data-act="generate"]');
+  await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 4);
+  await idle();
+  const sc3 = ai.asked.slice(nAsk).find((a) => /a cut-out PNG/.test(a.prompt));
+  check('和产品图一样：要求保持产品图的角度朝向', sc3 && sc3.images === 1 && /keep the product's orientation/.test(sc3.prompt));
+  await page.click('[data-place="ref"] .x');
+  await page.waitForFunction(() => !document.querySelector('[data-place="ref"]'));
+  check('参考图可以去掉', true);
+
+  // 先画背景再融入：不自动审核，直接显示 AI 图
+  await page.click('[data-mode="paste"]');
+  await page.waitForSelector('[data-mode="paste"].on');
+  await page.click('[data-sty="marble"]');
+  await page.waitForSelector('[data-act="generate"]:has-text("生成 2 张")');
+  nAsk = ai.asked.length;
+  await page.click('[data-act="generate"]');
+  await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 6);
+  await idle();
+  const bgAsk = ai.asked.slice(nAsk).filter((a) => a.kind === 'image' && /empty background scene/.test(a.prompt));
+  check('先画背景再融入：AI 画了 2 张空背景，然后融入', bgAsk.length === 2 && bgAsk.some((a) => /marble/.test(a.prompt)) && ai.asked.slice(nAsk).filter((a) => /Edit the uploaded image/.test(a.prompt)).length === 2);
+  check('融入后不自动审核，直接显示 AI 图', doubao.length === 1 && (await page.locator('.pendbox [data-act="harmView"][data-v="1"].on').count()) === 2);
+  await page.click('.pendbox .mcard:has([data-act="harmView"]) [data-act="judge"] >> nth=0');
+  await page.waitForSelector('.pendbox .mcard:has-text("审核选了 AI 图：去掉了白边")', { timeout: 30000 });
+  check('AI 审核（融入的图）：豆包比一比原贴图和 AI 图', doubao.length === 2 && /哪张更适合/.test(doubao[1].text) && doubao[1].files === 2);
   check('待确认卡片上能切换“AI 图 / 原贴图”', (await page.locator('.pendbox [data-act="harmView"]').count()) === 4);
   await page.click('.pendbox [data-act="harmView"][data-v="0"] >> nth=0');
   await page.waitForSelector('.pendbox [data-act="harmView"][data-v="0"].on');
@@ -132,28 +184,15 @@ try {
   check('勾“镂空的白色也抠掉”：重新抠图', true);
   check('抠好的图放在深色格子上', (await page.locator('.mcard[data-prid] .pic.dark').count()) === 1);
 
-  // AI 直接画场景
-  await page.click('[data-mode="scene"]');
-  await page.click('[data-sty="marble"]'); // 只留一种风格（纯色渐变棚拍）
-  await page.click('[data-sty^="my:"]', { position: { x: 12, y: 12 } });
-  await page.waitForSelector('[data-act="generate"]:has-text("生成 1 张")');
-  await page.click('[data-act="generate"]');
-  await page.waitForSelector('.pendbox .mcard:has-text("AI 直接画")');
-  await idle();
-  const sceneAsk = ai.asked.find((a) => /a cut-out PNG with transparent background/.test(a.prompt));
-  check('AI 直接画场景：把抠好的 PNG 发给 AI，审核看产品有没有被改', sceneAsk && sceneAsk.images === 1 && ai.asked.some((a) => /是不是同一个产品/.test(a.prompt)) && (await page.locator('.pendbox .mcard:has-text("审核：产品没被改")').count()) === 1);
-  await page.screenshot({ path: path.join(out, '4-scene.png'), fullPage: true });
-
   // 关掉网页再打开：后台照样做完
-  await page.click('[data-mode="paste"]');
-  await page.waitForSelector('[data-mode="paste"].on');
   const url = page.url();
+  const nItems = (await api('GET', `/api/projects/${/p=([^&]+)/.exec(url)[1]}`)).project.items.length;
   await page.click('[data-act="generate"]');
   await sleep(200);
   await page.goto('about:blank');
   const pid = /p=([^&]+)/.exec(url)[1];
   let done = false;
-  for (let i = 0; i < 100 && !done; i++) { const pp = (await api('GET', `/api/projects/${pid}`)).project; done = pp.items.length === 4 && pp.items.every((x) => !x.job); await sleep(300); }
+  for (let i = 0; i < 100 && !done; i++) { const pp = (await api('GET', `/api/projects/${pid}`)).project; done = pp.items.length > nItems && pp.items.every((x) => !x.job); await sleep(300); }
   check('关掉网页：服务器照样做完', done);
   await page.goto(url);
   await page.waitForSelector('.pendbox .mcard[data-iid]');
@@ -177,6 +216,7 @@ try {
 }
 await browser.close();
 plugin.close();
+plugin2.close();
 srv.kill();
 console.log('截图在', out);
 const bad = checks.filter((x) => !x).length;

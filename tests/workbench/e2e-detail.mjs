@@ -91,6 +91,9 @@ try {
   await page.waitForSelector('canvas');
   await page.waitForSelector('#edRight .harm', { timeout: 20000 });
   check('编辑页右边有“产品融入背景”（融入后 / 原贴图、选 AI）', (await page.locator('#edRight .harm [data-act="harmView"]').count()) === 2 && (await page.locator('#harmSite option').count()) === 3);
+  await page.click('#edRight [data-act="harmJudge"]');
+  await page.waitForSelector('#edRight .harm:has-text("豆包没连上")', { timeout: 20000 });
+  check('编辑页“AI 审核”：豆包没连上就直接说，还用 AI 图', await page.isVisible('#edRight [data-act="harmView"][data-v="1"].on'));
   await sleep(1000);
   await page.screenshot({ path: path.join(out, '3-edit.png') });
   check('编辑页画出来了', errors.length === 0, errors.join(' | '));
