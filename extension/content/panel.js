@@ -9,7 +9,7 @@
 (() => {
   if (window.__aitutuPanel) return;
   window.__aitutuPanel = true;
-  const VERSION = "0.8.1";
+  const VERSION = "0.9.0";
   const SITE = AITUTU_SITE; // gemini.js 或 copilot.js 提供
   const AI = SITE.name;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -233,7 +233,7 @@
       <div class="row"><b>结果</b><span class="muted" id="sumText"></span></div>
       <div class="row selbar" id="selBar" hidden>
         <label class="muted"><input type="checkbox" id="selAll"> 全选</label><span class="muted" id="selCount"></span>
-        <button id="selRetry" disabled>重做选中</button><button id="selZip" disabled>下载选中 zip</button><button id="selDel" class="danger" disabled>删除选中</button>
+        <button id="selRetry" disabled>重做选中</button><button id="selZip" disabled>下载选中 zip</button><button id="selLib" disabled title="放进 AI图图 工作台的素材中心">发素材中心</button><button id="selDel" class="danger" disabled>删除选中</button>
       </div>
       <div id="jobs"></div>
       <div class="row" style="margin-top:8px">
@@ -957,7 +957,7 @@
           ${j.error ? `<div class="txt" style="color:#b91c1c">${esc(j.error)}</div>` : ""}
           ${j.text && j.status !== "ok" ? `<div class="txt">${AI}：${esc(j.text.slice(0, 160))}</div>` : ""}
           <div class="row" style="margin-top:3px">
-            ${j.outUrl ? `<button data-dl="${j.id}">下载</button>` : ""}
+            ${j.outUrl ? `<button data-dl="${j.id}">下载</button><button data-lib="${j.id}" title="放进 AI图图 工作台的素材中心（插件要连着工作台）">发素材中心</button>` : ""}
             ${["refused", "fail", "cancel"].includes(j.status) && !running && !j.file.fromChat ? `<button data-retry="${j.id}">重做这张</button>` : ""}
             ${j.status !== "running" ? `<button data-del="${j.id}" class="danger" title="删除这条结果和面板里对应的产品图">删除</button>` : ""}
           </div></div></div>`;
@@ -971,6 +971,7 @@
     $("selAll").checked = jobs.length > 0 && sel.size === jobs.length;
     $("selRetry").disabled = running || !selJobs().some((j) => j.status !== "running");
     $("selZip").disabled = !selJobs().some((j) => j.status === "ok");
+    $("selLib").disabled = !selJobs().some((j) => j.status === "ok");
     $("selDel").disabled = !selJobs().some((j) => j.status !== "running");
   }
   // ---- 多选：重做 / 下载 zip / 删除
@@ -998,6 +999,16 @@
     list.forEach((j) => sel.delete(j.id));
     if (fs.length) startBatch(fs);
   }
+  /** 发到工作台的素材中心（0.9.0）：抠白底的算“白底图”，其他算“AI 生成”，按天分组 */
+  async function sendToLib(list) {
+    const ok = list.filter((j) => j.status === "ok" && j.outBlob);
+    if (!ok.length) { toast("没有做好的图"); return; }
+    toast(`正在发送 ${ok.length} 张到素材中心…`);
+    const items = [];
+    for (const j of ok) items.push({ b64: await blobToBase64(j.outBlob), mime: j.outBlob.type, name: outName(j), tag: /白底/.test(outName(j)) ? "白底图" : "AI 生成", grp: `AI图图 插件 ${bj().slice(5, 10)}` });
+    const r = await new Promise((res) => { try { chrome.runtime.sendMessage({ type: "aitutu-to-lib", items }, (x) => res(x || { ok: false, error: chrome.runtime.lastError && chrome.runtime.lastError.message })); } catch (e) { res({ ok: false, error: e.message }); } });
+    toast(r && r.ok ? `已放进素材中心 ${r.added} 张` : `没发成：${(r && r.error) || "插件后台没有回复"}`);
+  }
   async function zipJobs(list) {
     const ok = list.filter((j) => j.status === "ok");
     if (!ok.length) { toast("没有可下载的图"); return; }
@@ -1013,6 +1024,7 @@
   $("selAll").addEventListener("change", () => { if ($("selAll").checked) jobs.forEach((j) => sel.add(j.id)); else sel.clear(); renderJobs(); });
   $("selRetry").addEventListener("click", () => retryJobs(selJobs()));
   $("selZip").addEventListener("click", () => zipJobs(selJobs()));
+  $("selLib").addEventListener("click", () => sendToLib(selJobs()));
   $("selDel").addEventListener("click", () => { const n = deleteJobs(selJobs()); toast(`已删除 ${n} 条`); });
   $("setBtn").addEventListener("click", () => { $("setBox").hidden = !$("setBox").hidden; });
   $("jobs").addEventListener("change", (e) => {
@@ -1060,6 +1072,8 @@
     if (del) { deleteJobs(jobs.filter((x) => x.id === del)); return; }
     const v = e.target.dataset.view;
     if (v) { openViewer(v, jobImages()); return; }
+    const lb = Number(e.target.dataset.lib);
+    if (lb) { sendToLib(jobs.filter((x) => x.id === lb)); return; }
     const dl = Number(e.target.dataset.dl);
     if (dl) { const j = jobs.find((x) => x.id === dl); downloadBlob(j.outBlob, outName(j)); return; }
     const rt = Number(e.target.dataset.retry);

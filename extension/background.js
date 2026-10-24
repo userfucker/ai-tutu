@@ -116,7 +116,7 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
 // 工作台把“写文字 / 看图 / 画图”的任务发过来，这里转给 Gemini / Copilot 页面里的 content/workbench-runner.js 去做。
 // 协议和 ai-web 插件一样（WebSocket：hello / cmd / result / progress），hello 里带 app: "aitutu"。
 // 每个网站用一个单独的窗口（和别的标签页放一起时，切到后台会被浏览器暂停）。在插件“选项”里填工作台 IP、端口、口令。
-const AWB = { ws: null, state: "off", error: "", retry: 0, timer: null, ping: null, tabs: {}, wins: {}, jobs: new Map() };
+const AWB = { ws: null, state: "off", error: "", retry: 0, timer: null, ping: null, tabs: {}, wins: {}, jobs: new Map(), libWait: new Map() };
 const AWB_VERSION = chrome.runtime.getManifest().version;
 async function awbConf() {
   const v = await chrome.storage.local.get("aitutu_wb");
@@ -162,6 +162,7 @@ async function awbConnect() {
     if (m.type === "error") { awbSetState("error", m.error || "工作台拒绝连接"); if (m.fatal) AWB.retry = 99; return; }
     if (m.type === "ping") { awbSend({ type: "pong", t: m.t }); return; }
     if (m.type === "cmd") awbReady.finally(() => awbHandle(m));
+    if (m.type === "libraryResult") { const p = AWB.libWait.get(m.id); if (p) { AWB.libWait.delete(m.id); p(m); } }
   };
   ws.onclose = () => {
     clearInterval(AWB.ping);
@@ -309,3 +310,15 @@ chrome.alarms.onAlarm.addListener((a) => { if (a.name === "aitutu-wb") awbConnec
 // 记下的标签页 / 窗口存在 storage.local（插件后台被浏览器回收、重启以后还认得；编号失效时 awbFindTab 会按网址再找）
 const awbReady = chrome.storage.local.get("aitutu_wb_tabs").then((v) => { const x = v.aitutu_wb_tabs; if (x && x.tabs) { AWB.tabs = x.tabs; AWB.wins = x.wins || {}; } }).catch(() => {});
 awbReady.finally(awbConnect);
+
+// 面板结果“发素材中心”（0.9.0，Lee 2026-10-24）：通过工作台的连接把做好的图放进工作台的素材中心
+chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
+  if (!msg || msg.type !== "aitutu-to-lib") return false;
+  if (!AWB.ws || AWB.ws.readyState !== 1 || AWB.state !== "on") { sendResponse({ ok: false, error: "还没连上 AI图图 工作台：在插件“选项”里填工作台的 IP、端口、口令" }); return false; }
+  const id = "L" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const timer = setTimeout(() => { AWB.libWait.delete(id); sendResponse({ ok: false, error: "工作台 60 秒没回复" }); }, 60000);
+  AWB.libWait.set(id, (m) => { clearTimeout(timer); sendResponse(m.ok ? { ok: true, added: m.added } : { ok: false, error: m.error || "工作台没收下" }); });
+  awbSend({ type: "library", id, items: msg.items || [] });
+  return true;
+});
+

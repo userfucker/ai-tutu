@@ -83,6 +83,15 @@ const gp = gpages[0];
 // （面板和工作台互相等：插件内部变量，测试脚本改不到，不在这里测）
 // 5. 右侧面板还在（原来的功能没被删）
 check('右侧面板还在', (await gp.locator('#aitutu-panel-host').count()) === 1);
+// 5b. 面板结果“发素材中心”（0.9.0）：插件页面发消息给后台，后台通过工作台的连接把图放进素材中心
+const extId = new URL(sw.url()).host;
+const ep = await ctx.newPage();
+await ep.goto(`chrome-extension://${extId}/options.html`);
+const pngB64 = fs.readFileSync(path.join(dataDir, 'files', r3.result.file)).toString('base64');
+const libR = await ep.evaluate((b64) => new Promise((res) => chrome.runtime.sendMessage({ type: 'aitutu-to-lib', items: [{ b64, mime: 'image/png', name: '杯子-白底-800x800.png', tag: '白底图', grp: 'AI图图 插件 10-24' }] }, res)), pngB64);
+const libItems = (await api('GET', '/api/library')).items;
+check('面板结果“发素材中心”：放进工作台的素材中心（白底图，来源 AI图图 插件）', libR && libR.ok && libItems.some((x) => x.name === '杯子-白底-800x800.png' && x.tag === '白底图' && x.source === 'aitutu'), JSON.stringify(libR));
+await ep.close();
 // 6. 插件断开重连：任务排队，连回来接着做
 await sw.evaluate(() => chrome.storage.local.set({ aitutu_wb: { enabled: false } }));
 await sleep(800);
