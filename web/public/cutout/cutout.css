@@ -78,3 +78,5 @@ button.sm.on { background: #1f2329; color: #fff; border-color: #1f2329; }
 .thumb:hover .sk { color: #c3c6cd; }
 .thumb.skip .sk { background: #dc2626; border-color: #dc2626; color: #fff; }
 .thumb.skip img { opacity: .35; }
+.thumb .pe { position: absolute; left: 50%; top: 3px; transform: translateX(-50%); white-space: nowrap; z-index: 3; display: none; box-shadow: 0 1px 4px rgba(0,0,0,.3); font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 0; background: #1677ff; color: #fff; }
+.thumb:hover .pe { display: block; }

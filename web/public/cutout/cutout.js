@@ -92,6 +92,18 @@
     }
     if (n) toast(`加了 ${n} 张图`);
   }
+  /** 产品图去白边：另存一张新产品图，放在原图后面 */
+  async function peFile(fid) {
+    const f = P.files.find((x) => x.id === fid);
+    if (!f) return;
+    const r = await PNGEDIT.open({ src: blobUrl(f.curKey), name: f.name });
+    if (!r) return;
+    const id = uid("f");
+    const key = `${P.id}:${id}-orig`;
+    await putBlob(key, r.blob);
+    await op({ op: "addFile", id, key, name: r.name, w: r.w, h: r.h, after: f.id, libTag: "白底图" });
+    toast("去白边的图另存好了（在原图后面，也放进了素材中心）");
+  }
   async function openEditor(i) {
     const list = await Promise.all(P.files.map(full));
     CE.open(list, i, {
@@ -205,6 +217,7 @@
   let thumbUrls = new Map();
   const thumbOf = (key) => blobUrl(key);
   const isPng = (f) => f.type === "image/png";
+  const isPngJob = (j) => j.ext === ".png" || /\.png$/i.test(j.outName || "");
   // 深色底：和看大图共用一个开关（lib/viewer.js 也读这个）
   const darkThumbs = () => { try { return localStorage.getItem("st:viewerDark") === "1"; } catch { return false; } };
   let rendering = false, again = false;
@@ -238,7 +251,7 @@
       <div class="card"><div class="row"><b>产品图</b><span class="muted">${files.length} 张</span>
         <span class="sp row">${files.some(isPng) ? `<button class="sm ${darkThumbs() ? "on" : ""}" data-act="darkThumbs" title="PNG 透明图换深色底，看白边">深色底</button>` : ""}<button class="sm" data-act="fromLib">从素材中心选</button><button class="sm" data-act="addFiles">上传图片</button>${files.length ? '<button class="sm" data-act="clearFiles">清空</button>' : ""}</span></div>
         ${files.length ? `<div class="thumbs ${darkThumbs() ? "darkthumbs" : ""}">${files.map((f, i) => `<div class="thumb ${f.done ? "done" : ""} ${f.skip ? "skip" : ""} ${isPng(f) ? "png" : ""}" data-edit="${i}" title="${esc(f.name)}（点一下编辑：框选、标注、取色、旋转）"><img src="${thumbOf(f.curKey)}" alt="">
-          <button class="sk" data-skipfile="${f.id}" title="${f.skip ? "这张不做。点一下取消 ×，就会做" : "点一下打 ×：这张不做"}">×</button>${isPng(f) ? '<span class="fmt">PNG</span>' : ""}
+          <button class="sk" data-skipfile="${f.id}" title="${f.skip ? "这张不做。点一下取消 ×，就会做" : "点一下打 ×：这张不做"}">×</button>${isPng(f) ? `<span class="fmt">PNG</span><button class="pe" data-pefile="${f.id}" title="钢笔选区删除、一键去白边，另存一张新图">去白边</button>` : ""}
           ${f.crop ? `<span class="box" style="left:${f.crop.x * 100}%;top:${f.crop.y * 100}%;width:${f.crop.w * 100}%;height:${f.crop.h * 100}%"></span>` : ""}
           ${(f.parts || []).length || (f.colors || []).length ? `<span class="badge">${(f.parts || []).length ? `配件 ${f.parts.length}` : ""}${(f.colors || []).length ? ` 颜色 ${f.colors.length}` : ""}</span>` : ""}
           <button class="x" data-delfile="${f.id}" title="移除">×</button></div>`).join("")}</div>
@@ -258,7 +271,7 @@
       <div class="col" style="gap:3px"><div class="row"><b class="jname">${esc(j.outName || j.name)}</b>${tag}${j.w ? `<span class="tag">${j.w}×${j.h}</span>` : ""}${j.site ? `<span class="tag">${esc(j.site === "gemini" ? "Gemini" : j.site === "copilot" ? "Copilot" : j.site)}</span>` : ""}</div>
         ${j.note ? `<div class="muted">${esc(j.note)}</div>` : ""}${j.error ? `<div class="muted bad">${esc(j.error)}</div>` : ""}${j.req ? `<div class="muted">精修要求：${esc(j.req)}</div>` : ""}
         <div class="row">${j.outKey ? `<a href="${blobUrl(j.outKey)}" download="${esc(j.outName || "结果.jpg")}"><button class="sm">下载</button></a>` : ""}${j.aiKey ? '<button class="sm" data-act="viewAi">看 AI 原图</button>' : ""}
-          <button class="sm" data-act="redo" ${j.status === "queued" || j.status === "running" ? "disabled" : ""}>重做</button>${j.outKey ? '<button class="sm" data-act="useOut" title="把这张做好的图放回产品图，接着调整">拿来接着做</button>' : ""}
+          <button class="sm" data-act="redo" ${j.status === "queued" || j.status === "running" ? "disabled" : ""}>重做</button>${j.outKey ? '<button class="sm" data-act="useOut" title="把这张做好的图放回产品图，接着调整">拿来接着做</button>' : ""}${j.outKey && isPngJob(j) ? '<button class="sm" data-act="peJob" title="钢笔选区删除、一键去白边，另存成一条新结果">去白边</button>' : ""}
           <button class="sm danger" data-act="delJob">删除</button></div></div></div>`;
   }
 
@@ -310,6 +323,16 @@
     tpls: () => manageTpls(),
     redo: async (el) => { const j = jobOf(el); const f = P.files.find((x) => x.id === j.fileId); if (!f) return toast("这张产品图已经移除了，没法重做", true); await startBatch([f], j); },
     selRedo: async () => { for (const j of P.jobs.filter((x) => sel.has(x.id) && x.status !== "queued" && x.status !== "running")) { const f = P.files.find((x) => x.id === j.fileId); if (f) await startBatch([f], j); } },
+    // 去白边（lib/pngedit.js）：另存成一条新结果，放在原来那条后面
+    peJob: async (el) => {
+      const j = jobOf(el);
+      const r = await PNGEDIT.open({ src: blobUrl(j.outKey), name: j.outName || j.name });
+      if (!r) return;
+      const key = `${P.id}:${uid("e")}-edit-${Date.now()}`;
+      await putBlob(key, r.blob);
+      await op({ op: "addEdited", jid: j.id, key, name: r.name, w: r.w, h: r.h });
+      toast("去白边的图另存好了（在原来那条后面，也放进了素材中心）");
+    },
     useOut: async (el) => { const replace = await confirmBox("把这张做好的图放回产品图接着调整：要清空现有的产品图吗？（选“不清空”就加在后面）", "清空后放进去"); op({ op: "useOutput", jid: jobOf(el).id, replace }); },
     delJob: (el) => op({ op: "delJobs", jids: [jobOf(el).id] }),
     selDel: async () => { if (await confirmBox(`删除选中的 ${sel.size} 条结果？`, "删除", true)) { op({ op: "delJobs", jids: [...sel] }); sel.clear(); } },
@@ -325,6 +348,7 @@
   document.addEventListener("click", (e) => {
     const t = e.target;
     if (t.closest("#modal") || t.closest("#ceModal") || t.closest("#libLayer")) return;
+    if (t.dataset.pefile) { e.stopPropagation(); peFile(t.dataset.pefile); return; }
     if (t.dataset.skipfile) { e.stopPropagation(); const f = P.files.find((x) => x.id === t.dataset.skipfile); if (f) op({ op: "setFile", fid: f.id, fields: { skip: !f.skip } }); return; }
     if (t.dataset.delfile) { e.stopPropagation(); op({ op: "delFiles", fids: [t.dataset.delfile] }); return; }
     const b = t.closest("[data-act]");

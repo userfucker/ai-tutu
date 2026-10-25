@@ -283,8 +283,9 @@
         ${st ? `<span class="st tag ${/失败/.test(st) ? "bad" : "blue"}">${esc(st)}</span>` : pr.cut ? '<span class="st tag ok">已抠图</span>' : '<span class="st tag warn">没抠图</span>'}</div>
         <div class="acts"><button class="sm" data-act="useProduct">${pr.id === (curProduct() || {}).id ? "正在用" : "用这张"}</button>
         ${!pr.cut || pr.white ? `<button class="sm" data-act="cutAi" ${st && !/失败/.test(st) ? "disabled" : ""}>AI 抠图</button>` : ""}
+        ${pr.cut ? '<button class="sm" data-act="peProduct" title="钢笔选区删除、一键去白边，另存一张新产品图">去白边</button>' : ""}
         <button class="sm danger" data-act="delProduct">删除</button></div>
-        ${pr.cut || pr.edgeWhite || pr.white ? `<label class="row lb" title="手腕绳、提手这种围成圈的地方，中间的白色也抠掉"><input type="checkbox" data-holes ${pr.holes ? "checked" : ""} ${st && !/失败/.test(st) ? "disabled" : ""}> 镂空的白色也抠掉</label>` : ""}</div>`;
+        ${pr.cut !== pr.key && (pr.cut || pr.edgeWhite || pr.white) ? `<label class="row lb" title="手腕绳、提手这种围成圈的地方，中间的白色也抠掉"><input type="checkbox" data-holes ${pr.holes ? "checked" : ""} ${st && !/失败/.test(st) ? "disabled" : ""}> 镂空的白色也抠掉</label>` : ""}</div>`;
     }));
     const sel = new Set(p.styles || []);
     const myPills = await Promise.all(myStyles.map(async (s) => `<span class="stypill ${sel.has("my:" + s.id) ? "on" : ""}" data-sty="my:${s.id}" title="${esc(s.desc || s.prompt)}">${s.ref ? `<img src="${await ST.urlOf(s.ref)}" alt="">` : ""}${esc(s.name)}<span class="x" data-act="delStyle" data-sid="${s.id}" title="删除这个风格">✕</span></span>`));
@@ -387,6 +388,17 @@
         out.push({ src: URL.createObjectURL(await ST.toBlob(c.canvas, "image/jpeg", 0.92)), name: `${it.styleName}（${it.mode === "scene" ? "AI 直接画" : c.used ? "AI 图" : "原贴图"}）`, png: false });
       }
       VIEWER.open(out, list.indexOf(it0));
+    },
+    // 去白边（lib/pngedit.js）：另存一张新产品图，放在这张后面，也放进素材中心
+    peProduct: async (el) => {
+      const p = P(), pr = p.products.find((x) => x.id === el.closest("[data-prid]").dataset.prid);
+      const r = await PNGEDIT.open({ src: await ST.urlOf(pr.cut), name: /\.png$/i.test(pr.name) ? pr.name : pr.name.replace(/\.[^.]+$/, "") + ".png" });
+      if (!r) return;
+      const id = ST.uid("pr");
+      const key = `${p.id}:${id}-orig`;
+      await ST.saveImage(key, r.blob);
+      await op({ op: "addProduct", id, key, name: r.name, after: pr.id, libTag: "白底图", isCut: true });
+      APP.toast("去白边的图另存好了（在这张后面，也放进了素材中心）");
     },
     viewProduct: async (el) => {
       const prs = P().products;

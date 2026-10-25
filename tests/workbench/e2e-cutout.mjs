@@ -155,6 +155,75 @@ try {
   await page.waitForFunction(() => !document.querySelector('.thumb.skip'));
   check('再点 × 就取消', !(await proj()).files[0].skip);
 
+  // 去白边（钢笔）：PNG 产品图 → 选区删除 → 撤销 / 重做 → 一键去白边 → 另存成新产品图（在原图后面）
+  await page.hover('.thumb >> nth=0');
+  await page.click('.thumb >> nth=0 >> .pe');
+  await page.waitForSelector('#peLayer #peCv');
+  await sleep(300);
+  check('去白边：默认深色底', await page.evaluate(() => document.getElementById('peStage').classList.contains('dark')));
+  const cb = await (await page.$('#peCv')).boundingBox();
+  const P2 = (fx, fy) => [cb.x + cb.width * fx, cb.y + cb.height * fy];
+  await page.mouse.click(...P2(0.3, 0.3));
+  await page.mouse.click(...P2(0.7, 0.3));
+  // 按住拖动拉出弧线
+  await page.mouse.move(...P2(0.7, 0.7)); await page.mouse.down(); await page.mouse.move(...P2(0.75, 0.8), { steps: 4 }); await page.mouse.up();
+  await page.mouse.click(...P2(0.5, 0.9));
+  // 右键删掉最后一个锚点，退格再删一个，再补回来
+  await page.mouse.click(...P2(0.5, 0.9), { button: 'right' });
+  let st2 = await page.evaluate(() => ({ n: document.getElementById('peLayer')._pe.pts.length, h: !!document.getElementById('peLayer')._pe.pts[2].h }));
+  check('钢笔：点一下加锚点、拖动出弧线、右键删锚点', st2.n === 3 && st2.h, JSON.stringify(st2));
+  await page.keyboard.press('Backspace');
+  check('退格删最后一个点', await page.evaluate(() => document.getElementById('peLayer')._pe.pts.length) === 2);
+  await page.mouse.click(...P2(0.7, 0.7));
+  await page.mouse.click(...P2(0.3, 0.7));
+  await page.mouse.click(...P2(0.3, 0.3)); // 点回第一个点：闭合
+  check('点回第一个点闭合，出现蚂蚁线', await page.evaluate(() => document.getElementById('peLayer')._pe.closed) && (await page.locator('#peSvg .ants2').count()) === 1);
+  await page.screenshot({ path: path.join(out, '3-pen.png') });
+  await page.keyboard.press('Delete');
+  check('Delete：选区变透明（可以撤销）', await page.evaluate(() => document.getElementById('peLayer')._pe.undo) === 1);
+  const alphaAt = (fx, fy) => page.evaluate(([fx, fy]) => { const c = document.getElementById('peCv'); return c.getContext('2d').getImageData(Math.floor(c.width * fx), Math.floor(c.height * fy), 1, 1).data[3]; }, [fx, fy]);
+  const a1 = await alphaAt(0.5, 0.5);
+  await page.keyboard.press('Control+z');
+  const a2 = await alphaAt(0.5, 0.5);
+  await page.keyboard.press('Control+y');
+  check('撤销 / 重做（Ctrl+Z / Ctrl+Y）', a1 === 0 && a2 === 255 && (await alphaAt(0.5, 0.5)) === 0, `${a1} ${a2}`);
+  await page.click('#peWhiteBtn');
+  await page.fill('#peStr', '8'); await page.dispatchEvent('#peStr', 'input');
+  await sleep(400);
+  await page.click('#peWhiteOk');
+  check('一键去白边：确定后可以撤销', await page.evaluate(() => document.getElementById('peLayer')._pe.undo) === 2);
+  await page.click('#peSave');
+  await page.waitForFunction(() => !document.getElementById('peLayer'));
+  await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 3);
+  p = await proj();
+  check('另存成新产品图，在原图后面，名字带“-去白边”', /-去白边\.png$/.test(p.files[1].name) && p.files[1].type === 'image/png', p.files.map((f) => f.name).join(','));
+  await sleep(500);
+  check('去白边的图也放进素材中心（白底图）', (await api('GET', '/api/library')).items.some((x) => /-去白边\.png$/.test(x.name) && x.tag === '白底图'));
+  const dw = await page.evaluate(() => {
+    // 透明底上一个红方块，外面一圈 3 像素白边，方块里面有一块白色（不挨着透明处）
+    const W = 40, im = new ImageData(W, W);
+    for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4, inR = x >= 10 && x < 30 && y >= 10 && y < 30, inW = x >= 7 && x < 33 && y >= 7 && y < 33, hole = x >= 17 && x < 23 && y >= 17 && y < 23;
+      if (hole) im.data.set([255, 255, 255, 255], i); else if (inR) im.data.set([200, 30, 30, 255], i); else if (inW) im.data.set([250, 250, 250, 255], i);
+    }
+    const o = PNGEDIT.deWhite(im, 5).data, a = (x, y) => o[(y * W + x) * 4 + 3];
+    return { ring: a(8, 20), red: a(12, 20), hole: a(20, 20) };
+  });
+  check('一键去白边：去掉贴着透明处的白边，产品里面的白色不动', dw.ring === 0 && dw.red === 255 && dw.hole === 255, JSON.stringify(dw));
+
+  // 结果去白边另存：加一条新结果，在原来那条后面
+  {
+    const pid = p.id, j0 = p.jobs[0];
+    await page.evaluate(async (k) => { const c = document.createElement('canvas'); c.width = c.height = 20; const b = await new Promise((r) => c.toBlob(r, 'image/png')); await fetch('/api/blobs/' + encodeURIComponent(k), { method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: b }); }, pid + ':e1-edit');
+    await api('POST', `/api/cutout/${pid}/op`, { op: 'addEdited', jid: j0.id, key: pid + ':e1-edit', name: 'x-去白边.png', w: 20, h: 20 });
+    const pj2 = await proj();
+    check('结果去白边：另存成新结果，在原来那条后面', pj2.jobs[1].outKey === pid + ':e1-edit' && pj2.jobs[1].status === 'done' && pj2.jobs[1].inKey && pj2.jobs[1].inKey !== j0.inKey);
+    await page.waitForFunction(() => document.querySelectorAll('.job [data-act="peJob"]').length === 1);
+    await api('POST', `/api/cutout/${pid}/op`, { op: 'delJobs', jids: [pj2.jobs[1].id] });
+  }
+  await page.click(`.thumb >> nth=1 >> [data-delfile]`);
+  await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 2);
+
   // 模式切换
   await page.click('[data-mode="refine"]');
   await page.waitForSelector('[data-s="refineBg"]');

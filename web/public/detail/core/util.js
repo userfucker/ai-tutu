@@ -89,6 +89,20 @@ ST.edgeIsWhite = (img) => {
   for (let y = 0; y < c.height; y++) { at(0, y); at(c.width - 1, y); }
   return white / n > 0.92;
 };
+/** 四周一圈大多是透明的（已经抠好的 PNG，不用再抠） */
+ST.edgeIsClear = (img) => {
+  const W = img.naturalWidth || img.width, H = img.naturalHeight || img.height;
+  const s = Math.min(1, 200 / Math.max(W, H));
+  const c = ST.canvas(Math.max(1, Math.round(W * s)), Math.max(1, Math.round(H * s)));
+  const g = c.getContext("2d", { willReadFrequently: true });
+  g.drawImage(img, 0, 0, c.width, c.height);
+  const d = g.getImageData(0, 0, c.width, c.height).data;
+  let n = 0, clear = 0;
+  const at = (x, y) => { n++; if (d[(y * c.width + x) * 4 + 3] < 20) clear++; };
+  for (let x = 0; x < c.width; x++) { at(x, 0); at(x, c.height - 1); }
+  for (let y = 0; y < c.height; y++) { at(0, y); at(c.width - 1, y); }
+  return clear / n > 0.6;
+};
 /** 3×3 锐化（图片放大以后用一点，减少发虚） */
 ST.sharpen = (g, W, H, amount = 0.5) => {
   const im = g.getImageData(0, 0, W, H);

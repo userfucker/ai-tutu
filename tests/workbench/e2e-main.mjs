@@ -81,6 +81,18 @@ try {
   const bg2 = await page.$eval('#vwLayer .vwimg', (e) => e.className);
   check('产品图点开看大图；抠好的 PNG 可以一键换深色底，再点换回来', /light/.test(bg0) && /dark/.test(bg1) && /light/.test(bg2), [bg0, bg1, bg2].join(' / '));
   await page.click('#vwLayer .vwclose');
+  // 去白边：抠好的产品图 → 一键去白边 → 另存成新产品图（在这张后面；透明 PNG 直接算抠好的）
+  await page.click('.mcard[data-prid] [data-act="peProduct"]');
+  await page.waitForSelector('#peLayer #peCv');
+  await page.click('#peWhiteBtn'); await sleep(300); await page.click('#peWhiteOk');
+  await page.click('#peSave');
+  await page.waitForFunction(() => document.querySelectorAll('.pgrid .mcard[data-prid], .mcard[data-prid]').length >= 2);
+  await sleep(500);
+  const mid = /p=([^&]+)/.exec(page.url())[1];
+  let mp = (await api('GET', `/api/projects/${mid}`)).project;
+  check('主图产品图去白边：另存成新产品图，在后面，透明 PNG 直接算抠好的', mp.products.length === 2 && /-去白边\.png$/.test(mp.products[1].name) && mp.products[1].cut === mp.products[1].key && mp.products[1].cutBox && mp.cur === mp.products[0].id, JSON.stringify(mp.products.map((x) => [x.name, !!x.cut])));
+  await api('POST', `/api/main/${mid}/op`, { op: 'delProduct', prid: mp.products[1].id });
+  await page.waitForFunction(() => document.querySelectorAll('.mcard[data-prid]').length === 1);
   check('默认做法：AI 直接画场景、AI 自由摆放', await page.isVisible('[data-mode="scene"].on') && await page.isVisible('[data-place="free"].on'));
   await page.click('[data-sty="marble"]');
   await page.selectOption('#count', '1');
@@ -239,6 +251,19 @@ try {
   await page.click('#modal [data-ret="yes"]');
   await page.waitForFunction((n) => document.querySelectorAll('.lit').length === n, libAll.length);
   check('素材中心：批量删除', true);
+  // 素材中心 PNG：去白边另存一张新图（同一个分组、同一个类型）
+  const pngLit = page.locator('.lit:has([data-pe]):has(.lname:text-is("白底.png"))');
+  const pngName = '白底';
+  const nLit = await page.locator('.lit').count();
+  await pngLit.locator('[data-pe]').click();
+  await page.waitForSelector('#peLayer #peCv');
+  await sleep(300);
+  const lb = await (await page.$('#peCv')).boundingBox();
+  for (const [fx, fy] of [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4], [0.1, 0.1]]) await page.mouse.click(lb.x + lb.width * fx, lb.y + lb.height * fy);
+  await page.click('#peDel');
+  await page.click('#peSave');
+  await page.waitForFunction((n) => document.querySelectorAll('.lit').length === n + 1, nLit);
+  check('素材中心：PNG 有“去白边”，另存成新图', (await api('GET', '/api/library')).items.some((x) => x.name === pngName + '-去白边.png' && x.mime === 'image/png'), pngName);
   await api('DELETE', `/api/projects/${dl3[0].id}`);
 
   // 工作台“主图”列表：点名称打开，后面只有“删除”

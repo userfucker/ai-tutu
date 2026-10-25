@@ -73,8 +73,13 @@
         const key = `${p.id}:${id}-orig`;
         await ST.saveImage(key, blob);
         const white = ST.edgeIsWhite(img);
-        if (!o.fromLibrary) APP.toLibrary(blob, { tag: "原图", name: f.name || "" }); // 上传的图也放进素材中心
-        p.assets.push({ id, name: f.name || "图片", tag: o.tag || (white ? "white" : "other"), note: o.note || "", group: o.group ? o.group(f) : "", key, w: img.naturalWidth, h: img.naturalHeight, white: "", cut: "", cutBox: null, edgeWhite: white });
+        if (!o.fromLibrary) APP.toLibrary(blob, { tag: o.libTag || "原图", name: f.name || "" }); // 上传的图也放进素材中心
+        const a = { id, name: f.name || "图片", tag: o.tag || (white ? "white" : "other"), note: o.note || "", group: o.group ? o.group(f) : "", key, w: img.naturalWidth, h: img.naturalHeight, white: "", cut: "", cutBox: null, edgeWhite: white };
+        // 已经抠好的透明 PNG：直接当抠好的图用
+        if (o.cut || (!white && ST.edgeIsClear(img))) { a.cut = key; a.cutBox = ST.alphaBox(img); a.cutW = img.naturalWidth; a.cutH = img.naturalHeight; }
+        // o.after = 加在这张后面（去白边另存的新图）
+        const at = o.after ? p.assets.findIndex((x) => x.id === o.after) : -1;
+        at >= 0 ? p.assets.splice(at + 1, 0, a) : p.assets.push(a);
         n++;
       } catch (e) { APP.toast(`${f.name} 打不开：${e.message}`, true); }
     }
@@ -169,6 +174,7 @@
       },
       check: async (v, m) => {
         const blob = await ST.toBlob(m._canvas, "image/png");
+        if (a.cut === a.key) a.cut = `${P().id}:${a.id}-cut`; // 原图本来就是透明 PNG：修好的另存，“用原图”还能回去
         await ST.saveImage(a.cut, blob);
         const img = await ST.imgOf(a.cut);
         a.cutBox = ST.alphaBox(img);
@@ -248,7 +254,7 @@
           <div class="acts">
             <button class="sm" data-act="cutAi" ${b && !/失败/.test(b) ? "disabled" : ""} title="让 AI 出一张纯白背景的图，再去白底（适合背景复杂的图）">AI 抠图</button>
             <button class="sm" data-act="cutDirect" ${b && !/失败/.test(b) ? "disabled" : ""} title="图本来就是白底：直接去掉白色背景，不用 AI">直接去白底</button>
-            ${a.cut ? '<button class="sm" data-act="trim">修边</button><button class="sm" data-act="uncut" title="不用抠好的图，用原图">用原图</button>' : ""}
+            ${a.cut ? '<button class="sm" data-act="peAsset" title="钢笔选区删除、一键去白边，另存一张新素材">去白边</button>' : ""}${a.cut ? '<button class="sm" data-act="trim">修边</button><button class="sm" data-act="uncut" title="不用抠好的图，用原图">用原图</button>' : ""}
             <button class="sm" data-act="angleAi" title="照着这张图让 AI 画其他角度（主视、左右、后视、俯视、底视、45°），可以多选">AI 多角度</button>
             <button class="sm" data-act="closeUp" title="用画笔或方框圈出一块地方，让 AI 画这块的特写（透明底）">圈细节</button>
             <button class="sm danger" data-act="delAsset">删除</button></div></div>`;
@@ -301,6 +307,15 @@
       pickTaobao: () => document.getElementById("tbInput").click(),
       cutAi: (el) => APP.cutAsset(P().assets.find((x) => x.id === el.closest("[data-aid]").dataset.aid), "ai"),
       cutDirect: (el) => APP.cutAsset(P().assets.find((x) => x.id === el.closest("[data-aid]").dataset.aid), "direct"),
+      // 去白边（lib/pngedit.js）：另存一张新素材，放在这张后面，也放进素材中心
+      peAsset: async (el) => {
+        const a = P().assets.find((x) => x.id === el.closest("[data-aid]").dataset.aid);
+        const r = await PNGEDIT.open({ src: await ST.urlOf(a.cut), name: a.name.replace(/\.[^.]+$/, "") + ".png" });
+        if (!r) return;
+        await APP.addAssetFiles([new File([r.blob], r.name, { type: "image/png" })], { tag: a.tag, note: a.note, group: () => a.group, after: a.id, libTag: "白底图", cut: true });
+        APP.toast("去白边的图另存好了（在这张后面，也放进了素材中心）");
+        APP.render();
+      },
       trim: (el) => trimAsset(P().assets.find((x) => x.id === el.closest("[data-aid]").dataset.aid)),
       uncut: async (el) => {
         const a = P().assets.find((x) => x.id === el.closest("[data-aid]").dataset.aid);

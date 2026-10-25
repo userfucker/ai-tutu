@@ -42,7 +42,9 @@ export async function send(b) {
       store.putBlob(key, f.buf, f.mime);
       const img = await ST.imgOf(key);
       const white = img ? ST.edgeIsWhite(img) : false;
-      p.assets.push({ id: aid, name: f.row.name, tag: DETAIL_TAG[f.row.tag] === "other" && white ? "white" : DETAIL_TAG[f.row.tag] || "other", note: "", group: "", key, w: f.row.w, h: f.row.h, white: "", cut: "", cutBox: null, edgeWhite: white });
+      const a = { id: aid, name: f.row.name, tag: DETAIL_TAG[f.row.tag] === "other" && white ? "white" : DETAIL_TAG[f.row.tag] || "other", note: "", group: "", key, w: f.row.w, h: f.row.h, white: "", cut: "", cutBox: null, edgeWhite: white };
+      if (img && !white && ST.edgeIsClear(img)) { a.cut = key; a.cutBox = ST.alphaBox(img); a.cutW = f.row.w; a.cutH = f.row.h; } // 已经抠好的透明 PNG
+      p.assets.push(a);
     }
     store.putProject(p);
     lib.markUsed(ids, { type: "detail", id: p.id, name: p.name });

@@ -168,6 +168,16 @@ try {
   await page.waitForSelector('#cMask');
   check('下次打开还是方框模式', await page.isVisible('#cMode [data-m="box"].on'));
   await page.click('#modal [data-ret=""]');
+  // 去白边：抠好的素材 → 一键去白边 → 另存一张新素材，在这张后面，同样的标签
+  await page.click('.asset[data-aid] >> nth=1 >> [data-act="peAsset"]');
+  await page.waitForSelector('#peLayer #peCv');
+  await page.click('#peWhiteBtn'); await sleep(300); await page.click('#peWhiteOk');
+  await page.click('#peSave');
+  await page.waitForFunction(() => document.querySelectorAll('.assets > .asset[data-aid]').length === 4);
+  check('详情页素材去白边：另存成新素材，在这张后面，标签一样，算抠好的', (await page.locator('.asset[data-aid] >> nth=2').locator('select[data-k="tag"]').inputValue()) === 'detail' && await page.locator('.asset[data-aid] >> nth=2').locator('text=已抠图').count() === 1 && await page.locator('.asset[data-aid] >> nth=2').locator('[data-act="peAsset"]').count() === 1);
+  await page.click('.asset[data-aid] >> nth=2 >> [data-act="delAsset"]');
+  await page.click('#modal [data-ret="yes"]');
+  await page.waitForFunction(() => document.querySelectorAll('.assets > .asset[data-aid]').length === 3);
   await page.click('#steps [data-go="info"]');
   await page.fill('[data-info="name"]', '男士双肩包');
   await page.click('[data-act="aiPoints"]');

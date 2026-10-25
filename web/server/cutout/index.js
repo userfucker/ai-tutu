@@ -114,8 +114,9 @@ export async function op(pid, b) {
       const f = store.getBlob(b.key);
       if (!f) throw new Error("图片没传上来");
       const file = { id: b.id || ST.uid("f"), name: String(b.name || "图片").slice(0, 100), key: b.key, curKey: b.key, w: +b.w || 0, h: +b.h || 0, ow: +b.w || 0, oh: +b.h || 0, type: f.type, size: f.buf.length, crop: null, lasso: null, colors: [], parts: [], partsNote: "", rot90: 0, fine: 0, done: false };
-      const p = edit(pid, (q) => { q.files.push(file); });
-      if (!b.fromLibrary) lib.add(f.buf, { grp: p.name, source: "cutout", tag: "原图", name: file.name, used: { type: "cutout", id: pid, name: p.name } }).catch(() => {});
+      // after = 加在这张后面（去白边另存的新图）
+      const p = edit(pid, (q) => { const i = b.after ? q.files.findIndex((x) => x.id === b.after) : -1; i >= 0 ? q.files.splice(i + 1, 0, file) : q.files.push(file); });
+      if (!b.fromLibrary) lib.add(f.buf, { grp: p.name, source: "cutout", tag: b.libTag === "白底图" ? "白底图" : "原图", name: file.name, used: { type: "cutout", id: pid, name: p.name } }).catch(() => {});
       return p;
     }
     case "setFile": return edit(pid, (p) => {
@@ -155,6 +156,23 @@ export async function op(pid, b) {
       for (const j of p.jobs.filter((x) => ids.has(x.id))) [j.inKey, ...(j.extraKeys || []), j.aiKey, j.outKey].forEach((k) => k && delBlob(k));
       p.jobs = p.jobs.filter((x) => !ids.has(x.id));
     });
+    case "addEdited": {
+      // 结果去白边另存：加一条新结果，放在原来那条后面；新图也放进素材中心
+      const j = p0.jobs.find((x) => x.id === b.jid);
+      const f = store.getBlob(b.key);
+      if (!j || !f) throw new Error("这条结果没有了");
+      const id = ST.uid("j");
+      const src = store.getBlob(j.inKey);
+      const inKey = src ? `${pid}:${id}-in-${Date.now()}` : "";
+      if (src) store.putBlob(inKey, src.buf, src.type);
+      const name = String(b.name || "去白边.png").slice(0, 120);
+      const item = await lib.add(f.buf, { grp: p0.name, source: "cutout", tag: "白底图", name, used: { type: "cutout", id: pid, name: p0.name } }).catch(() => null);
+      return edit(pid, (p) => {
+        const i = p.jobs.findIndex((x) => x.id === j.id);
+        const rec = { ...j, id, inKey, extraKeys: [], aiKey: "", outKey: b.key, outName: name, ext: ".png", w: +b.w || j.w, h: +b.h || j.h, status: "done", job: "", error: "", note: "去白边", libId: item ? item.id : "", created: Date.now(), ended: Date.now() };
+        p.jobs.splice(i < 0 ? 0 : i + 1, 0, rec);
+      });
+    }
     case "useOutput": {
       // 结果拿来接着做：换掉现有的产品图（和插件的“添加到产品图”一样）
       const j = p0.jobs.find((x) => x.id === b.jid);

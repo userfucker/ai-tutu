@@ -48,7 +48,7 @@
             <div class="lpic" data-view="${x.id}"><img loading="lazy" src="/api/library/${x.id}/thumb" alt=""></div>
             <div class="lname" title="${esc(x.name)}">${esc(x.name)}</div>
             <div class="muted"><b class="fmt fmt-${fmtOf(x).toLowerCase()}">${fmtOf(x)}</b> · ${x.w}×${x.h} · ${fmt(x.size)}</div>
-            <div class="row" style="gap:4px"><span class="tag">${esc(x.tag)}</span><span class="tag">${esc(x.sourceName)}</span></div>
+            <div class="row" style="gap:4px"><span class="tag">${esc(x.tag)}</span><span class="tag">${esc(x.sourceName)}</span>${x.mime === "image/png" ? `<button class="sm" data-pe="${x.id}" title="钢笔选区删除、一键去白边，另存一张新图" style="margin-left:auto">去白边</button>` : ""}</div>
             ${x.used.length ? `<div class="muted lused">用在：${x.used.map((u) => USED[u.type] ? `<a href="${USED[u.type][1]}${encodeURIComponent(u.id)}" target="_blank">${esc(u.name || USED[u.type][0])}</a>` : esc(u.name)).join("、")}</div>` : ""}
           </div>`).join("")}</div>` : `<div class="empty" id="libDrop">${d.total.n ? "这个筛选下没有图。" : "还没有图。点右上角“上传图片”，或者把图片拖进来、按 Ctrl+V 粘贴。"}</div>`}
         </div></div>`;
@@ -72,6 +72,17 @@
     VIEWER.open(list.map((x) => ({ src: `/api/library/${x.id}/file`, download: `/api/library/${x.id}/file?dl=1`, name: x.name, png: x.mime === "image/png", info: `${fmtOf(x)} · ${x.w}×${x.h} · ${fmt(x.size)} · ${x.tag} · ${x.grp}` })), Math.max(0, list.findIndex((x) => x.id === id)));
   }
 
+  /** 去白边（lib/pngedit.js）：另存一张新图，同一个分组、同一个类型 */
+  async function pe(id) {
+    const x = S.data.items.find((y) => y.id === id);
+    if (!x) return;
+    const r = await PNGEDIT.open({ src: `/api/library/${x.id}/file`, name: x.name });
+    if (!r) return;
+    try { await LIB.add(r.blob, { grp: x.grp, tag: x.tag, source: x.source, name: r.name }); W.toast("去白边的图另存好了"); }
+    catch (e) { return W.toast(e.message, true); }
+    await load(); draw(document.getElementById("main"));
+  }
+
   W.pages.library = {
     async render(main) {
       await load();
@@ -81,6 +92,7 @@
         if (t.closest("[data-grp]")) { S.grp = t.closest("[data-grp]").dataset.grp; return draw(main); }
         if (t.closest("[data-tag]")) { S.tag = t.closest("[data-tag]").dataset.tag; return draw(main); }
         if (t.closest("[data-view]")) return view(t.closest("[data-view]").dataset.view);
+        if (t.dataset.pe) return pe(t.dataset.pe);
         if (t.dataset.ck) { t.checked ? S.sel.add(t.dataset.ck) : S.sel.delete(t.dataset.ck); return draw(main); }
         const b = t.closest("[data-act]");
         if (!b || b.disabled) return;
