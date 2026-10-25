@@ -103,7 +103,7 @@ function runJob(pid, jid, resume) {
 }
 
 // ------------------------------------------------------------ 网页发来的操作
-const FILE_KEYS = ["crop", "lasso", "colors", "partsNote", "parts", "rot90", "fine", "curKey", "w", "h", "type", "maskKey", "req", "productName"];
+const FILE_KEYS = ["crop", "lasso", "colors", "partsNote", "parts", "rot90", "fine", "curKey", "w", "h", "type", "maskKey", "req", "productName", "skip"];
 export async function op(pid, b) {
   const ST = getST();
   const p0 = store.getProject(pid);

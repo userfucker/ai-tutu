@@ -121,8 +121,9 @@
   // ------------------------------------------------------------ 开始一批
   async function startBatch(files, redoOf) {
     const s = S();
-    const todo = files || P.files.filter((f) => !f.done).slice(0, Math.max(1, +s.batchSize || 10));
-    if (!todo.length) return toast(P.files.length ? "都做过了（缩略图上有 ✓）。要再做，点结果里的“重做”" : "先加产品图", true);
+    // ✓ 只是提示做过；打 × 的不做，其他的不管做没做过都做（超过每批张数时先做没做过的）
+    const todo = files || P.files.filter((f) => !f.skip).sort((a, b) => !!a.done - !!b.done).slice(0, Math.max(1, +s.batchSize || 10));
+    if (!todo.length) return toast(P.files.length ? "产品图都打了 ×（不做）。点左上角的 × 取消，就会做这张" : "先加产品图", true);
     $("startBtn").disabled = true;
     const jobs = [];
     try {
@@ -236,11 +237,12 @@
     $("cright").innerHTML = `
       <div class="card"><div class="row"><b>产品图</b><span class="muted">${files.length} 张</span>
         <span class="sp row">${files.some(isPng) ? `<button class="sm ${darkThumbs() ? "on" : ""}" data-act="darkThumbs" title="PNG 透明图换深色底，看白边">深色底</button>` : ""}<button class="sm" data-act="fromLib">从素材中心选</button><button class="sm" data-act="addFiles">上传图片</button>${files.length ? '<button class="sm" data-act="clearFiles">清空</button>' : ""}</span></div>
-        ${files.length ? `<div class="thumbs ${darkThumbs() ? "darkthumbs" : ""}">${files.map((f, i) => `<div class="thumb ${f.done ? "done" : ""} ${isPng(f) ? "png" : ""}" data-edit="${i}" title="${esc(f.name)}（点一下编辑：框选、标注、取色、旋转）"><img src="${thumbOf(f.curKey)}" alt="">${isPng(f) ? '<span class="fmt">PNG</span>' : ""}
+        ${files.length ? `<div class="thumbs ${darkThumbs() ? "darkthumbs" : ""}">${files.map((f, i) => `<div class="thumb ${f.done ? "done" : ""} ${f.skip ? "skip" : ""} ${isPng(f) ? "png" : ""}" data-edit="${i}" title="${esc(f.name)}（点一下编辑：框选、标注、取色、旋转）"><img src="${thumbOf(f.curKey)}" alt="">
+          <button class="sk" data-skipfile="${f.id}" title="${f.skip ? "这张不做。点一下取消 ×，就会做" : "点一下打 ×：这张不做"}">×</button>${isPng(f) ? '<span class="fmt">PNG</span>' : ""}
           ${f.crop ? `<span class="box" style="left:${f.crop.x * 100}%;top:${f.crop.y * 100}%;width:${f.crop.w * 100}%;height:${f.crop.h * 100}%"></span>` : ""}
           ${(f.parts || []).length || (f.colors || []).length ? `<span class="badge">${(f.parts || []).length ? `配件 ${f.parts.length}` : ""}${(f.colors || []).length ? ` 颜色 ${f.colors.length}` : ""}</span>` : ""}
           <button class="x" data-delfile="${f.id}" title="移除">×</button></div>`).join("")}</div>
-          <div class="muted" style="margin-top:6px">点缩略图：框选商品、画笔标注配件、吸管取色、旋转。打 ✓ 的是做过的，“开始这一批”只做没打 ✓ 的。</div>`
+          <div class="muted" style="margin-top:6px">点缩略图：框选商品、画笔标注配件、吸管取色、旋转。打 ✓ 的是做过的（只是提示）。不想做的点左上角打 ×，“开始这一批”会做所有没打 × 的图。</div>`
         : '<div class="empty" id="drop">点“上传图片”，或者把图片拖到这里、按 Ctrl+V 粘贴，或者“从素材中心选”<br><span class="muted">JPG / PNG / WebP，可以一次多张</span></div>'}</div>
       <div class="card"><div class="row"><b>结果</b><span class="muted">${jobs.length ? `${jobs.length} 张` : ""}</span></div>
         ${jobs.length ? `<div class="row selbar"><label class="row"><input type="checkbox" id="selAll" ${jobs.length && jobs.every((j) => sel.has(j.id)) ? "checked" : ""}> 全选</label><span class="muted">${sel.size ? `已选 ${sel.size} 张` : ""}</span>
@@ -323,6 +325,7 @@
   document.addEventListener("click", (e) => {
     const t = e.target;
     if (t.closest("#modal") || t.closest("#ceModal") || t.closest("#libLayer")) return;
+    if (t.dataset.skipfile) { e.stopPropagation(); const f = P.files.find((x) => x.id === t.dataset.skipfile); if (f) op({ op: "setFile", fid: f.id, fields: { skip: !f.skip } }); return; }
     if (t.dataset.delfile) { e.stopPropagation(); op({ op: "delFiles", fids: [t.dataset.delfile] }); return; }
     const b = t.closest("[data-act]");
     if (b && !b.disabled && ACT[b.dataset.act]) { ACT[b.dataset.act](b, e); return; }

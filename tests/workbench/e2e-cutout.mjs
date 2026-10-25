@@ -142,6 +142,19 @@ try {
   await sleep(500);
   check('重做：重新交给 AI（用这张上次的要求）', ai.asked.filter((a) => /a refined e-commerce product photo/.test(a.prompt)).length === n0 + 1 && /黑色皮质钱包/.test(ai.asked[ai.asked.length - 1].prompt));
 
+  // 打 × 的不做；做过的（✓）点“开始这一批”照样再做
+  await page.click('.thumb >> nth=0 >> .sk');
+  await page.waitForSelector('.thumb.skip');
+  const j0 = (await proj()).jobs, nj = j0.length, na = ai.asked.length;
+  await page.click('[data-act="start"]');
+  await page.waitForFunction((n) => document.querySelectorAll('.job').length === n + 1 && !document.querySelector('.job .tag.blue'), nj, { timeout: 60000 });
+  await sleep(500);
+  const pj = await proj();
+  check('打 × 的不做，做过的照样再做（不提示“都做过了”）', pj.jobs.length === nj + 1 && pj.jobs.find((j) => !j0.some((x) => x.id === j.id)).fileId === pj.files[1].id && ai.asked.length === na + 1);
+  await page.click('.thumb >> nth=0 >> .sk');
+  await page.waitForFunction(() => !document.querySelector('.thumb.skip'));
+  check('再点 × 就取消', !(await proj()).files[0].skip);
+
   // 模式切换
   await page.click('[data-mode="refine"]');
   await page.waitForSelector('[data-s="refineBg"]');
@@ -156,7 +169,7 @@ try {
   await page.waitForSelector('#libLayer:has-text("已经放进")');
   await page.click('#libLayer [data-ret=""]');
   const mains = (await api('GET', '/api/projects?kind=main')).list;
-  check('选中的白底图“做主图”：新建主图项目，两张都放进去', mains.length === 1 && /^主图-钱包\d\d-\d\d-2$/.test(mains[0].name) && (await api('GET', `/api/projects/${mains[0].id}`)).project.products.length === 2, JSON.stringify(mains.map((x) => x.name)));
+  check('选中的白底图“做主图”：新建主图项目，三张都放进去', mains.length === 1 && /^主图-钱包\d\d-\d\d-2$/.test(mains[0].name) && (await api('GET', `/api/projects/${mains[0].id}`)).project.products.length === 3, JSON.stringify(mains.map((x) => x.name)));
   // 工作台列表
   await page.goto(BASE + '/#/cutout');
   await page.waitForSelector('td a[href^="/cutout/#p="]');
