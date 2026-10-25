@@ -17,7 +17,7 @@
   let tpls = [];
   const MODES = {
     white: { label: "抠白底图 1:1", locks: { ratio: "1:1", background: "white" }, outSizes: ["800", "1024"], formats: ["jpeg", "png-alpha"] },
-    refine: { label: "图片精修", locks: { ratio: "auto", fill: "keep", angle: "keep", retouch: "on", format: "jpeg" }, outSizes: ["original", "800", "1024"], formats: ["jpeg"] },
+    refine: { label: "图片精修", locks: { ratio: "auto", fill: "keep", angle: "keep", retouch: "on" }, outSizes: ["original", "800", "1024"], formats: ["jpeg", "png", "png-alpha"] }, // PNG 可选（Lee 2026-10-25）；透明底只在白底时能用
     free: { label: "自由模式", locks: {}, outSizes: ["800", "1024", "original"], formats: ["jpeg", "png", "png-alpha"] },
   };
   const LABELS = { outSize: { 800: "800×800", 1024: "1K（1024）", original: "AI 原尺寸" }, format: { jpeg: "JPG", png: "PNG", "png-alpha": "PNG 透明底" } };
@@ -185,7 +185,7 @@
         ${s.mode === "refine" ? `<label class="f">背景<select data-s="refineBg">${opt("original", "原图背景", s.refineBg)}${opt("white", "白底图", s.refineBg)}${opt("custom", "自定义（写在精修要求里）", s.refineBg)}</select></label>` : `<label class="f">背景${sel("background", [["white", "白底图"], ["original", "原图背景"]])}</label>`}
         <label class="f">尺寸比例${sel("ratio", [["auto", "自动（跟原图）"], ["1:1", "1:1 正方形"], ["3:4", "3:4 竖版"], ["4:3", "4:3 横版"], ["2:3", "2:3 竖版"], ["3:2", "3:2 横版"], ["4:5", "4:5 竖版"], ["5:4", "5:4 横版"], ["9:16", "9:16 竖屏"], ["16:9", "16:9 宽屏"]])}</label>
         <label class="f">输出尺寸<select data-s="outSize">${M.outSizes.map((v) => opt(v, LABELS.outSize[v], s.outSize)).join("")}</select></label>
-        <label class="f">输出格式<select data-s="format" ${dis("format")}>${M.formats.map((v) => opt(v, LABELS.format[v], val("format"))).join("")}</select></label>
+        <label class="f">输出格式<select data-s="format" ${dis("format")}>${M.formats.filter((v) => !(s.mode === "refine" && v === "png-alpha" && s.refineBg !== "white")).map((v) => opt(v, LABELS.format[v], val("format"))).join("")}</select>${s.mode === "refine" && s.refineBg !== "white" ? '<span class="muted">背景选“白底图”才能出透明底 PNG</span>' : ""}</label>
         ${val("format") === "png-alpha" ? `<label class="f" title="被产品围住的白色（戒指中间的孔、手腕绳围成的圈、金属高光）怎么处理">镂空处<select data-s="holes">${opt("auto", "自动（推荐）", s.holes)}${opt("off", "保留（白色都不抠）", s.holes)}${opt("on", "都抠透明", s.holes)}</select></label>` : ""}
         <label class="f">主体大小${sel("fill", [["keep", "保持原图"], ["70", "适中 70%"], ["85", "饱满 85%"]])}</label>
         <label class="f">拍摄角度${sel("angle", [["keep", "保持原图"], ["auto", "自动摆正"], ["front", "正面平视"], ["45", "45° 俯视"], ["top", "正上方俯拍"]])}</label>
@@ -203,6 +203,9 @@
 
   let thumbUrls = new Map();
   const thumbOf = (key) => blobUrl(key);
+  const isPng = (f) => f.type === "image/png";
+  // 深色底：和看大图共用一个开关（lib/viewer.js 也读这个）
+  const darkThumbs = () => { try { return localStorage.getItem("st:viewerDark") === "1"; } catch { return false; } };
   let rendering = false, again = false;
   async function render() { if (rendering) { again = true; return; } rendering = true; try { do { again = false; await renderProject(); } while (again); } finally { rendering = false; } }
   async function renderProject() {
@@ -232,8 +235,8 @@
     const files = P.files || [];
     $("cright").innerHTML = `
       <div class="card"><div class="row"><b>产品图</b><span class="muted">${files.length} 张</span>
-        <span class="sp row"><button class="sm" data-act="fromLib">从素材中心选</button><button class="sm" data-act="addFiles">上传图片</button>${files.length ? '<button class="sm" data-act="clearFiles">清空</button>' : ""}</span></div>
-        ${files.length ? `<div class="thumbs">${files.map((f, i) => `<div class="thumb ${f.done ? "done" : ""}" data-edit="${i}" title="${esc(f.name)}（点一下编辑：框选、标注、取色、旋转）"><img src="${thumbOf(f.curKey)}" alt="">
+        <span class="sp row">${files.some(isPng) ? `<button class="sm ${darkThumbs() ? "on" : ""}" data-act="darkThumbs" title="PNG 透明图换深色底，看白边">深色底</button>` : ""}<button class="sm" data-act="fromLib">从素材中心选</button><button class="sm" data-act="addFiles">上传图片</button>${files.length ? '<button class="sm" data-act="clearFiles">清空</button>' : ""}</span></div>
+        ${files.length ? `<div class="thumbs ${darkThumbs() ? "darkthumbs" : ""}">${files.map((f, i) => `<div class="thumb ${f.done ? "done" : ""} ${isPng(f) ? "png" : ""}" data-edit="${i}" title="${esc(f.name)}（点一下编辑：框选、标注、取色、旋转）"><img src="${thumbOf(f.curKey)}" alt="">${isPng(f) ? '<span class="fmt">PNG</span>' : ""}
           ${f.crop ? `<span class="box" style="left:${f.crop.x * 100}%;top:${f.crop.y * 100}%;width:${f.crop.w * 100}%;height:${f.crop.h * 100}%"></span>` : ""}
           ${(f.parts || []).length || (f.colors || []).length ? `<span class="badge">${(f.parts || []).length ? `配件 ${f.parts.length}` : ""}${(f.colors || []).length ? ` 颜色 ${f.colors.length}` : ""}</span>` : ""}
           <button class="x" data-delfile="${f.id}" title="移除">×</button></div>`).join("")}</div>
@@ -249,7 +252,7 @@
     const tag = j.status === "done" ? '<span class="tag ok">完成</span>' : j.status === "failed" ? '<span class="tag bad">失败</span>' : j.status === "stopped" ? '<span class="tag warn">已停止</span>' : `<span class="tag blue">${esc(j.job || "排队中")}</span>`;
     return `<div class="job" data-jid="${j.id}"><input type="checkbox" class="ck" data-ck="${j.id}" ${sel.has(j.id) ? "checked" : ""}>
       <img src="${blobUrl(j.inKey)}" data-view="in" title="交给 AI 的图" alt="">
-      ${j.outKey ? `<img class="checker" src="${blobUrl(j.outKey)}" data-view="out" title="做好的图（点一下看大图）" alt="">` : '<div class="ph">…</div>'}
+      ${j.outKey ? `<img class="checker ${darkThumbs() ? "dk" : ""}" src="${blobUrl(j.outKey)}" data-view="out" title="做好的图（点一下看大图）" alt="">` : '<div class="ph">…</div>'}
       <div class="col" style="gap:3px"><div class="row"><b class="jname">${esc(j.outName || j.name)}</b>${tag}${j.w ? `<span class="tag">${j.w}×${j.h}</span>` : ""}${j.site ? `<span class="tag">${esc(j.site === "gemini" ? "Gemini" : j.site === "copilot" ? "Copilot" : j.site)}</span>` : ""}</div>
         ${j.note ? `<div class="muted">${esc(j.note)}</div>` : ""}${j.error ? `<div class="muted bad">${esc(j.error)}</div>` : ""}${j.req ? `<div class="muted">精修要求：${esc(j.req)}</div>` : ""}
         <div class="row">${j.outKey ? `<a href="${blobUrl(j.outKey)}" download="${esc(j.outName || "结果.jpg")}"><button class="sm">下载</button></a>` : ""}${j.aiKey ? '<button class="sm" data-act="viewAi">看 AI 原图</button>' : ""}
@@ -298,6 +301,7 @@
       if (!list || !list.length) return;
       try { await api("POST", "/api/library/send", { to: "cutout", projectId: P.id, ids: list.map((x) => x.id) }); toast(`从素材中心放进来 ${list.length} 张`); pull(); } catch (e) { toast(e.message, true); }
     },
+    darkThumbs: () => { try { localStorage.setItem("st:viewerDark", darkThumbs() ? "0" : "1"); } catch {} render(); },
     clearFiles: async () => { if (await confirmBox("清空所有产品图？（结果不受影响）", "清空", true)) op({ op: "delFiles", fids: P.files.map((f) => f.id) }); },
     start: () => startBatch(),
     stop: () => op({ op: "stop" }),
@@ -332,7 +336,11 @@
   document.addEventListener("change", (e) => {
     const t = e.target;
     if (!P) return;
-    if (t.dataset.s) op({ op: "settings", settings: { [t.dataset.s]: t.type === "number" ? Math.max(1, Math.min(50, +t.value || 10)) : t.value } });
+    if (t.dataset.s) {
+      const set = { [t.dataset.s]: t.type === "number" ? Math.max(1, Math.min(50, +t.value || 10)) : t.value };
+      if (t.dataset.s === "refineBg" && t.value !== "white" && P.settings.format === "png-alpha") set.format = "png"; // 透明底只在白底时能用
+      op({ op: "settings", settings: set });
+    }
     if (t.id === "selAll") { for (const j of P.jobs) t.checked ? sel.add(j.id) : sel.delete(j.id); render(); }
     if (t.id === "tplSel" && t.value !== "") { const tp = tpls[+t.value]; if (tp) { req = tp.text; $("requirement").value = req; } t.value = ""; }
   });

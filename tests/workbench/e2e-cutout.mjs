@@ -80,6 +80,12 @@ try {
   await page.click('#ceTools [data-tool="picker"]');
   await page.mouse.click(st.x + st.width * 0.45, st.y + st.height * 0.45);
   await page.waitForSelector('#ceColors .crow');
+  await page.mouse.move(st.x + st.width / 2, st.y + st.height / 2);
+  await page.mouse.wheel(0, -300); await sleep(200);
+  const zv = await page.textContent('#ceZoomV');
+  await page.click('#ceDark');
+  check('编辑框：滚轮放大、深色底', zv !== '100%' && await page.evaluate(() => document.getElementById('ceStage').classList.contains('dark')), zv);
+  await page.click('#ceDark'); await page.click('#ceZoomFit');
   await page.click('#ceRotR');
   await page.waitForFunction(() => /90/.test(document.getElementById('ceTitle').textContent) || true);
   await sleep(500);
@@ -103,6 +109,10 @@ try {
   check('Gemini 模型：按设置切到 Pro', asks.every((a) => a.model === 'Pro'));
   check('做完一批自动清空精修要求和产品名', (await page.inputValue('#requirement')) === '' && (await page.inputValue('#productName')) === '');
   p = await proj();
+  check('PNG 产品图：透明格子底 + PNG 角标', (await page.locator('.thumb.png .fmt').count()) === 2);
+  await page.click('[data-act="darkThumbs"]'); await sleep(300);
+  check('产品图“深色底”开关', (await page.locator('.thumbs.darkthumbs').count()) === 1 && (await page.locator('.job img.checker.dk').count()) === 2);
+  await page.click('[data-act="darkThumbs"]'); await sleep(300);
   check('缩略图打 ✓；结果有尺寸（800×800）', (await page.locator('.thumb.done').count()) === 2 && p.jobs.every((j) => j.w === 800 && j.h === 800 && j.outKey));
   const lib = (await api('GET', '/api/library')).items;
   // （假 AI 两次给的是同一张图，素材中心同一组里一样的图只存一份）

@@ -16,6 +16,16 @@
     picker: "在产品上点一下取色号，要求这个部位保持这个颜色（最多 8 个）。",
   };
   let files = [], idx = -1, rect = null, lasso = null, drag = null, tool = "crop", cb = {}, changed = new Set();
+  // 放大缩小、拖动看（Lee 2026-10-25）：view = { z 倍数, x, y 平移（像素）}；深色底记在浏览器里
+  let view = { z: 1, x: 0, y: 0 }, pan = null, space = false;
+  let dark = (() => { try { return localStorage.getItem("st:viewerDark") === "1"; } catch { return false; } })();
+  function applyView() {
+    $("ceZoom").style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.z})`;
+    $("ceZoomV").textContent = Math.round(view.z * 100) + "%";
+    $("ceStage").classList.toggle("dark", dark);
+    $("ceDark").classList.toggle("active", dark);
+    $("ceDark").textContent = dark ? "深色底 ✓" : "深色底";
+  }
   const cur = () => files[idx];
 
   function build() {
@@ -34,9 +44,10 @@
     <span class="muted">微调</span><input type="range" id="ceRotFine" min="-45" max="45" step="1" value="0" style="width:140px"><span class="muted" id="ceRotVal">0°</span><button id="ceRotReset">复原</button>
     <span class="muted">（框选、标注会跟着一起转；发给 AI 的是转好的图）</span></div>
   <div class="muted" id="ceHint"></div>
-  <div class="ce-stage" id="ceStage"><img id="ceImg" draggable="false" alt=""><canvas class="ce-mark" id="ceMark"></canvas><div class="ce-picks" id="cePicks"></div>
+  <div class="row"><span class="muted">滚轮放大缩小，按住鼠标右键（或空格）拖动看别的地方</span><span class="muted" id="ceZoomV">100%</span><button id="ceZoomFit">适应窗口</button><button id="ceDark" title="透明底的 PNG：换成深色底看有没有白边">深色底</button></div>
+  <div class="ce-stage" id="ceStage"><div class="ce-zoom" id="ceZoom"><img id="ceImg" draggable="false" alt=""><canvas class="ce-mark" id="ceMark"></canvas><div class="ce-picks" id="cePicks"></div>
     <svg class="ce-lasso" id="ceLassoSvg" viewBox="0 0 100 100" preserveAspectRatio="none" style="display:none"><path id="ceLassoMask" fill-rule="evenodd"></path><polygon id="ceLassoPoly"></polygon><polyline id="ceLassoLine"></polyline></svg>
-    <div class="ce-sel" id="ceSel" hidden>${["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((h) => `<span class="h ${h}" data-h="${h}"></span>`).join("")}</div></div>
+    <div class="ce-sel" id="ceSel" hidden>${["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((h) => `<span class="h ${h}" data-h="${h}"></span>`).join("")}</div></div></div>
   <input id="ceParts" placeholder="配件说明（选填）：例如“右边两个白色插头是配件，必须保留”">
   <div id="ceColors"></div>
   <div class="row"><span class="muted" id="ceInfo" style="margin-right:auto"></span>
@@ -57,6 +68,8 @@
     rect = f.crop ? { ...f.crop } : null;
     lasso = f.crop && f.lasso ? f.lasso.map((p) => ({ ...p })) : null;
     $("ceImg").src = f.dataUrl;
+    view = { z: 1, x: 0, y: 0 };
+    applyView();
     $("ceTitle").textContent = `第 ${idx + 1}/${files.length} 张：${f.name}（${f.w}×${f.h}）`;
     $("cePrev").disabled = idx === 0;
     $("ceNext").disabled = idx === files.length - 1;
@@ -195,13 +208,12 @@
     const cv = document.createElement("canvas");
     cv.width = W; cv.height = H;
     const g = cv.getContext("2d");
-    g.fillStyle = "#ffffff";
-    g.fillRect(0, 0, W, H);
+    const png = f.orig.type === "image/png";
+    if (!png) { g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H); } // PNG 转出来的角留透明
     g.translate(W / 2, H / 2);
     g.rotate(rad);
     g.imageSmoothingQuality = "high";
     g.drawImage(img, -W0 / 2, -H0 / 2);
-    const png = f.orig.type === "image/png";
     const blob = await canvasToBlob(cv, png ? "image/png" : "image/jpeg", 0.95);
     const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
     const dr = (delta * Math.PI) / 180, cs = Math.cos(dr), si = Math.sin(dr);
@@ -241,8 +253,23 @@
     $("ceColors").addEventListener("input", (e) => { const i = e.target.dataset.cnote; if (i !== undefined) { cur().colors[Number(i)].note = e.target.value.trim(); changed.add(cur()); } });
     $("ceColors").addEventListener("click", (e) => { const i = e.target.dataset.cdel; if (i !== undefined) { cur().colors.splice(Number(i), 1); changed.add(cur()); renderPicks(); } });
     const stage = $("ceStage");
+    stage.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const r = stage.getBoundingClientRect(), cx = e.clientX - r.left, cy = e.clientY - r.top;
+      const z2 = Math.min(12, Math.max(1, view.z * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+      view.x = z2 === 1 ? 0 : cx - ((cx - view.x) * z2) / view.z;
+      view.y = z2 === 1 ? 0 : cy - ((cy - view.y) * z2) / view.z;
+      view.z = z2;
+      applyView();
+    }, { passive: false });
+    stage.addEventListener("contextmenu", (e) => e.preventDefault());
+    document.addEventListener("keydown", (e) => { if (e.code === "Space" && $("ceModal").classList.contains("show") && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); space = true; stage.classList.add("panning"); } });
+    document.addEventListener("keyup", (e) => { if (e.code === "Space") { space = false; stage.classList.remove("panning"); } });
+    $("ceZoomFit").addEventListener("click", () => { view = { z: 1, x: 0, y: 0 }; applyView(); });
+    $("ceDark").addEventListener("click", () => { dark = !dark; try { localStorage.setItem("st:viewerDark", dark ? "1" : "0"); } catch {} applyView(); });
     stage.addEventListener("pointerdown", (e) => {
       e.preventDefault();
+      if (e.button === 2 || space) { pan = { sx: e.clientX, sy: e.clientY, x: view.x, y: view.y }; stage.setPointerCapture(e.pointerId); stage.classList.add("panning"); return; }
       const p = pt(e);
       if (tool === "picker") { pickColor(p); return; }
       if (tool === "lasso") { drag = { mode: "lasso" }; lasso = [p]; rect = null; stage.setPointerCapture(e.pointerId); drawSel(); return; }
@@ -256,6 +283,7 @@
       drawSel();
     });
     stage.addEventListener("pointermove", (e) => {
+      if (pan) { view.x = pan.x + e.clientX - pan.sx; view.y = pan.y + e.clientY - pan.sy; applyView(); return; }
       if (!drag) return;
       const p = pt(e);
       if (drag.mode === "paint") { paintSeg(drag.last, p); drag.last = p; return; }
@@ -278,6 +306,7 @@
       drawSel();
     });
     stage.addEventListener("pointerup", () => {
+      if (pan) { pan = null; if (!space) stage.classList.remove("panning"); return; }
       if (drag && drag.mode === "lasso") {
         drag = null;
         if (lasso.length < 3) { lasso = null; drawSel(); return; }
