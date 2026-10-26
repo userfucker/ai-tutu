@@ -146,7 +146,8 @@ try {
   await page.click('[data-act="generate"]');
   await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 2);
   await idle();
-  const sc1 = ai.asked.filter((a) => /a cut-out PNG with transparent background/.test(a.prompt));
+  const sc1 = ai.asked.filter((a) => /the product cut out and placed on a plain white background/.test(a.prompt));
+  check('AI 直接画：抠好的图铺白底发给 AI（透明 PNG 发给 Gemini 会出黑点），提示词说透明灯罩、玻璃不要变黑', sc1.length === 2 && /clear lamp lenses/.test(sc1[0].prompt) && sc1[0].files && sc1[0].files[0] && /\.jpg$/.test(sc1[0].files[0]) && sc1[0].mimes[0] === 'image/jpeg', JSON.stringify(sc1[0] && sc1[0].files));
   check('AI 直接画：把抠好的 PNG 发给 AI，让它自由摆放', sc1.length === 2 && sc1.every((a) => a.images === 1 && /you may choose a natural, attractive way/.test(a.prompt)));
   check('每张主图标出是哪个 AI 画的', (await page.locator('.pendbox .mcard .tag.aisite', { hasText: 'Gemini' }).count()) === 2);
   check('不自动审核：没有问审核 AI', doubao.length === 0 && !ai.asked.some((a) => /是不是同一个产品|哪张更适合/.test(a.prompt)));
@@ -165,7 +166,7 @@ try {
   await page.click('[data-act="generate"]');
   await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 3);
   await idle();
-  const sc2 = ai.asked.slice(nAsk).find((a) => /a cut-out PNG/.test(a.prompt));
+  const sc2 = ai.asked.slice(nAsk).find((a) => /cut out and placed on a plain white background/.test(a.prompt));
   check('照参考图摆：产品 PNG + 那张图一起发给 AI', sc2 && sc2.images === 2 && /SECOND uploaded image/.test(sc2.prompt));
   await page.click('[data-place="same"]');
   await page.waitForSelector('[data-place="same"].on');
@@ -173,7 +174,7 @@ try {
   await page.click('[data-act="generate"]');
   await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 4);
   await idle();
-  const sc3 = ai.asked.slice(nAsk).find((a) => /a cut-out PNG/.test(a.prompt));
+  const sc3 = ai.asked.slice(nAsk).find((a) => /cut out and placed on a plain white background/.test(a.prompt));
   check('和产品图一样：要求保持产品图的角度朝向', sc3 && sc3.images === 1 && /keep the product's orientation/.test(sc3.prompt));
   await page.click('[data-place="ref"] .x');
   await page.waitForFunction(() => !document.querySelector('[data-place="ref"]'));

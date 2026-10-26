@@ -135,7 +135,8 @@ function runItem(pid, iid, what, resume) {
       // AI 直接画场景：把抠好的透明 PNG 发过去；摆放照 it.placement（free / same / ref = 照某张图的摆法）
       const pr = ST.mainProduct(p, it.product);
       set({ job: "AI 画场景中" });
-      const png = await ai.img(await ST.db.getBlob(pr.cut || pr.key), "产品.png", 1536, !!pr.cut);
+      // 抠好的图铺白底再发（Lee 2026-10-26：透明 PNG 直接发给 Gemini，透明的地方——透明灯罩、抠穿的小孔——会被画成黑点；Copilot 不会）
+      const png = await ai.img(await ST.db.getBlob(pr.cut || pr.key), "产品.jpg", 1536);
       const place = it.placement === "ref" && it.placeRef ? await ai.img(await ST.db.getBlob(it.placeRef), "摆放参考.jpg", 1024) : null;
       const ref = it.ref ? await ai.img(await ST.db.getBlob(it.ref), "风格参考.jpg", 1024) : null;
       const placement = place ? "ref" : it.placement === "same" ? "same" : "free";

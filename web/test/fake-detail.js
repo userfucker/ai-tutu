@@ -77,7 +77,7 @@ export function fakeDetailAI(o = {}) {
     asked,
     async onCmd(m) {
       if (m.cmd !== "run") return { error: "不支持" };
-      asked.push({ kind: m.args.kind, prompt: m.args.prompt, images: (m.args.images || []).length, model: m.args.model || "", site: m.site });
+      asked.push({ kind: m.args.kind, prompt: m.args.prompt, images: (m.args.images || []).length, files: (m.args.images || []).map((i) => i.name), mimes: (m.args.images || []).map((i) => i.mime), model: m.args.model || "", site: m.site });
       await new Promise((r) => setTimeout(r, 5));
       if (m.args.kind === "image") return { b64: aiImage(m.args.prompt, m.args.images, o.harmBad).toString("base64"), mime: "image/png" };
       return answer(badBg, m.args.prompt, (m.args.images || []).length, o.harmBad);
