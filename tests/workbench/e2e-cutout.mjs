@@ -248,6 +248,8 @@ try {
     const pj2 = await proj();
     check('结果去白边：另存成新结果，在原来那条后面', pj2.jobs[1].outKey === pid + ':e1-edit' && pj2.jobs[1].status === 'done' && pj2.jobs[1].inKey && pj2.jobs[1].inKey !== j0.inKey);
     await page.waitForFunction(() => document.querySelectorAll('.job [data-act="peJob"]').length === 1);
+    check('结果的“去白边”：平时不显示，鼠标移到做好的图上才出现蓝色按钮', !(await page.isVisible('.job [data-act="peJob"]')));
+    await page.hover('.job .outwrap:has([data-act="peJob"])');
     await page.click('.job [data-act="peJob"]');
     await page.waitForSelector('#peLayer #peCv');
     await sleep(300);

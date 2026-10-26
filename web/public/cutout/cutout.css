@@ -80,3 +80,6 @@ button.sm.on { background: #1f2329; color: #fff; border-color: #1f2329; }
 .thumb.skip img { opacity: .35; }
 .thumb .pe { position: absolute; left: 50%; top: 3px; transform: translateX(-50%); white-space: nowrap; z-index: 3; display: none; box-shadow: 0 1px 4px rgba(0,0,0,.3); font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 0; background: #1677ff; color: #fff; }
 .thumb:hover .pe { display: block; }
+.job .outwrap { position: relative; width: 84px; height: 84px; }
+.job .outwrap .pe { position: absolute; left: 50%; top: 3px; transform: translateX(-50%); z-index: 3; display: none; white-space: nowrap; box-shadow: 0 1px 4px rgba(0,0,0,.3); font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 0; background: #1677ff; color: #fff; cursor: pointer; }
+.job .outwrap:hover .pe { display: block; }
