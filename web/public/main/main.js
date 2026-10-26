@@ -214,6 +214,15 @@
       ${list.length ? `<div class="mcards">${cards.join("")}</div>` : '<div class="empty">还没有主图项目，点右上角“新建主图项目”。</div>'}`;
   }
 
+  const SITE_NAME = { gemini: "Gemini", copilot: "Copilot" };
+  const siteName = (s) => SITE_NAME[s] || s || "";
+  /** 这张主图是哪个 AI 画的：AI 直接画 = 画场景的；画背景 + 融入 = 两个都写（一样就写一个） */
+  function whoDrew(it) {
+    if (it.mode === "scene") return siteName(it.sceneSite);
+    const bg = siteName(it.bgSite), bl = it.harm && it.harm.key ? siteName(it.blendSite) : "";
+    if (bg && bl && bg !== bl) return `背景 ${bg} · 融入 ${bl}`;
+    return bg || bl;
+  }
   async function itemCard(it) {
     const st = it.job || "";
     const scene = it.mode === "scene";
@@ -246,9 +255,11 @@
       else if (has) line = (hm.on ? "AI 图" : "原贴图") + (ST.harmText(hm) ? "；" + ST.harmText(hm) : "");
       else if (it.bg) line = "原贴图（没有融入）";
     }
+    // 哪个 AI 画的（Lee 2026-10-26：好对比）
+    const aiTag = whoDrew(it);
     return `<div class="mcard" data-iid="${it.id}">
       <div class="pic" data-act="view">${url ? `<img src="${url}" alt="">` : ""}${st ? `<span class="st tag ${/失败/.test(st) ? "bad" : "blue"}">${esc(st)}</span>` : ""}</div>
-      <div class="row"><b>${esc(it.styleName)}${scene ? ' <span class="muted">AI 直接画</span>' : ""}</b>${has ? `<span class="sp pills"><span class="pill ${hm.on ? "on" : ""}" data-act="harmView" data-v="1">AI 图</span><span class="pill ${hm.on ? "" : "on"}" data-act="harmView" data-v="0">原贴图</span></span>` : ""}</div>
+      <div class="row"><b>${esc(it.styleName)}${scene ? ' <span class="muted">AI 直接画</span>' : ""}</b>${aiTag ? `<span class="tag aisite" title="哪个 AI 画的">${esc(aiTag)}</span>` : ""}${has ? `<span class="sp pills"><span class="pill ${hm.on ? "on" : ""}" data-act="harmView" data-v="1">AI 图</span><span class="pill ${hm.on ? "" : "on"}" data-act="harmView" data-v="0">原贴图</span></span>` : ""}</div>
       ${line ? `<div class="muted ${warn ? "warntext" : ""}">${esc(line)}</div>` : ""}
       <div class="acts">
         <button class="sm" data-act="dlOne" ${ready ? "" : "disabled"}>下载</button>
@@ -407,7 +418,7 @@
       const out = [];
       for (const it of list) {
         const c = await compose(it, 1000);
-        out.push({ src: URL.createObjectURL(await ST.toBlob(c.canvas, "image/jpeg", 0.92)), name: `${it.styleName}（${it.mode === "scene" ? "AI 直接画" : c.used ? "AI 图" : "原贴图"}）`, png: false });
+        out.push({ src: URL.createObjectURL(await ST.toBlob(c.canvas, "image/jpeg", 0.92)), name: `${it.styleName}（${it.mode === "scene" ? "AI 直接画" : c.used ? "AI 图" : "原贴图"}）${whoDrew(it) ? " · " + whoDrew(it) : ""}`, png: false });
       }
       VIEWER.open(out, list.indexOf(it0));
     },

@@ -23,3 +23,4 @@
 .warntext { color: #b45309 !important; }
 .pill .placeimg { width: 20px; height: 20px; border-radius: 4px; object-fit: cover; vertical-align: middle; margin-right: 4px; }
 .pill .x { color: var(--mute); margin-left: 4px; }
+.mcard .tag.aisite { margin-left: 6px; background: #eef4ff; color: #1d4ed8; }

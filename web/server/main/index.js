@@ -58,7 +58,9 @@ function aiOf(pid, tag) {
     async image(key, prompt, images, label, opt) {
       const r = await ask(key, "image", prompt, images, label, opt);
       if (!r.file) throw new Error("AI 没有给出图片");
-      return new Blob([fs.readFileSync(Q.filePath(r.file))], { type: r.mime || "image/png" });
+      const blob = new Blob([fs.readFileSync(Q.filePath(r.file))], { type: r.mime || "image/png" });
+      blob.site = r.site || ""; // 哪个 AI 画的（主图卡片上标出来，Lee 2026-10-26）
+      return blob;
     },
     async json(key, prompt, images, label, opt) {
       const r = await ask(key, "text", prompt, images, label, opt);
@@ -141,7 +143,7 @@ function runItem(pid, iid, what, resume) {
       const key = `${pid}:${iid}-scene-${Date.now()}`;
       await ST.saveImage(key, blob);
       const old = it.scene;
-      set({ scene: key, job: "", judge: null });
+      set({ scene: key, sceneSite: blob.site, job: "", judge: null });
       delBlob(old);
       return;
     }
@@ -152,19 +154,20 @@ function runItem(pid, iid, what, resume) {
       const key = `${pid}:${iid}-bg-${Date.now()}`;
       await ST.saveImage(key, blob);
       const old = it.bg;
-      set({ bg: key });
+      set({ bg: key, bgSite: blob.site });
       delBlob(old);
     }
     if (p.blend === false && what !== "blend") { set({ job: "" }); return; }
     set({ job: "融入中" });
     const c = await ST.mainCompose(p, it, 1024, false);
+    let blendSite = "";
     const res = await ST.harmonizeCanvas(p, c.canvas, c.box, {
-      image: async (prompt, imgs, label) => ai.image("blend", prompt, await Promise.all(imgs.map((x) => ai.img(x.blob, x.name, 1536))), label, { role: "mn_blend", rotate: rot, site: it.site }),
+      image: async (prompt, imgs, label) => { const b = await ai.image("blend", prompt, await Promise.all(imgs.map((x) => ai.img(x.blob, x.name, 1536))), label, { role: "mn_blend", rotate: rot, site: it.site }); blendSite = b.site; return b; },
     }, `主图 ${it.styleName}`); // 不自动审核：直接用 AI 图，要审核点“AI 审核”
     const key = `${pid}:${iid}-harm-${Date.now()}`;
     await ST.saveImage(key, res.blob);
     const old = it.harm && it.harm.key;
-    set({ harm: { key, sig: c.sig, on: true, status: "ok" }, job: "" });
+    set({ harm: { key, sig: c.sig, on: true, status: "ok" }, blendSite, job: "" });
     delBlob(old);
   })().catch((e) => {
     if (!/主图已经删掉了/.test(e.message || "")) console.error("主图出错", e.message || e);
