@@ -244,6 +244,8 @@
   let thumbUrls = new Map();
   const thumbOf = (key) => blobUrl(key);
   const isPng = (f) => f.type === "image/png";
+  /** 北京时间，精确到秒：2026-10-26 18:03:57 */
+  const bjTime = (ms) => { const d = new Date(ms + 8 * 3600e3), p = (n) => String(n).padStart(2, "0"); return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`; };
   const isPngJob = (j) => j.ext === ".png" || /\.png$/i.test(j.outName || "");
   // 深色底：和看大图共用一个开关（lib/viewer.js 也读这个）
   const darkThumbs = () => { try { return localStorage.getItem("st:viewerDark") === "1"; } catch { return false; } };
@@ -296,7 +298,7 @@
     return `<div class="job" data-jid="${j.id}"><input type="checkbox" class="ck" data-ck="${j.id}" ${sel.has(j.id) ? "checked" : ""}>
       <img src="${blobUrl(j.inKey)}" data-view="in" title="交给 AI 的图" alt="">
       ${j.outKey ? `<div class="outwrap"><img class="checker ${darkThumbs() ? "dk" : ""}" src="${blobUrl(j.outKey)}" data-view="out" title="做好的图（点一下看大图）" alt="">${isPngJob(j) ? '<button class="pe" data-act="peJob" title="钢笔选区删除、一键去白边（只能保存）">去白边</button>' : ""}</div>` : '<div class="ph">…</div>'}
-      <div class="col" style="gap:3px"><div class="row"><b class="jname">${esc(j.outName || j.name)}</b>${tag}${j.w ? `<span class="tag">${j.w}×${j.h}</span>` : ""}${j.site ? `<span class="tag">${esc(j.site === "gemini" ? "Gemini" : j.site === "copilot" ? "Copilot" : j.site)}</span>` : ""}</div>
+      <div class="col" style="gap:3px"><div class="row"><b class="jname">${esc(j.outName || j.name)}</b>${tag}${j.w ? `<span class="tag">${j.w}×${j.h}</span>` : ""}${j.site ? `<span class="tag">${esc(j.site === "gemini" ? "Gemini" : j.site === "copilot" ? "Copilot" : j.site)}</span>` : ""}${j.status === "done" && j.ended ? `<span class="tag jtime" title="做好的时间（北京时间）">${bjTime(j.ended)}</span>` : j.created ? `<span class="tag jtime" title="开始做的时间（北京时间）">提交 ${bjTime(j.created)}</span>` : ""}</div>
         ${j.note ? `<div class="muted">${esc(j.note)}</div>` : ""}${j.error ? `<div class="muted bad">${esc(j.error)}</div>` : ""}${j.req ? `<div class="muted reqfull">精修要求：${esc(fillProduct(j.req, j.productName) || j.req)}</div>` : ""}
         <div class="row">${j.outKey ? `<a href="${blobUrl(j.outKey)}" download="${esc(j.outName || "结果.jpg")}"><button class="sm">下载</button></a>` : ""}${j.aiKey ? '<button class="sm" data-act="viewAi">看 AI 原图</button>' : ""}
           <button class="sm" data-act="redo" ${j.status === "queued" || j.status === "running" ? "disabled" : ""}>重做</button>${j.outKey ? '<button class="sm" data-act="useOut" title="把这张做好的图放回产品图，接着调整">拿来接着做</button>' : ""}

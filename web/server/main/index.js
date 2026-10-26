@@ -144,7 +144,7 @@ function runItem(pid, iid, what, resume) {
       const key = `${pid}:${iid}-scene-${Date.now()}`;
       await ST.saveImage(key, blob);
       const old = it.scene;
-      set({ scene: key, sceneSite: blob.site, job: "", judge: null });
+      set({ scene: key, sceneSite: blob.site, doneAt: Date.now(), job: "", judge: null });
       delBlob(old);
       return;
     }
@@ -155,7 +155,7 @@ function runItem(pid, iid, what, resume) {
       const key = `${pid}:${iid}-bg-${Date.now()}`;
       await ST.saveImage(key, blob);
       const old = it.bg;
-      set({ bg: key, bgSite: blob.site });
+      set({ bg: key, bgSite: blob.site, doneAt: Date.now() });
       delBlob(old);
     }
     if (p.blend === false && what !== "blend") { set({ job: "" }); return; }
@@ -168,7 +168,7 @@ function runItem(pid, iid, what, resume) {
     const key = `${pid}:${iid}-harm-${Date.now()}`;
     await ST.saveImage(key, res.blob);
     const old = it.harm && it.harm.key;
-    set({ harm: { key, sig: c.sig, on: true, status: "ok" }, blendSite, job: "" });
+    set({ harm: { key, sig: c.sig, on: true, status: "ok" }, blendSite, doneAt: Date.now(), job: "" });
     delBlob(old);
   })().catch((e) => {
     if (!/主图已经删掉了/.test(e.message || "")) console.error("主图出错", e.message || e);

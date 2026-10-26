@@ -113,6 +113,7 @@ try {
   const asks = ai.asked.filter((a) => /a refined e-commerce product photo/.test(a.prompt));
   check('开始这一批：两张都交给 AI（服务器做），提示词带产品名、要求、配件位置、颜色', asks.length === 2 && asks.some((a) => /"钱包"/.test(a.prompt) && /黑色皮质钱包/.test(a.prompt) && /Accessories:.*\d+%/.test(a.prompt) && /#[0-9A-F]{6}/.test(a.prompt)));
   check('Gemini 模型：按设置切到 Pro', asks.every((a) => a.model === 'Pro'));
+  check('结果显示做好的时间（北京时间，精确到秒）', (await page.locator('.job .tag.jtime').count()) === 2 && /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test((await page.locator('.job .tag.jtime').first().textContent()).trim()));
   check('结果里的精修要求显示完整（[产品名] 换成了产品名）', (await page.locator('.job .reqfull', { hasText: '黑色皮质钱包，拉链要清楚' }).count()) === 2);
   check('做完一批自动清空精修要求和产品名', (await page.inputValue('#requirement')) === '' && (await page.inputValue('#productName')) === '');
   p = await proj();

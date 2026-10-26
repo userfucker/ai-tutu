@@ -14,7 +14,7 @@
   const APP = (globalThis.APP = { project: null });
   const P = () => APP.project;
   const SIZES = [800, 1000];
-  const MODES = [["scene", "AI 直接画场景", "把抠好的透明 PNG 发给 AI，一步画出带产品的场景（最自然）"], ["paste", "先画背景再融入", "产品最稳：AI 画空背景，程序贴产品，AI 只调光影"]];
+  const MODES = [["scene", "AI 直接画场景", "把抠好的产品图（铺白底）发给 AI，一步画出带产品的场景（最自然）"], ["paste", "先画背景再融入", "产品最稳：AI 画空背景，程序贴产品，AI 只调光影"]];
   const PLACES = [["free", "AI 自由发挥", "让 AI 自己决定怎么摆（立着、平放、斜着……）"], ["same", "和产品图一样", "保持产品图里的角度和朝向"]];
   const SITES = [["", "自动（按 AI 分工轮流）"], ["gemini", "Gemini"], ["copilot", "Copilot"]];
   const ls = { get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
@@ -259,7 +259,7 @@
     const aiTag = whoDrew(it);
     return `<div class="mcard" data-iid="${it.id}">
       <div class="pic" data-act="view">${url ? `<img src="${url}" alt="">` : ""}${st ? `<span class="st tag ${/失败/.test(st) ? "bad" : "blue"}">${esc(st)}</span>` : ""}</div>
-      <div class="row"><b>${esc(it.styleName)}${scene ? ' <span class="muted">AI 直接画</span>' : ""}</b>${aiTag ? `<span class="tag aisite" title="哪个 AI 画的">${esc(aiTag)}</span>` : ""}${has ? `<span class="sp pills"><span class="pill ${hm.on ? "on" : ""}" data-act="harmView" data-v="1">AI 图</span><span class="pill ${hm.on ? "" : "on"}" data-act="harmView" data-v="0">原贴图</span></span>` : ""}</div>
+      <div class="row"><b>${esc(it.styleName)}${scene ? ' <span class="muted">AI 直接画</span>' : ""}</b>${aiTag ? `<span class="tag aisite" title="哪个 AI 画的">${esc(aiTag)}</span>` : ""}${it.doneAt || it.t ? `<span class="tag mtime" title="${it.doneAt ? "画好的时间" : "开始画的时间"}（北京时间）">${it.doneAt ? "" : "提交 "}${ST.bj(it.doneAt || it.t, true)}</span>` : ""}${has ? `<span class="sp pills"><span class="pill ${hm.on ? "on" : ""}" data-act="harmView" data-v="1">AI 图</span><span class="pill ${hm.on ? "" : "on"}" data-act="harmView" data-v="0">原贴图</span></span>` : ""}</div>
       ${line ? `<div class="muted ${warn ? "warntext" : ""}">${esc(line)}</div>` : ""}
       <div class="acts">
         <button class="sm" data-act="dlOne" ${ready ? "" : "disabled"}>下载</button>
@@ -332,7 +332,7 @@
         <label class="row lb"><input type="checkbox" id="blend" ${p.blend !== false ? "checked" : ""}> 融入背景（AI 只调光影）</label>`}
         <label class="row lb">用哪个 AI <select id="site">${SITES.map(([v, t]) => `<option value="${v}" ${v === site ? "selected" : ""}>${t}</option>`).join("")}</select></label>
         <button class="primary" data-act="generate" ${n && curProduct() ? "" : "disabled"}>生成 ${n} 张</button></div>
-        <div class="note" style="margin-top:10px">${p.mode !== "paste" ? "AI 直接画：把抠好的透明 PNG 发给 AI，一步画出带产品的场景，最自然；产品可能被 AI 改一点，不放心就点图片下面的“AI 审核”。喜欢哪张的摆法，点那张的“用这个摆放”。" : "先画背景再融入：AI 画空背景 → 程序把抠好的 PNG 贴到中间 → AI 调光影融入，直接显示 AI 图（原贴图留着可以切换，想让 AI 判断哪张好点“AI 审核”）。"}
+        <div class="note" style="margin-top:10px">${p.mode !== "paste" ? "AI 直接画：把抠好的产品图（铺白底）发给 AI，一步画出带产品的场景，最自然；产品可能被 AI 改一点，不放心就点图片下面的“AI 审核”。喜欢哪张的摆法，点那张的“用这个摆放”。" : "先画背景再融入：AI 画空背景 → 程序把抠好的 PNG 贴到中间 → AI 调光影融入，直接显示 AI 图（原贴图留着可以切换，想让 AI 判断哪张好点“AI 审核”）。"}
           在服务器上做，关掉网页也不停。默认不加文字。</div></div>
       ${pend.length ? `<div class="card pendbox"><div class="head"><div><h3>待确认（${pend.length}）</h3><div class="muted">看过点“采用”；不满意可以调整产品、重新融入、重画背景，或者不要。</div></div></div>
         <div class="mcards">${(await Promise.all(pend.map(itemCard))).join("")}</div></div>` : ""}

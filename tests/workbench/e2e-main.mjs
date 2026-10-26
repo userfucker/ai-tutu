@@ -149,6 +149,8 @@ try {
   const sc1 = ai.asked.filter((a) => /the product cut out and placed on a plain white background/.test(a.prompt));
   check('AI 直接画：抠好的图铺白底发给 AI（透明 PNG 发给 Gemini 会出黑点），提示词说透明灯罩、玻璃不要变黑', sc1.length === 2 && /clear lamp lenses/.test(sc1[0].prompt) && sc1[0].files && sc1[0].files[0] && /\.jpg$/.test(sc1[0].files[0]) && sc1[0].mimes[0] === 'image/jpeg', JSON.stringify(sc1[0] && sc1[0].files));
   check('AI 直接画：把抠好的 PNG 发给 AI，让它自由摆放', sc1.length === 2 && sc1.every((a) => a.images === 1 && /you may choose a natural, attractive way/.test(a.prompt)));
+  check('每张主图显示时间（北京时间，精确到秒）', (await page.locator('.pendbox .mcard .tag.mtime').count()) === 2 && /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test((await page.locator('.pendbox .mcard .tag.mtime').first().textContent()).trim()), await page.locator('.pendbox .mcard .tag.mtime').first().textContent());
+  await page.screenshot({ path: path.join(out, '2b-cards.png'), fullPage: true });
   check('每张主图标出是哪个 AI 画的', (await page.locator('.pendbox .mcard .tag.aisite', { hasText: 'Gemini' }).count()) === 2);
   check('不自动审核：没有问审核 AI', doubao.length === 0 && !ai.asked.some((a) => /是不是同一个产品|哪张更适合/.test(a.prompt)));
   check('每张图下面有“下载”“AI 审核”“用这个摆放”', (await page.locator('.pendbox [data-act="dlOne"]:not([disabled])').count()) === 2 && (await page.locator('.pendbox [data-act="judge"]:not([disabled])').count()) === 2 && (await page.locator('.pendbox [data-act="placeRef"]').count()) === 2);
