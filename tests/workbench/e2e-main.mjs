@@ -279,6 +279,10 @@ try {
   const lb = await (await page.$('#peCv')).boundingBox();
   for (const [fx, fy] of [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4], [0.1, 0.1]]) await page.mouse.click(lb.x + lb.width * fx, lb.y + lb.height * fy);
   await page.click('#peDel');
+  await page.click('#peFringeBtn'); // 素材中心页面没有 imagekit.js：点了才加载
+  await page.waitForSelector('#peWhite.show');
+  check('素材中心：边缘修色能用（用到时才加载）', await page.evaluate(() => typeof defringeAlpha === 'function') && (await page.textContent('#pePanelT')) === '边缘修色');
+  await page.click('#peWhiteNo');
   await page.click('#peSaveAs');
   await page.waitForFunction((n) => document.querySelectorAll('.lit').length === n + 1, nLit);
   check('素材中心：PNG 有“去白边”，另存成新图', (await api('GET', '/api/library')).items.some((x) => x.name === pngName + '-去白边.png' && x.mime === 'image/png'), pngName);

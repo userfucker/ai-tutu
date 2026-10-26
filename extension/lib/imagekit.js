@@ -12,11 +12,11 @@
 const T = {
   en: {
     background: {
-      white: "Pure white (RGB 255,255,255) clean seamless background; remove everything from the original background, including shadow edges; a subtle natural contact shadow under the product is allowed.",
+      white: "Pure white (RGB 255,255,255) clean seamless background; remove everything from the original background, including shadow edges; a subtle natural contact shadow under the product is allowed. The product outline must be crisp and go straight from the product's own color to the white background, with no white or light outline, rim light, glow or halo along the edges.",
       original: "Keep the original background and scene; only clean obvious clutter and stains in the background; do not replace the background.",
       refine: "Keep the original background, scene, lighting and color tone; only remove specks, stains and dust from the background; do not replace it or change the style.",
       custom: "Use the background described in the user note (Chinese). If the user note does not describe a background, keep the original background, scene, lighting and color tone, and only remove specks, stains and dust from it.",
-      alpha: "Pure white (RGB 255,255,255) clean background with everything from the original background removed; absolutely no shadows, reflections or cast shadows (it will be cut out to a transparent PNG afterwards); crisp, clean product edges without fringes or halos; every gap between leaves, branches, handles or parts must show the same pure white background.",
+      alpha: "Pure white (RGB 255,255,255) clean background with everything from the original background removed; absolutely no shadows, reflections or cast shadows (it will be cut out to a transparent PNG afterwards); crisp, clean product edges without fringes or halos; every gap between leaves, branches, handles or parts must show the same pure white background. Edges: the product outline must go straight from the product's own color to pure white — no white or light outline, no rim light, no glow, no bright edge line, no light bevel along the silhouette, no blur or feathering, no sharpening halo; dark products must keep a dark edge right up to the background.",
     },
     angle: {
       keep: "Keep the camera angle, perspective, product orientation and placement exactly as in the reference; cables, harnesses and accessories keep their routing and positions; do not rotate, flip or rearrange anything.",
@@ -52,11 +52,11 @@ const T = {
   },
   zh: {
     background: {
-      white: "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物和阴影边缘；可以保留产品下方自然、轻微的接触投影。",
+      white: "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物和阴影边缘；可以保留产品下方自然、轻微的接触投影。产品轮廓清晰锐利，从产品本身的颜色直接过渡到白底，边缘不要白色或浅色描边、轮廓光、外发光和光晕。",
       original: "保留原图的背景和场景，只清理背景里明显的杂物和污点，不要换背景。",
       refine: "保留原图的背景、场景、光线和色调，只去掉背景里的杂点、污渍和灰尘，不要换背景，不要改变画面风格。",
       custom: "背景按用户备注里写的要求做；如果备注里没有写背景要求，就保留原图的背景、场景、光线和色调，只去掉背景里的杂点、污渍和灰尘。",
-      alpha: "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物；不要任何投影、倒影和阴影（之后要抠成透明底）；产品边缘清晰锐利、轮廓干净，没有毛边和白边；枝叶之间、把手里、零件之间的空隙也要露出同样的纯白背景。",
+      alpha: "纯白色（RGB 255,255,255）干净背景，去掉原背景里的所有杂物；不要任何投影、倒影和阴影（之后要抠成透明底）；产品边缘清晰锐利、轮廓干净，没有毛边和白边；枝叶之间、把手里、零件之间的空隙也要露出同样的纯白背景。边缘：产品轮廓从产品本身的颜色直接过渡到纯白，不要白色或浅色描边、轮廓光、外发光、亮边线、沿轮廓的浅色倒角，不要模糊羽化，不要锐化光晕；深色产品的边缘要一直是深色。",
     },
     angle: {
       keep: "保持原图的拍摄角度、透视、产品朝向和摆放方式完全不变；线缆、线束和配件的走向与位置也不变；不要旋转、翻转或重新摆放任何部分。",
@@ -517,7 +517,61 @@ function cutoutWhite(g, W, H, opts = {}) {
     }
     out[i * 4 + 3] = Math.round(Math.max(0.08, Math.min(cover, sum / n / 255)) * 255);
   }
+  // 边缘修色：最外圈只去了 1 像素的白，往里第 2 圈偏浅的（AI 在白底上画的混色、压缩出的亮边）也染回产品色（Lee 2026-10-26：放大后边缘一级级的浅色台阶）
+  if (opts.defringe !== false) defringeAlpha(out, W, H, { band: 2, strength: 1 });
   g.putImageData(new ImageData(out, W, H), 0, 0);
+}
+
+/**
+ * 边缘修色（去色边）：透明底图片贴着透明处 band 圈以内、比里面的产品颜色更浅（混了白色）的像素，
+ * 把颜色染回里面一点的真实产品色，最外两圈顺便按混进去的白色多少降一点透明度。不删像素，产品不会变小。
+ * 参考色取 band+1～band+3 圈（离透明处更远）的像素；参考色本身很浅（白色产品）或这一带本来就是浅色（宽的浅色包边）就不动。
+ * d = RGBA 数组（就地修改），透明 = alpha < 16；strength 0~1
+ */
+function defringeAlpha(d, W, H, o = {}) {
+  const band = Math.max(1, Math.min(6, o.band || 2)), sMul = Math.max(0, Math.min(1, o.strength == null ? 1 : o.strength));
+  if (!sMul) return d;
+  const N = W * H, far = band + 3;
+  const dep = new Uint8Array(N); // 离透明处几圈：0 = 透明（或还没算到），1 = 挨着透明处
+  const q = new Int32Array(N);
+  let qh = 0, qt = 0;
+  for (let i = 0; i < N; i++) if (d[i * 4 + 3] < 16) {
+    const x = i % W;
+    for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < N && d[j * 4 + 3] >= 16 && !dep[j]) { dep[j] = 1; q[qt++] = j; }
+  }
+  while (qh < qt) {
+    const i = q[qh++], x = i % W, k = dep[i] + 1;
+    if (k > far) continue;
+    for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < N && d[j * 4 + 3] >= 16 && !dep[j]) { dep[j] = k; q[qt++] = j; }
+  }
+  const R = band + 3;
+  const src = new Uint8ClampedArray(d);
+  for (let i = 0; i < N; i++) {
+    const de = dep[i];
+    if (!de || de > band) continue;
+    const x = i % W, y = (i - x) / W;
+    // 参考色：紧挨着往里的 band+1～band+3 圈（再往里的不算：宽的浅色包边里，紧挨着的还是浅色，就不会被当成白边）
+    let r = 0, g2 = 0, b = 0, n = 0;
+    for (let yy = Math.max(0, y - R); yy <= Math.min(H - 1, y + R); yy++) for (let xx = Math.max(0, x - R); xx <= Math.min(W - 1, x + R); xx++) {
+      const j = yy * W + xx;
+      if (src[j * 4 + 3] < 250) continue;
+      if (!dep[j] || dep[j] <= band) continue;
+      r += src[j * 4]; g2 += src[j * 4 + 1]; b += src[j * 4 + 2]; n++;
+    }
+    if (n < 3) continue;
+    const F = [r / n, g2 / n, b / n];
+    // 混进去的白色有多少：a = 产品占的比例（按离白色的距离算，参考色太浅的通道不算）
+    let as = 0, an = 0;
+    for (let c = 0; c < 3; c++) { const room = 255 - F[c]; if (room >= 24) { as += (255 - src[i * 4 + c]) / room; an++; } }
+    if (!an) continue; // 白色 / 很浅的产品：不动
+    const a = Math.max(0, Math.min(1, as / an));
+    if (a >= 0.97) continue; // 不比里面浅：不是白边
+    const m = sMul;
+    for (let c = 0; c < 3; c++) d[i * 4 + c] = Math.round(src[i * 4 + c] + (F[c] - src[i * 4 + c]) * m);
+    const drop = de === 1 ? 1 : de === 2 ? 0.25 : 0; // 最外圈按混白多少变透明一点，第 2 圈少一点，再往里只改颜色
+    if (drop) d[i * 4 + 3] = Math.round(src[i * 4 + 3] * (1 - m * drop * (1 - a) * 0.85));
+  }
+  return d;
 }
 
 /**

@@ -6,6 +6,7 @@
  * 钢笔：点一下加锚点（两点之间直线），按住拖动拉出弧线；点回第一个点闭合，出现蚂蚁线；
  *       右键点锚点删掉它（没点在锚点上就删最近加的那个），退格删最后一个点，Esc 放弃；闭合以后 Delete（或“删除选区”）把选区变透明。
  * 边缘：硬（默认）/ 柔和 1 像素（记在浏览器里）。一键去白边：强度 0~20（默认 0 = 不变），拖动时马上看效果。
+ * 边缘修色：同一条滑块，不删像素，把边缘偏浅的一两圈染回产品色（和抠图时自动做的是同一套 defringeAlpha）。
  * 撤销 / 重做：Ctrl+Z / Ctrl+Y，最多 20 步。滚轮放大缩小，按住空格（或鼠标中键）拖动看别的地方，默认深色底。
  */
 (() => {
@@ -136,6 +137,20 @@
     return im;
   }
 
+  /** 边缘修色：用 imagekit.js 里的 defringeAlpha（抠图时自动用的同一套），强度 0~20 → 修几圈、修多少 */
+  function fringe(src, s) {
+    const im = new ImageData(new Uint8ClampedArray(src.data), src.width, src.height);
+    if (!(s > 0) || typeof defringeAlpha !== "function") return im;
+    defringeAlpha(im.data, src.width, src.height, { band: s <= 7 ? 2 : s <= 14 ? 3 : 4, strength: Math.min(1, 0.3 + s * 0.07) });
+    return im;
+  }
+  /** 素材中心页面没有 imagekit.js：用到时再加载 */
+  let kitP = null;
+  const kitReady = () => {
+    if (typeof defringeAlpha === "function") return Promise.resolve(true);
+    return (kitP = kitP || new Promise((res) => { const sc = document.createElement("script"); sc.src = "/lib/imagekit.js"; sc.onload = () => res(typeof defringeAlpha === "function"); sc.onerror = () => { kitP = null; res(false); }; document.head.appendChild(sc); }));
+  };
+
   const isPngName = (n) => /\.png$/i.test(String(n || ""));
   const newName = (n) => { const b = String(n || "图片").replace(/\.[^.]+$/, ""); return (/-去白边$/.test(b) ? b : b + "-去白边") + ".png"; };
 
@@ -161,11 +176,12 @@
           <button id="peDel" disabled title="把蚂蚁线里面的地方变透明（Delete）">删除选区</button>
           <label class="row">边缘 <select id="peEdge"><option value="hard">硬</option><option value="soft">柔和 1 像素</option></select></label>
           <button id="peWhiteBtn" title="不用选，整张图贴着透明处的白边一起去掉">一键去白边</button>
+          <button id="peFringeBtn" title="不删像素：把边缘偏浅的一两圈（白色台阶、亮边）染回产品本身的颜色">边缘修色</button>
           <button id="peUndo" disabled title="撤销（Ctrl+Z）">撤销</button><button id="peRedo" disabled title="重做（Ctrl+Y）">重做</button>
           <span class="sp"><span class="muted" id="peZoomV">100%</span><button id="peFit">适应窗口</button><button id="peDark">深色底</button>
           <button id="peDl" title="把现在这张图下载到电脑（PNG）">下载</button><button id="peCancel">取消</button><button id="peSaveAs" disabled title="${o.saveAs === false ? "这里只能保存" : "另存一张新图，原图不动"}">另存为新图</button><button class="primary" id="peSave" disabled title="替换原图">保存</button></span></div>
-        <div class="pewhite" id="peWhite"><b>一键去白边</b> 强度 <input type="range" id="peStr" min="0" max="20" step="1" value="0"> <b id="peStrV">0</b>
-          <span class="muted">0 是不变，往右越拉去得越多。只去贴着透明处、偏白的边，产品本身的白色不动</span><span class="sp"><button id="peWhiteNo">取消</button><button class="primary" id="peWhiteOk">确定</button></span></div>
+        <div class="pewhite" id="peWhite"><b id="pePanelT">一键去白边</b> 强度 <input type="range" id="peStr" min="0" max="20" step="1" value="0"> <b id="peStrV">0</b>
+          <span class="muted" id="pePanelHint"></span><span class="sp"><button id="peWhiteNo">取消</button><button class="primary" id="peWhiteOk">确定</button></span></div>
         <div class="pehint muted">钢笔：点一下加锚点（两点之间是直线），按住拖动拉出弧线；点回第一个点闭合，出现蚂蚁线后按 Delete 或点“删除选区”。右键点锚点删掉它（不在锚点上右键就删最近加的那个），退格删最后一个点，Esc 放弃。“下载”把现在这张图存到电脑。滚轮放大缩小，按住空格（或鼠标中键）拖动看别的地方。</div>
         <div id="peStage"><div id="peWrap"><canvas id="peCv" width="${W}" height="${H}"></canvas></div><svg id="peSvg"></svg></div></div>`;
       document.body.appendChild(L);
@@ -241,14 +257,22 @@
       };
 
       // ---------------------------------------------------------------- 一键去白边（拖动马上看效果）
-      let whiteOn = false, preview = null, wt = 0;
-      const showWhite = (on) => {
+      // 一键去白边（删掉偏白的边）/ 边缘修色（把偏浅的边染回产品色）共用一条滑块
+      let whiteOn = false, mode = "white", preview = null, wt = 0;
+      const PANEL = {
+        white: ["一键去白边", "0 是不变，往右越拉去得越多。只去贴着透明处、偏白的边，产品本身的白色不动"],
+        fringe: ["边缘修色", "0 是不变，往右越拉修得越宽越狠。不删像素：边缘偏浅的一两圈染回里面的产品色，白色产品不动"],
+      };
+      const calc = (s) => (mode === "white" ? deWhite(cur, s) : fringe(cur, s));
+      const showWhite = (on, m) => {
+        if (on && m) mode = m;
         whiteOn = on;
         $("peWhite").classList.toggle("show", on);
-        $("peWhiteBtn").classList.toggle("on", on);
-        if (on) { resetPath(); runPreview(); } else { preview = null; paint(cur); }
+        $("peWhiteBtn").classList.toggle("on", on && mode === "white");
+        $("peFringeBtn").classList.toggle("on", on && mode === "fringe");
+        if (on) { $("pePanelT").textContent = PANEL[mode][0]; $("pePanelHint").textContent = PANEL[mode][1]; $("peStr").value = 0; $("peStrV").textContent = "0"; resetPath(); runPreview(); } else { preview = null; paint(cur); }
       };
-      const runPreview = () => { clearTimeout(wt); wt = setTimeout(() => { if (!whiteOn) return; preview = deWhite(cur, +$("peStr").value); paint(preview); }, 60); };
+      const runPreview = () => { clearTimeout(wt); wt = setTimeout(() => { if (!whiteOn) return; preview = calc(+$("peStr").value); paint(preview); }, 60); };
 
       // ---------------------------------------------------------------- 鼠标
       stage.addEventListener("wheel", (e) => {
@@ -323,10 +347,11 @@
       $("peRedo").onclick = doRedo;
       $("peFit").onclick = fit;
       $("peDark").onclick = () => { dark = !dark; ls.set("st:peDark", dark ? "1" : "0"); apply(); };
-      $("peWhiteBtn").onclick = () => showWhite(!whiteOn);
+      $("peWhiteBtn").onclick = () => showWhite(!(whiteOn && mode === "white"), "white");
+      $("peFringeBtn").onclick = async () => { if (!(await kitReady())) return alert("边缘修色加载失败，刷新页面再试"); showWhite(!(whiteOn && mode === "fringe"), "fringe"); };
       $("peStr").oninput = (e) => { $("peStrV").textContent = e.target.value; runPreview(); };
       $("peWhiteNo").onclick = () => showWhite(false);
-      $("peWhiteOk").onclick = () => { clearTimeout(wt); if (+$("peStr").value === 0) return showWhite(false); /* 0 = 不变 */ const im = preview || deWhite(cur, +$("peStr").value); whiteOn = false; preview = null; $("peWhite").classList.remove("show"); $("peWhiteBtn").classList.remove("on"); commit(im); };
+      $("peWhiteOk").onclick = () => { clearTimeout(wt); if (+$("peStr").value === 0) return showWhite(false); /* 0 = 不变 */ const im = preview || calc(+$("peStr").value); whiteOn = false; preview = null; $("peWhite").classList.remove("show"); $("peWhiteBtn").classList.remove("on"); $("peFringeBtn").classList.remove("on"); commit(im); };
       const finish = (r) => { document.removeEventListener("keydown", key, true); document.removeEventListener("keyup", key, true); L.remove(); resolve(r); };
       const close = () => { if (dirty && !confirm("改过的还没保存，确定不要了？")) return; finish(null); };
       $("peCancel").onclick = close;
@@ -352,5 +377,5 @@
     });
   }
 
-  globalThis.PNGEDIT = { open, isPngName, newName, deWhite, cutPath };
+  globalThis.PNGEDIT = { open, isPngName, newName, deWhite, cutPath, fringe };
 })();

@@ -9,7 +9,7 @@
 (() => {
   if (window.__aitutuPanel) return;
   window.__aitutuPanel = true;
-  const VERSION = "0.9.0";
+  const VERSION = "0.9.1";
   const SITE = AITUTU_SITE; // gemini.js 或 copilot.js 提供
   const AI = SITE.name;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

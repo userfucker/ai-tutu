@@ -198,7 +198,15 @@ try {
   const a2 = await alphaAt(0.5, 0.5);
   await page.keyboard.press('Control+y');
   check('撤销 / 重做（Ctrl+Z / Ctrl+Y）', a1 === 0 && a2 === 255 && (await alphaAt(0.5, 0.5)) === 0, `${a1} ${a2}`);
+  await page.click('#peFringeBtn');
+  check('边缘修色：和一键去白边共用滑块，打开时从 0 开始', await page.isVisible('#peWhite') && (await page.textContent('#pePanelT')) === '边缘修色' && (await page.inputValue('#peStr')) === '0');
+  await page.fill('#peStr', '10'); await page.dispatchEvent('#peStr', 'input');
+  await sleep(300);
+  await page.click('#peWhiteOk');
+  const nu = await page.evaluate(() => document.getElementById('peLayer')._pe.undo);
+  await page.keyboard.press('Control+z');
   await page.click('#peWhiteBtn');
+  check('一键去白边：面板标题换过来', (await page.textContent('#pePanelT')) === '一键去白边' && nu === 2);
   await page.fill('#peStr', '8'); await page.dispatchEvent('#peStr', 'input');
   await sleep(400);
   await page.click('#peWhiteOk');
@@ -238,6 +246,17 @@ try {
     return { plain: await corner(base), crop: await corner({ ...base, crop: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } }) };
   });
   check('透明 PNG 交给 AI 前铺白底（框选过的也不变黑）', pi.plain[0] > 240 && pi.plain[3] === 255 && pi.crop[0] > 240 && pi.crop[1] > 240, JSON.stringify(pi));
+  const df = await page.evaluate(() => {
+    // 透明底上 40×40 深棕方块：外面两圈是混了白色的浅色（AI 白底上画的那种台阶）；另一块是宽 6 像素的浅灰包边（真的花纹，不能动）；还有一块白色产品
+    const W = 120, H = 60, im = new ImageData(W, H), put = (x, y, c) => im.data.set([...c, 255], (y * W + x) * 4);
+    for (let y = 10; y < 50; y++) for (let x = 10; x < 50; x++) { const e = Math.min(x - 10, 49 - x, y - 10, 49 - y); put(x, y, e < 2 ? [205, 190, 185] : [90, 60, 50]); }
+    for (let y = 10; y < 50; y++) for (let x = 60; x < 100; x++) { const e = Math.min(x - 60, 99 - x, y - 10, 49 - y); put(x, y, e < 6 ? [200, 200, 200] : [90, 60, 50]); }
+    for (let y = 10; y < 50; y++) for (let x = 104; x < 118; x++) put(x, y, [250, 250, 250]);
+    const o = new ImageData(new Uint8ClampedArray(im.data), W, H); defringeAlpha(o.data, W, H, { band: 2, strength: 1 });
+    const px = (x, y) => [...o.data.slice((y * W + x) * 4, (y * W + x) * 4 + 4)];
+    return { halo1: px(10, 30), halo2: px(11, 30), inner: px(30, 30), trim: px(61, 30), white: px(110, 30) };
+  });
+  check('边缘修色：浅色台阶染回产品色；宽的浅色包边、白色产品不动', df.halo2[0] < 120 && df.halo1[0] < 120 && df.halo1[3] < 255 && df.halo2[3] > 200 && df.inner[0] === 90 && df.trim[0] === 200 && df.white[0] === 250 && df.white[3] === 255, JSON.stringify(df));
   check('一键去白边：去掉贴着透明处的白边，产品里面的白色不动', dw.ring === 0 && dw.red === 255 && dw.hole === 255 && dw.zero === 255, JSON.stringify(dw));
 
   // 结果去白边另存：加一条新结果，在原来那条后面
