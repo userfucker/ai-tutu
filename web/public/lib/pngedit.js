@@ -41,7 +41,7 @@
 #peWrap { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 #peWrap canvas { display: block; }
 #peWrap.pix canvas { image-rendering: pixelated; }
-#peSvg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+#peSvg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; pointer-events: none; }
 #peSvg * { vector-effect: non-scaling-stroke; shape-rendering: crispEdges; }
 #peSvg .p2 { fill: none; stroke: #1677ff; stroke-width: 1; shape-rendering: auto; }
 #peSvg .ants1 { fill: none; stroke: #fff; stroke-width: 1; shape-rendering: auto; }
@@ -167,7 +167,7 @@
         <div class="pewhite" id="peWhite"><b>一键去白边</b> 强度 <input type="range" id="peStr" min="0" max="20" step="1" value="0"> <b id="peStrV">0</b>
           <span class="muted">0 是不变，往右越拉去得越多。只去贴着透明处、偏白的边，产品本身的白色不动</span><span class="sp"><button id="peWhiteNo">取消</button><button class="primary" id="peWhiteOk">确定</button></span></div>
         <div class="pehint muted">钢笔：点一下加锚点（两点之间是直线），按住拖动拉出弧线；点回第一个点闭合，出现蚂蚁线后按 Delete 或点“删除选区”。右键点锚点删掉它，退格删最后一个点，Esc 放弃。滚轮放大缩小，按住空格（或鼠标中键）拖动看别的地方。</div>
-        <div id="peStage"><div id="peWrap"><canvas id="peCv" width="${W}" height="${H}"></canvas><svg id="peSvg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"></svg></div></div></div>`;
+        <div id="peStage"><div id="peWrap"><canvas id="peCv" width="${W}" height="${H}"></canvas></div><svg id="peSvg"></svg></div></div>`;
       document.body.appendChild(L);
       const $ = (id) => L.querySelector("#" + id);
       const stage = $("peStage"), wrap = $("peWrap"), svg = $("peSvg"), cv = $("peCv");
@@ -201,19 +201,22 @@
       const near = (p, q, px = 8) => Math.hypot(p.x - q.x, p.y - q.y) * v.z <= px;
       const hitAnchor = (p) => pts.findIndex((q) => near(p, q));
       function draw() {
-        const r = 3 / v.z; // 锚点：小方块，屏幕上一直 6 像素
+        // 线画在缩放层外面、用屏幕坐标：放多大都是 1 像素（Lee 2026-10-26）
+        const r = 3; // 锚点：小方块，屏幕上一直 6 像素
+        const sc = (q) => ({ x: v.x + q.x * v.z, y: v.y + q.y * v.z, h: q.h ? { x: q.h.x * v.z, y: q.h.y * v.z } : null });
+        const sp = pts.map(sc), sm = mouse && sc(mouse);
         let h = "";
-        if (pts.length) {
-          const d = svgD(pts, closed);
+        if (sp.length) {
+          const d = svgD(sp, closed);
           if (closed) h += `<path class="ants1" d="${d}"/><path class="ants2" d="${d}"/>`;
           else {
             h += `<path class="p2" d="${d}"/>`;
-            if (mouse && !drag) {
-              const a = pts[pts.length - 1];
-              h += `<path class="rub" d="${svgD([a, { x: mouse.x, y: mouse.y, h: null }], false)}"/>`;
+            if (sm && !drag) {
+              const a = sp[sp.length - 1];
+              h += `<path class="rub" d="${svgD([a, { x: sm.x, y: sm.y, h: null }], false)}"/>`;
             }
-            pts.forEach((q) => { if (q.h) h += `<line class="hd" x1="${q.x - q.h.x}" y1="${q.y - q.h.y}" x2="${q.x + q.h.x}" y2="${q.y + q.h.y}"/><circle class="hp" cx="${q.x + q.h.x}" cy="${q.y + q.h.y}" r="${r * 0.8}"/><circle class="hp" cx="${q.x - q.h.x}" cy="${q.y - q.h.y}" r="${r * 0.8}"/>`; });
-            pts.forEach((q, i) => (h += `<rect class="an ${i === pts.length - 1 ? "last" : ""} ${i === hot ? "hot" : ""}" x="${q.x - r}" y="${q.y - r}" width="${2 * r}" height="${2 * r}"/>`));
+            sp.forEach((q) => { if (q.h) h += `<line class="hd" x1="${q.x - q.h.x}" y1="${q.y - q.h.y}" x2="${q.x + q.h.x}" y2="${q.y + q.h.y}"/><circle class="hp" cx="${q.x + q.h.x}" cy="${q.y + q.h.y}" r="${r * 0.8}"/><circle class="hp" cx="${q.x - q.h.x}" cy="${q.y - q.h.y}" r="${r * 0.8}"/>`; });
+            sp.forEach((q, i) => (h += `<rect class="an ${i === sp.length - 1 ? "last" : ""} ${i === hot ? "hot" : ""}" x="${q.x - r}" y="${q.y - r}" width="${2 * r}" height="${2 * r}"/>`));
           }
         }
         svg.innerHTML = h;

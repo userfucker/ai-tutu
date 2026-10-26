@@ -179,6 +179,12 @@ try {
   await page.mouse.click(...P2(0.3, 0.7));
   await page.mouse.click(...P2(0.3, 0.3)); // 点回第一个点：闭合
   check('点回第一个点闭合，出现蚂蚁线', await page.evaluate(() => document.getElementById('peLayer')._pe.closed) && (await page.locator('#peSvg .ants2').count()) === 1);
+  await page.mouse.move(...P2(0.5, 0.5));
+  await page.mouse.wheel(0, -600); await sleep(300);
+  const ln = await page.evaluate(() => { const svg = document.getElementById('peSvg'), z = parseFloat(document.getElementById('peZoomV').textContent); return { z, scale: svg.getScreenCTM().a, inZoom: !!svg.closest('#peWrap'), w: getComputedStyle(svg.querySelector('.ants2')).strokeWidth }; });
+  check('放大以后钢笔线还是 1 像素', ln.z > 200 && ln.scale === 1 && !ln.inZoom && ln.w === '1px', JSON.stringify(ln));
+  await page.screenshot({ path: path.join(out, '3-pen-zoom.png') });
+  await page.click('#peFit');
   await page.screenshot({ path: path.join(out, '3-pen.png') });
   await page.keyboard.press('Delete');
   check('Delete：选区变透明（可以撤销）', await page.evaluate(() => document.getElementById('peLayer')._pe.undo) === 1);
