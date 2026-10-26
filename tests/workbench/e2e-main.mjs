@@ -264,7 +264,16 @@ try {
   const dl3 = (await api('GET', '/api/projects')).list;
   check('素材中心：发送到详情页（新建项目“详情图-新产品…”）', dl3.length === 1 && /^详情图-新产品\d\d-\d\d-2$/.test(dl3[0].name) && dl3[0].assets === 1, JSON.stringify(dl3.map((x) => x.name)));
   await page.screenshot({ path: path.join(out, '5-library.png'), fullPage: true });
-  await page.waitForSelector('.libbar:has-text("已选 1 张")'); // 发完还选着
+  check('素材中心：发完就取消勾选', !(await page.textContent('.libbar')).includes('已选'));
+  // 勾了图再换分组：勾选清掉，看不见的图不会跟着发出去
+  await page.click('.lit:has-text("新产品.png") .lck');
+  await page.waitForSelector('.libbar:has-text("已选 1 张")');
+  await page.click('.lgi[data-grp]:not([data-grp=""]) >> nth=0');
+  await page.waitForFunction(() => !document.querySelector('.libbar').textContent.includes('已选'));
+  await page.click('.lgi[data-grp=""]');
+  check('素材中心：换分组后之前的勾选清掉', (await page.locator('.lit.on').count()) === 0);
+  await page.click('.lit:has-text("新产品.png") .lck');
+  await page.waitForSelector('.libbar:has-text("已选 1 张")');
   await page.click('[data-act="del"]');
   await page.click('#modal [data-ret="yes"]');
   await page.waitForFunction((n) => document.querySelectorAll('.lit').length === n, libAll.length);

@@ -17,7 +17,7 @@
   function draw(main) {
     const d = S.data;
     const list = shown();
-    for (const id of [...S.sel]) if (!d.items.some((x) => x.id === id)) S.sel.delete(id);
+    for (const id of [...S.sel]) if (!list.some((x) => x.id === id)) S.sel.delete(id); // 看不见的不算勾选
     const selSize = d.items.filter((x) => S.sel.has(x.id)).reduce((a, x) => a + x.size, 0);
     const n = S.sel.size;
     main.innerHTML = `
@@ -96,14 +96,15 @@
       draw(main);
       main.onclick = async (e) => {
         const t = e.target;
-        if (t.closest("[data-grp]")) { S.grp = t.closest("[data-grp]").dataset.grp; return draw(main); }
-        if (t.closest("[data-tag]")) { S.tag = t.closest("[data-tag]").dataset.tag; return draw(main); }
+        // 换分组 / 类型 / 来源：之前勾的图清掉，免得看不见的图跟着一起发出去（Lee 2026-10-26：发“家具”时把钱包的图也带上了）
+        if (t.closest("[data-grp]")) { S.grp = t.closest("[data-grp]").dataset.grp; S.sel.clear(); return draw(main); }
+        if (t.closest("[data-tag]")) { S.tag = t.closest("[data-tag]").dataset.tag; S.sel.clear(); return draw(main); }
         if (t.closest("[data-view]")) return view(t.closest("[data-view]").dataset.view);
         if (t.dataset.pe) return pe(t.dataset.pe);
         if (t.dataset.ck) { t.checked ? S.sel.add(t.dataset.ck) : S.sel.delete(t.dataset.ck); return draw(main); }
         const b = t.closest("[data-act]");
         if (!b || b.disabled) return;
-        const ids = [...S.sel];
+        const ids = shown().filter((x) => S.sel.has(x.id)).map((x) => x.id); // 只认现在看得见的
         const act = b.dataset.act;
         if (act === "upload") {
           const i = document.createElement("input");
@@ -112,7 +113,7 @@
           i.click();
         } else if (act === "toMain" || act === "toDetail" || act === "toCutout") {
           const r = await LIB.sendDialog(ids, { toMain: "main", toDetail: "detail", toCutout: "cutout" }[act]);
-          if (r) { await load(); draw(main); }
+          if (r) { S.sel.clear(); await load(); draw(main); } // 发完取消勾选
         } else if (act === "zip") {
           const r = await fetch("/api/library/zip", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }), credentials: "same-origin" });
           const a = document.createElement("a");
@@ -128,7 +129,7 @@
         }
       };
       main.onchange = (e) => {
-        if (e.target.id === "libSrc") { S.source = e.target.value; draw(main); }
+        if (e.target.id === "libSrc") { S.source = e.target.value; S.sel.clear(); draw(main); }
         if (e.target.id === "libAll") { for (const x of shown()) e.target.checked ? S.sel.add(x.id) : S.sel.delete(x.id); draw(main); }
       };
       main.ondragover = (e) => e.preventDefault();
