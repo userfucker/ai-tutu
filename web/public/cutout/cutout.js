@@ -92,7 +92,7 @@
     }
     if (n) toast(`加了 ${n} 张图`);
   }
-  /** 产品图去白边：另存一张新产品图，放在原图后面 */
+  /** 产品图去白边：保存 = 替换原图；另存 = 新产品图，放在原图后面 */
   async function peFile(fid) {
     const f = P.files.find((x) => x.id === fid);
     if (!f) return;
@@ -101,6 +101,8 @@
     const id = uid("f");
     const key = `${P.id}:${id}-orig`;
     await putBlob(key, r.blob);
+    cache.delete(f.id);
+    if (r.how === "save") { await op({ op: "replaceFile", fid: f.id, key, name: r.name, w: r.w, h: r.h }); return toast("去白边保存好了"); }
     await op({ op: "addFile", id, key, name: r.name, w: r.w, h: r.h, after: f.id, libTag: "白底图" });
     toast("去白边的图另存好了（在原图后面，也放进了素材中心）");
   }
@@ -130,6 +132,26 @@
     });
   }
 
+  /** 原图是什么格式：JPG / PNG / PNG 透明底（四周大多透明） */
+  async function fileFormat(f) {
+    const type = f.type || "";
+    if (type !== "image/png") return "jpeg";
+    try {
+      const img = await loadImage(blobUrl(f.key || f.curKey));
+      const W = img.naturalWidth, H = img.naturalHeight, k = Math.min(1, 200 / Math.max(W, H));
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(W * k)); c.height = Math.max(1, Math.round(H * k));
+      const g = c.getContext("2d", { willReadFrequently: true });
+      g.drawImage(img, 0, 0, c.width, c.height);
+      const d = g.getImageData(0, 0, c.width, c.height).data;
+      let n = 0, clear = 0;
+      const at = (x, y) => { n++; if (d[(y * c.width + x) * 4 + 3] < 20) clear++; };
+      for (let x = 0; x < c.width; x++) { at(x, 0); at(x, c.height - 1); }
+      for (let y = 0; y < c.height; y++) { at(0, y); at(c.width - 1, y); }
+      return clear / n > 0.6 ? "png-alpha" : "png";
+    } catch { return "png"; }
+  }
+
   // ------------------------------------------------------------ 开始一批
   async function startBatch(files, redoOf) {
     const s = S();
@@ -148,8 +170,12 @@
         await putBlob(inKey, await (await fetch(input.dataUrl)).blob());
         const r0 = redoOf && !req.trim() ? redoOf.req : req;
         const n0 = redoOf && !productName.trim() ? redoOf.productName : productName;
-        const ps = { ...s, requirement: fillProduct(r0 || "", n0 || ""), productName: n0 || "", background: s.mode === "refine" ? s.refineBg : s.background };
-        jobs.push({ id, redoOf: redoOf ? redoOf.id : "", fileId: f.id, name: f.name, inKey, prompt: buildWebPrompt(ps, f, aiRatio, {}), aiRatio, inSize: { w: input.w, h: input.h }, req: r0, productName: n0 });
+        // 精修 + 原图背景：每张按原图的格式出；原图是透明 PNG 就出透明底（AI 画白底，再去白底）
+        const over = s.mode === "refine" && s.refineBg === "original" && s.formatAuto ? { format: await fileFormat(f0) } : null;
+        if (over && over.format === "png-alpha") over.refineBg = "white";
+        const s1 = { ...s, ...(over || {}) };
+        const ps = { ...s1, requirement: fillProduct(r0 || "", n0 || ""), productName: n0 || "", background: s1.mode === "refine" ? s1.refineBg : s1.background };
+        jobs.push({ id, redoOf: redoOf ? redoOf.id : "", fileId: f.id, name: f.name, inKey, prompt: buildWebPrompt(ps, f, aiRatio, {}), aiRatio, inSize: { w: input.w, h: input.h }, req: r0, productName: n0, over });
       }
       await op({ op: "addJobs", jobs });
       if (!redoOf) { req = ""; productName = ""; $("requirement").value = ""; $("productName").value = ""; } // 做完一批自动清空（和插件一样）
@@ -198,7 +224,7 @@
         ${s.mode === "refine" ? `<label class="f">背景<select data-s="refineBg">${opt("original", "原图背景", s.refineBg)}${opt("white", "白底图", s.refineBg)}${opt("custom", "自定义（写在精修要求里）", s.refineBg)}</select></label>` : `<label class="f">背景${sel("background", [["white", "白底图"], ["original", "原图背景"]])}</label>`}
         <label class="f">尺寸比例${sel("ratio", [["auto", "自动（跟原图）"], ["1:1", "1:1 正方形"], ["3:4", "3:4 竖版"], ["4:3", "4:3 横版"], ["2:3", "2:3 竖版"], ["3:2", "3:2 横版"], ["4:5", "4:5 竖版"], ["5:4", "5:4 横版"], ["9:16", "9:16 竖屏"], ["16:9", "16:9 宽屏"]])}</label>
         <label class="f">输出尺寸<select data-s="outSize">${M.outSizes.map((v) => opt(v, LABELS.outSize[v], s.outSize)).join("")}</select></label>
-        <label class="f">输出格式<select data-s="format" ${dis("format")}>${M.formats.filter((v) => !(s.mode === "refine" && v === "png-alpha" && s.refineBg !== "white")).map((v) => opt(v, LABELS.format[v], val("format"))).join("")}</select>${s.mode === "refine" && s.refineBg !== "white" ? '<span class="muted">背景选“白底图”才能出透明底 PNG</span>' : ""}</label>
+        <label class="f">输出格式<select data-s="format" ${dis("format")}>${M.formats.map((v) => opt(v, LABELS.format[v], val("format"))).join("")}</select>${s.mode === "refine" && s.refineBg === "original" && s.formatAuto ? '<span class="muted">原图背景：每张按原图的格式出（JPG / PNG / PNG 透明底）</span>' : ""}</label>
         ${val("format") === "png-alpha" ? `<label class="f" title="被产品围住的白色（戒指中间的孔、手腕绳围成的圈、金属高光）怎么处理">镂空处<select data-s="holes">${opt("auto", "自动（推荐）", s.holes)}${opt("off", "保留（白色都不抠）", s.holes)}${opt("on", "都抠透明", s.holes)}</select></label>` : ""}
         <label class="f">主体大小${sel("fill", [["keep", "保持原图"], ["70", "适中 70%"], ["85", "饱满 85%"]])}</label>
         <label class="f">拍摄角度${sel("angle", [["keep", "保持原图"], ["auto", "自动摆正"], ["front", "正面平视"], ["45", "45° 俯视"], ["top", "正上方俯拍"]])}</label>
@@ -326,12 +352,13 @@
     // 去白边（lib/pngedit.js）：另存成一条新结果，放在原来那条后面
     peJob: async (el) => {
       const j = jobOf(el);
-      const r = await PNGEDIT.open({ src: blobUrl(j.outKey), name: j.outName || j.name });
+      // 结果只能“保存”（替换），另存是灰的（Lee 2026-10-26）
+      const r = await PNGEDIT.open({ src: blobUrl(j.outKey), name: j.outName || j.name, saveAs: false });
       if (!r) return;
       const key = `${P.id}:${uid("e")}-edit-${Date.now()}`;
       await putBlob(key, r.blob);
-      await op({ op: "addEdited", jid: j.id, key, name: r.name, w: r.w, h: r.h });
-      toast("去白边的图另存好了（在原来那条后面，也放进了素材中心）");
+      await op({ op: "replaceOutput", jid: j.id, key, w: r.w, h: r.h });
+      toast("去白边保存好了（素材中心里那张也换了）");
     },
     useOut: async (el) => { const replace = await confirmBox("把这张做好的图放回产品图接着调整：要清空现有的产品图吗？（选“不清空”就加在后面）", "清空后放进去"); op({ op: "useOutput", jid: jobOf(el).id, replace }); },
     delJob: (el) => op({ op: "delJobs", jids: [jobOf(el).id] }),
@@ -354,18 +381,23 @@
     const b = t.closest("[data-act]");
     if (b && !b.disabled && ACT[b.dataset.act]) { ACT[b.dataset.act](b, e); return; }
     if (t.closest("[data-edit]")) { openEditor(+t.closest("[data-edit]").dataset.edit); return; }
-    if (t.closest("[data-mode]") && P) { const mode = t.closest("[data-mode]").dataset.mode; const L = MODES[mode].locks; const s = { mode, ...L }; if (!MODES[mode].outSizes.includes(P.settings.outSize)) s.outSize = MODES[mode].outSizes[0]; if (!MODES[mode].formats.includes(L.format || P.settings.format)) s.format = MODES[mode].formats[0]; op({ op: "settings", settings: s }); return; }
+    if (t.closest("[data-mode]") && P) { const mode = t.closest("[data-mode]").dataset.mode; const L = MODES[mode].locks; const s = { mode, ...L }; if (!MODES[mode].outSizes.includes(P.settings.outSize)) s.outSize = MODES[mode].outSizes[0]; if (!MODES[mode].formats.includes(L.format || P.settings.format)) s.format = MODES[mode].formats[0]; if (mode === "refine" && (s.format || P.settings.format) === "png-alpha") s.refineBg = "white"; op({ op: "settings", settings: s }); return; }
     if (t.dataset.view) { viewer(t.closest("[data-jid]").dataset.jid, t.dataset.view); return; }
     if (t.dataset.ck) { t.checked ? sel.add(t.dataset.ck) : sel.delete(t.dataset.ck); render(); return; }
     const open = t.closest("[data-open]");
     if (open) location.hash = "#p=" + open.dataset.open;
   });
-  document.addEventListener("change", (e) => {
+  document.addEventListener("change", async (e) => {
     const t = e.target;
     if (!P) return;
     if (t.dataset.s) {
       const set = { [t.dataset.s]: t.type === "number" ? Math.max(1, Math.min(50, +t.value || 10)) : t.value };
-      if (t.dataset.s === "refineBg" && t.value !== "white" && P.settings.format === "png-alpha") set.format = "png"; // 透明底只在白底时能用
+      // 精修：背景和输出格式联动（Lee 2026-10-26）。选 PNG 透明底 → 背景变白底；背景选原图背景 → 每张按原图的格式出
+      if (P.settings.mode === "refine") {
+        if (t.dataset.s === "format") { set.formatAuto = false; if (t.value === "png-alpha") set.refineBg = "white"; }
+        if (t.dataset.s === "refineBg" && t.value === "original") { set.formatAuto = true; const f = P.files.find((x) => !x.skip) || P.files[0]; if (f) set.format = await fileFormat(f); }
+        if (t.dataset.s === "refineBg" && t.value === "custom" && P.settings.format === "png-alpha") set.format = "png";
+      }
       op({ op: "settings", settings: set });
     }
     if (t.id === "selAll") { for (const j of P.jobs) t.checked ? sel.add(j.id) : sel.delete(j.id); render(); }

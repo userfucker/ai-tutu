@@ -84,8 +84,8 @@ try {
   // 去白边：抠好的产品图 → 一键去白边 → 另存成新产品图（在这张后面；透明 PNG 直接算抠好的）
   await page.click('.mcard[data-prid] [data-act="peProduct"]');
   await page.waitForSelector('#peLayer #peCv');
-  await page.click('#peWhiteBtn'); await sleep(300); await page.click('#peWhiteOk');
-  await page.click('#peSave');
+  await page.click('#peWhiteBtn'); await page.fill('#peStr', '6'); await page.dispatchEvent('#peStr', 'input'); await sleep(300); await page.click('#peWhiteOk');
+  await page.click('#peSaveAs');
   await page.waitForFunction(() => document.querySelectorAll('.pgrid .mcard[data-prid], .mcard[data-prid]').length >= 2);
   await sleep(500);
   const mid = /p=([^&]+)/.exec(page.url())[1];
@@ -93,6 +93,24 @@ try {
   check('主图产品图去白边：另存成新产品图，在后面，透明 PNG 直接算抠好的', mp.products.length === 2 && /-去白边\.png$/.test(mp.products[1].name) && mp.products[1].cut === mp.products[1].key && mp.products[1].cutBox && mp.cur === mp.products[0].id, JSON.stringify(mp.products.map((x) => [x.name, !!x.cut])));
   await api('POST', `/api/main/${mid}/op`, { op: 'delProduct', prid: mp.products[1].id });
   await page.waitForFunction(() => document.querySelectorAll('.mcard[data-prid]').length === 1);
+  // 保存 = 换掉抠好的图（还是一张产品图）
+  const cut0 = (await api('GET', `/api/projects/${mid}`)).project.products[0].cut;
+  await page.click('.mcard[data-prid] [data-act="peProduct"]');
+  await page.waitForSelector('#peLayer #peCv');
+  await sleep(300);
+  const mb = await (await page.$('#peCv')).boundingBox();
+  for (const [fx, fy] of [[0.05, 0.05], [0.3, 0.05], [0.3, 0.3], [0.05, 0.05]]) await page.mouse.click(mb.x + mb.width * fx, mb.y + mb.height * fy);
+  await page.click('#peDel');
+  await page.click('#peSave');
+  await page.waitForFunction(() => !document.getElementById('peLayer'));
+  await sleep(800);
+  mp = (await api('GET', `/api/projects/${mid}`)).project;
+  check('主图产品图去白边“保存”：换掉抠好的图，不多出产品图', mp.products.length === 1 && mp.products[0].cut !== cut0 && mp.products[0].cutBox);
+  // 左上角“工作台”：鼠标移上去弹出菜单
+  await page.hover('a.backwb');
+  await page.waitForSelector('.nmdrop a[data-nm="library"]', { state: 'visible' });
+  check('左上角“工作台”：鼠标移上去弹出 8 个菜单，当前页标出来', (await page.locator('.nmdrop a').count()) === 8 && (await page.getAttribute('.nmdrop a[data-nm="main"]', 'class')).includes('on'));
+  await page.mouse.move(700, 600);
   check('默认做法：AI 直接画场景、AI 自由摆放', await page.isVisible('[data-mode="scene"].on') && await page.isVisible('[data-place="free"].on'));
   await page.click('[data-sty="marble"]');
   await page.selectOption('#count', '1');
@@ -261,9 +279,21 @@ try {
   const lb = await (await page.$('#peCv')).boundingBox();
   for (const [fx, fy] of [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4], [0.1, 0.1]]) await page.mouse.click(lb.x + lb.width * fx, lb.y + lb.height * fy);
   await page.click('#peDel');
-  await page.click('#peSave');
+  await page.click('#peSaveAs');
   await page.waitForFunction((n) => document.querySelectorAll('.lit').length === n + 1, nLit);
   check('素材中心：PNG 有“去白边”，另存成新图', (await api('GET', '/api/library')).items.some((x) => x.name === pngName + '-去白边.png' && x.mime === 'image/png'), pngName);
+  // 保存 = 换掉这张图（张数不变，名字不变，内容变了）
+  const lb0 = (await api('GET', '/api/library')).items.find((x) => x.name === '白底.png');
+  await page.locator('.lit:has(.lname:text-is("白底.png")) [data-pe]').click();
+  await page.waitForSelector('#peLayer #peCv');
+  await sleep(300);
+  for (const [fx, fy] of [[0.6, 0.6], [0.9, 0.6], [0.9, 0.9], [0.6, 0.6]]) await page.mouse.click(lb.x + lb.width * fx, lb.y + lb.height * fy);
+  await page.click('#peDel');
+  await page.click('#peSave');
+  await page.waitForFunction(() => !document.getElementById('peLayer'));
+  await sleep(800);
+  const after = (await api('GET', '/api/library')).items.find((x) => x.id === lb0.id);
+  check('素材中心：去白边“保存”换掉原图（名字不变、张数不变）', after && after.name === '白底.png' && after.v !== lb0.v && (await page.locator('.lit').count()) === nLit + 1, JSON.stringify([lb0.v, after && after.v]));
   await api('DELETE', `/api/projects/${dl3[0].id}`);
 
   // 工作台“主图”列表：点名称打开，后面只有“删除”

@@ -307,11 +307,22 @@
       pickTaobao: () => document.getElementById("tbInput").click(),
       cutAi: (el) => APP.cutAsset(P().assets.find((x) => x.id === el.closest("[data-aid]").dataset.aid), "ai"),
       cutDirect: (el) => APP.cutAsset(P().assets.find((x) => x.id === el.closest("[data-aid]").dataset.aid), "direct"),
-      // 去白边（lib/pngedit.js）：另存一张新素材，放在这张后面，也放进素材中心
+      // 去白边（lib/pngedit.js）：保存 = 换掉抠好的图；另存 = 新素材，放在这张后面，也放进素材中心
       peAsset: async (el) => {
         const a = P().assets.find((x) => x.id === el.closest("[data-aid]").dataset.aid);
         const r = await PNGEDIT.open({ src: await ST.urlOf(a.cut), name: a.name.replace(/\.[^.]+$/, "") + ".png" });
         if (!r) return;
+        if (r.how === "save") {
+          const p = P(), old = a.cut;
+          const key = `${p.id}:${a.id}-cut-${Date.now()}`;
+          await ST.saveImage(key, r.blob);
+          const img = await ST.imgOf(key);
+          a.cut = key; a.cutBox = ST.alphaBox(img); a.cutW = img.naturalWidth; a.cutH = img.naturalHeight;
+          await APP.save(true);
+          if (old && old !== a.key) { ST.forget(old); ST.db.delBlob(old); }
+          APP.toast("去白边保存好了");
+          return APP.render();
+        }
         await APP.addAssetFiles([new File([r.blob], r.name, { type: "image/png" })], { tag: a.tag, note: a.note, group: () => a.group, after: a.id, libTag: "白底图", cut: true });
         APP.toast("去白边的图另存好了（在这张后面，也放进了素材中心）");
         APP.render();

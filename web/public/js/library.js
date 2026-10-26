@@ -45,7 +45,7 @@
           </div>
           ${list.length ? `<div class="libgrid">${list.map((x) => `<div class="lit ${S.sel.has(x.id) ? "on" : ""}" data-id="${x.id}">
             <input type="checkbox" class="lck" data-ck="${x.id}" ${S.sel.has(x.id) ? "checked" : ""}>
-            <div class="lpic" data-view="${x.id}"><img loading="lazy" src="/api/library/${x.id}/thumb" alt=""></div>
+            <div class="lpic" data-view="${x.id}"><img loading="lazy" src="/api/library/${x.id}/thumb?v=${x.v || ""}" alt=""></div>
             <div class="lname" title="${esc(x.name)}">${esc(x.name)}</div>
             <div class="muted"><b class="fmt fmt-${fmtOf(x).toLowerCase()}">${fmtOf(x)}</b> · ${x.w}×${x.h} · ${fmt(x.size)}</div>
             <div class="row" style="gap:4px"><span class="tag">${esc(x.tag)}</span><span class="tag">${esc(x.sourceName)}</span>${x.mime === "image/png" ? `<button class="sm" data-pe="${x.id}" title="钢笔选区删除、一键去白边，另存一张新图" style="margin-left:auto">去白边</button>` : ""}</div>
@@ -69,15 +69,22 @@
   /** 看大图：滚轮缩放、拖动、← → 切换；PNG 可以一键换深色底（lib/viewer.js） */
   function view(id) {
     const list = shown();
-    VIEWER.open(list.map((x) => ({ src: `/api/library/${x.id}/file`, download: `/api/library/${x.id}/file?dl=1`, name: x.name, png: x.mime === "image/png", info: `${fmtOf(x)} · ${x.w}×${x.h} · ${fmt(x.size)} · ${x.tag} · ${x.grp}` })), Math.max(0, list.findIndex((x) => x.id === id)));
+    VIEWER.open(list.map((x) => ({ src: `/api/library/${x.id}/file?v=${x.v || ""}`, download: `/api/library/${x.id}/file?dl=1`, name: x.name, png: x.mime === "image/png", info: `${fmtOf(x)} · ${x.w}×${x.h} · ${fmt(x.size)} · ${x.tag} · ${x.grp}` })), Math.max(0, list.findIndex((x) => x.id === id)));
   }
 
-  /** 去白边（lib/pngedit.js）：另存一张新图，同一个分组、同一个类型 */
+  /** 去白边（lib/pngedit.js）：保存 = 换掉这张图；另存 = 新图，同一个分组、同一个类型 */
   async function pe(id) {
     const x = S.data.items.find((y) => y.id === id);
     if (!x) return;
-    const r = await PNGEDIT.open({ src: `/api/library/${x.id}/file`, name: x.name });
+    const r = await PNGEDIT.open({ src: `/api/library/${x.id}/file?v=${x.v || ""}`, name: x.name });
     if (!r) return;
+    if (r.how === "save") {
+      const res = await fetch(`/api/library/${x.id}/file`, { method: "PUT", body: r.blob, credentials: "same-origin" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) return W.toast(d.error || "保存失败", true);
+      W.toast("去白边保存好了");
+      await load(); return draw(document.getElementById("main"));
+    }
     try { await LIB.add(r.blob, { grp: x.grp, tag: x.tag, source: x.source, name: r.name }); W.toast("去白边的图另存好了"); }
     catch (e) { return W.toast(e.message, true); }
     await load(); draw(document.getElementById("main"));

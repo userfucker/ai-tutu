@@ -31,13 +31,14 @@ const S = {
   get: db.prepare("SELECT * FROM library WHERE id = ?"),
   bySha: db.prepare("SELECT * FROM library WHERE sha1 = ? AND grp = ?"),
   del: db.prepare("DELETE FROM library WHERE id = ?"),
+  upd: db.prepare("UPDATE library SET file = @file, mime = @mime, w = @w, h = @h, size = @size, sha1 = @sha1, name = @name WHERE id = @id"),
   setUsed: db.prepare("UPDATE library SET used = ? WHERE id = ?"),
   all: db.prepare("SELECT * FROM library ORDER BY created DESC, id DESC"),
 };
 export const SOURCES = { upload: "上传", taobao: "淘宝采集", aitutu: "AI图图 插件", cutout: "抠白底图", main: "主图制作", detail: "详情页" };
 export const TAGS = ["原图", "白底图", "主图", "详情图", "SKU图", "AI 生成"];
 
-const view = (r) => r && ({ id: r.id, name: r.name, grp: r.grp, source: r.source, sourceName: SOURCES[r.source] || r.source, tag: r.tag, w: r.w, h: r.h, size: r.size, mime: r.mime, used: JSON.parse(r.used || "[]"), created: r.created });
+const view = (r) => r && ({ id: r.id, name: r.name, grp: r.grp, source: r.source, sourceName: SOURCES[r.source] || r.source, tag: r.tag, w: r.w, h: r.h, size: r.size, mime: r.mime, used: JSON.parse(r.used || "[]"), created: r.created, v: String(r.sha1 || "").slice(0, 8) });
 const extOf = (mime) => (/png/.test(mime) ? "png" : /webp/.test(mime) ? "webp" : /gif/.test(mime) ? "gif" : "jpg");
 const mimeOf = (buf) => (buf[0] === 0x89 && buf[1] === 0x50 ? "image/png" : buf[0] === 0xff && buf[1] === 0xd8 ? "image/jpeg" : buf.slice(0, 4).toString() === "RIFF" ? "image/webp" : buf.slice(0, 3).toString() === "GIF" ? "image/gif" : "");
 export const filePath = (r) => path.join(DIR, r.file);
@@ -50,6 +51,38 @@ export function stampName(ext) {
   seq = s === lastStamp ? seq + 1 : 1;
   lastStamp = s;
   return `${s}-${seq}.${ext}`;
+}
+
+/** 小图，顺便量出尺寸 */
+async function makeThumb(id, buf, mime) {
+  let w = 0, h = 0;
+  try {
+    const img = await loadImage(buf);
+    w = img.width; h = img.height;
+    const s = Math.min(1, 360 / Math.max(w, h));
+    const c = createCanvas(Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s)));
+    const g = c.getContext("2d");
+    if (mime === "image/png") { g.fillStyle = "#ffffff"; g.fillRect(0, 0, c.width, c.height); } // 透明图的小图用白底看
+    g.drawImage(img, 0, 0, c.width, c.height);
+    fs.writeFileSync(thumbPath(id), c.toBuffer("image/jpeg", 80));
+  } catch { /* 解不开的图也收着，只是没有小图 */ }
+  return { w, h };
+}
+
+/** 换掉一张图的内容（去白边“保存”）：名字、分组、类型不变 */
+export async function replace(id, buf) {
+  const r = S.get.get(id);
+  if (!r) throw new Error("素材中心没有这张图");
+  const mime = mimeOf(buf);
+  if (!mime) throw new Error("不是图片（只认 JPG / PNG / WebP / GIF）");
+  const file = `${id}.${extOf(mime)}`;
+  if (file !== r.file) fs.rmSync(filePath(r), { force: true });
+  fs.writeFileSync(path.join(DIR, file), buf);
+  const { w, h } = await makeThumb(id, buf, mime);
+  const name = r.name.replace(/\.[^.]+$/, "") + "." + extOf(mime);
+  S.upd.run({ id, file, mime, w, h, size: buf.length, sha1: crypto.createHash("sha1").update(buf).digest("hex"), name });
+  broadcast("library", { replaced: id });
+  return view(S.get.get(id));
 }
 
 /**
@@ -67,17 +100,7 @@ export async function add(buf, o = {}) {
   const ext = extOf(mime);
   const file = `${id}.${ext}`;
   fs.writeFileSync(path.join(DIR, file), buf);
-  let w = 0, h = 0;
-  try {
-    const img = await loadImage(buf);
-    w = img.width; h = img.height;
-    const s = Math.min(1, 360 / Math.max(w, h));
-    const c = createCanvas(Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s)));
-    const g = c.getContext("2d");
-    if (mime === "image/png") { g.fillStyle = "#ffffff"; g.fillRect(0, 0, c.width, c.height); } // 透明图的小图用白底看
-    g.drawImage(img, 0, 0, c.width, c.height);
-    fs.writeFileSync(thumbPath(id), c.toBuffer("image/jpeg", 80));
-  } catch { /* 解不开的图也收着，只是没有小图 */ }
+  const { w, h } = await makeThumb(id, buf, mime);
   const name = o.stampName ? stampName(ext) : String(o.name || stampName(ext)).replace(/[\\/:*?"<>|\r\n\t]+/g, "_").slice(0, 100);
   S.ins.run({ id, name, grp, source: SOURCES[o.source] ? o.source : "upload", tag: TAGS.includes(o.tag) ? o.tag : "原图", file, mime, w, h, size: buf.length, sha1, used: JSON.stringify(o.used ? [o.used] : []), created: Date.now() });
   broadcast("library", { added: id, grp });

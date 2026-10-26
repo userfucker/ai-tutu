@@ -160,6 +160,7 @@ try {
   await page.click('.thumb >> nth=0 >> .pe');
   await page.waitForSelector('#peLayer #peCv');
   await sleep(300);
+  check('去白边：边缘默认“硬”，强度默认 0（范围 0~20），保存 / 另存还没改时是灰的', (await page.inputValue('#peEdge')) === 'hard' && (await page.inputValue('#peStr')) === '0' && (await page.getAttribute('#peStr', 'max')) === '20' && await page.isDisabled('#peSave') && await page.isDisabled('#peSaveAs'));
   check('去白边：默认深色底', await page.evaluate(() => document.getElementById('peStage').classList.contains('dark')));
   const cb = await (await page.$('#peCv')).boundingBox();
   const P2 = (fx, fy) => [cb.x + cb.width * fx, cb.y + cb.height * fy];
@@ -192,7 +193,7 @@ try {
   await sleep(400);
   await page.click('#peWhiteOk');
   check('一键去白边：确定后可以撤销', await page.evaluate(() => document.getElementById('peLayer')._pe.undo) === 2);
-  await page.click('#peSave');
+  await page.click('#peSaveAs');
   await page.waitForFunction(() => !document.getElementById('peLayer'));
   await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 3);
   p = await proj();
@@ -207,9 +208,10 @@ try {
       if (hole) im.data.set([255, 255, 255, 255], i); else if (inR) im.data.set([200, 30, 30, 255], i); else if (inW) im.data.set([250, 250, 250, 255], i);
     }
     const o = PNGEDIT.deWhite(im, 5).data, a = (x, y) => o[(y * W + x) * 4 + 3];
-    return { ring: a(8, 20), red: a(12, 20), hole: a(20, 20) };
+    const z = PNGEDIT.deWhite(im, 0).data;
+    return { ring: a(8, 20), red: a(12, 20), hole: a(20, 20), zero: z[(20 * W + 8) * 4 + 3] };
   });
-  check('一键去白边：去掉贴着透明处的白边，产品里面的白色不动', dw.ring === 0 && dw.red === 255 && dw.hole === 255, JSON.stringify(dw));
+  check('一键去白边：去掉贴着透明处的白边，产品里面的白色不动', dw.ring === 0 && dw.red === 255 && dw.hole === 255 && dw.zero === 255, JSON.stringify(dw));
 
   // 结果去白边另存：加一条新结果，在原来那条后面
   {
@@ -219,15 +221,48 @@ try {
     const pj2 = await proj();
     check('结果去白边：另存成新结果，在原来那条后面', pj2.jobs[1].outKey === pid + ':e1-edit' && pj2.jobs[1].status === 'done' && pj2.jobs[1].inKey && pj2.jobs[1].inKey !== j0.inKey);
     await page.waitForFunction(() => document.querySelectorAll('.job [data-act="peJob"]').length === 1);
+    await page.click('.job [data-act="peJob"]');
+    await page.waitForSelector('#peLayer #peCv');
+    await sleep(300);
+    const jb = await (await page.$('#peCv')).boundingBox();
+    for (const [fx, fy] of [[0.1, 0.1], [0.5, 0.1], [0.5, 0.5], [0.1, 0.1]]) await page.mouse.click(jb.x + jb.width * fx, jb.y + jb.height * fy);
+    await page.click('#peDel');
+    check('结果去白边：只能“保存”，“另存为新图”是灰的', !(await page.isDisabled('#peSave')) && await page.isDisabled('#peSaveAs'));
+    await page.click('#peSave');
+    await page.waitForFunction(() => !document.getElementById('peLayer'));
+    await sleep(600);
+    const pj3 = await proj();
+    check('结果去白边“保存”：替换这条结果的图，不多出结果', pj3.jobs.length === pj2.jobs.length && pj3.jobs[1].outKey !== pid + ':e1-edit');
     await api('POST', `/api/cutout/${pid}/op`, { op: 'delJobs', jids: [pj2.jobs[1].id] });
   }
   await page.click(`.thumb >> nth=1 >> [data-delfile]`);
   await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 2);
+  // 产品图去白边“保存”：替换原图，张数不变
+  const k0 = (await proj()).files[1].curKey;
+  await page.hover('.thumb >> nth=1');
+  await page.click('.thumb >> nth=1 >> .pe');
+  await page.waitForSelector('#peLayer #peCv');
+  await sleep(300);
+  const fb = await (await page.$('#peCv')).boundingBox();
+  for (const [fx, fy] of [[0.05, 0.05], [0.2, 0.05], [0.2, 0.2], [0.05, 0.05]]) await page.mouse.click(fb.x + fb.width * fx, fb.y + fb.height * fy);
+  await page.click('#peDel');
+  await page.click('#peSave');
+  await page.waitForFunction(() => !document.getElementById('peLayer'));
+  await sleep(600);
+  p = await proj();
+  check('产品图去白边“保存”：替换原图，张数不变', p.files.length === 2 && p.files[1].curKey !== k0 && p.files[1].key === p.files[1].curKey);
 
   // 模式切换
   await page.click('[data-mode="refine"]');
   await page.waitForSelector('[data-s="refineBg"]');
   check('切到图片精修：比例跟原图、背景可以选原图 / 白底 / 自定义', (await page.inputValue('[data-s="ratio"]')) === 'auto' && (await page.isDisabled('[data-s="ratio"]')));
+  check('图片精修：输出格式一直是三种（JPG / PNG / PNG 透明底）', (await page.locator('[data-s="format"] option').count()) === 3);
+  await page.selectOption('[data-s="format"]', 'png-alpha');
+  await page.waitForFunction(() => document.querySelector('[data-s="refineBg"]').value === 'white');
+  check('选 PNG 透明底：背景自动变白底图', true);
+  await page.selectOption('[data-s="refineBg"]', 'original');
+  await page.waitForFunction(() => document.querySelector('[data-s="format"]').value !== 'png-alpha');
+  check('背景选原图背景：格式跟原图（这张原图是不透明的 PNG → PNG）', (await page.inputValue('[data-s="format"]')) === 'png' && (await page.locator('[data-s="format"] option').count()) === 3, await page.inputValue('[data-s="format"]'));
   await page.click('[data-mode="white"]');
 
   // 选中做主图

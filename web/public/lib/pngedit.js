@@ -1,10 +1,11 @@
 /**
  * 去白边（只给 PNG 用，抠白底图 / 主图 / 详情页 / 素材中心共用）：
- *  PNGEDIT.open({ src, name })  src = 图片地址或 Blob；另存时返回 { blob, name, w, h }，取消返回 null
+ *  PNGEDIT.open({ src, name, saveAs })  src = 图片地址或 Blob；saveAs: false = 只能“保存”（抠白底图的结果）
+ *    返回 { how: "save" | "saveAs", blob, name, w, h }：save = 替换原图（名字不变），saveAs = 另存新图（原名-去白边.png）；取消返回 null
  *  PNGEDIT.isPngName(name)
  * 钢笔：点一下加锚点（两点之间直线），按住拖动拉出弧线；点回第一个点闭合，出现蚂蚁线；
  *       右键点锚点删掉它，退格删最后一个点，Esc 放弃；闭合以后 Delete（或“删除选区”）把选区变透明。
- * 边缘：硬 / 柔和 1 像素（记在浏览器里）。一键去白边：强度 1~10（默认 5），拖动时马上看效果。
+ * 边缘：硬（默认）/ 柔和 1 像素（记在浏览器里）。一键去白边：强度 0~20（默认 0 = 不变），拖动时马上看效果。
  * 撤销 / 重做：Ctrl+Z / Ctrl+Y，最多 20 步。滚轮放大缩小，按住空格（或鼠标中键）拖动看别的地方，默认深色底。
  */
 (() => {
@@ -41,17 +42,17 @@
 #peWrap canvas { display: block; }
 #peWrap.pix canvas { image-rendering: pixelated; }
 #peSvg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-#peSvg .p1 { fill: none; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-#peSvg .p2 { fill: none; stroke: #1677ff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-#peSvg .ants1 { fill: rgba(22,119,255,.08); stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-#peSvg .ants2 { fill: none; stroke: #000; stroke-width: 1.5; stroke-dasharray: 5 5; vector-effect: non-scaling-stroke; animation: peAnts .6s linear infinite; }
-#peSvg .rub { fill: none; stroke: #1677ff; stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
-#peSvg .hd { stroke: #1677ff; stroke-width: 1; vector-effect: non-scaling-stroke; }
-#peSvg .an { fill: #fff; stroke: #1677ff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-#peSvg .an.first { fill: #1677ff; }
-#peSvg .an.hot { fill: #ffd400; }
-#peSvg .hp { fill: #1677ff; }
-@keyframes peAnts { to { stroke-dashoffset: -10; } }`;
+#peSvg * { vector-effect: non-scaling-stroke; shape-rendering: crispEdges; }
+#peSvg .p2 { fill: none; stroke: #1677ff; stroke-width: 1; shape-rendering: auto; }
+#peSvg .ants1 { fill: none; stroke: #fff; stroke-width: 1; shape-rendering: auto; }
+#peSvg .ants2 { fill: none; stroke: #000; stroke-width: 1; stroke-dasharray: 4 4; animation: peAnts .5s linear infinite; shape-rendering: auto; }
+#peSvg .rub { fill: none; stroke: #1677ff; stroke-width: 1; shape-rendering: auto; }
+#peSvg .hd { stroke: #1677ff; stroke-width: 1; shape-rendering: auto; }
+#peSvg .an { fill: #fff; stroke: #1677ff; stroke-width: 1; }
+#peSvg .an.last { fill: #1677ff; }
+#peSvg .an.hot { fill: #1677ff; stroke: #000; }
+#peSvg .hp { fill: #1677ff; shape-rendering: auto; }
+@keyframes peAnts { to { stroke-dashoffset: -8; } }`;
     document.head.appendChild(st);
   }
 
@@ -112,7 +113,8 @@
     const W = src.width, H = src.height;
     const im = new ImageData(new Uint8ClampedArray(src.data), W, H);
     const d = im.data;
-    const passes = Math.ceil(s / 2), thr = 250 - s * 7;
+    if (!(s > 0)) return im; // 0 = 不变
+    const passes = Math.ceil(s / 4), thr = 250 - s * 3.5; // 20 = 剥 5 层、偏白到 180 都算
     const clear = (i) => d[i * 4 + 3] < 16;
     const whiteish = (i, t) => { const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2]; const lo = Math.min(r, g, b); return lo >= t && Math.max(r, g, b) - lo <= 40; };
     const nearClear = (i) => { const x = i % W, y = (i - x) / W; return (x > 0 && clear(i - 1)) || (x < W - 1 && clear(i + 1)) || (y > 0 && clear(i - W)) || (y < H - 1 && clear(i + W)); };
@@ -161,9 +163,9 @@
           <button id="peWhiteBtn" title="不用选，整张图贴着透明处的白边一起去掉">一键去白边</button>
           <button id="peUndo" disabled title="撤销（Ctrl+Z）">撤销</button><button id="peRedo" disabled title="重做（Ctrl+Y）">重做</button>
           <span class="sp"><span class="muted" id="peZoomV">100%</span><button id="peFit">适应窗口</button><button id="peDark">深色底</button>
-          <button id="peCancel">取消</button><button class="primary" id="peSave" disabled title="另存一张新图，原图不动">另存为新图</button></span></div>
-        <div class="pewhite" id="peWhite"><b>一键去白边</b> 强度 <input type="range" id="peStr" min="1" max="10" step="1" value="5"> <b id="peStrV">5</b>
-          <span class="muted">越大去得越多。只去贴着透明处、偏白的边，产品本身的白色不动</span><span class="sp"><button id="peWhiteNo">取消</button><button class="primary" id="peWhiteOk">确定</button></span></div>
+          <button id="peCancel">取消</button><button id="peSaveAs" disabled title="${o.saveAs === false ? "这里只能保存" : "另存一张新图，原图不动"}">另存为新图</button><button class="primary" id="peSave" disabled title="替换原图">保存</button></span></div>
+        <div class="pewhite" id="peWhite"><b>一键去白边</b> 强度 <input type="range" id="peStr" min="0" max="20" step="1" value="0"> <b id="peStrV">0</b>
+          <span class="muted">0 是不变，往右越拉去得越多。只去贴着透明处、偏白的边，产品本身的白色不动</span><span class="sp"><button id="peWhiteNo">取消</button><button class="primary" id="peWhiteOk">确定</button></span></div>
         <div class="pehint muted">钢笔：点一下加锚点（两点之间是直线），按住拖动拉出弧线；点回第一个点闭合，出现蚂蚁线后按 Delete 或点“删除选区”。右键点锚点删掉它，退格删最后一个点，Esc 放弃。滚轮放大缩小，按住空格（或鼠标中键）拖动看别的地方。</div>
         <div id="peStage"><div id="peWrap"><canvas id="peCv" width="${W}" height="${H}"></canvas><svg id="peSvg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"></svg></div></div></div>`;
       document.body.appendChild(L);
@@ -199,19 +201,19 @@
       const near = (p, q, px = 8) => Math.hypot(p.x - q.x, p.y - q.y) * v.z <= px;
       const hitAnchor = (p) => pts.findIndex((q) => near(p, q));
       function draw() {
-        const r = 4.5 / v.z;
+        const r = 3 / v.z; // 锚点：小方块，屏幕上一直 6 像素
         let h = "";
         if (pts.length) {
           const d = svgD(pts, closed);
           if (closed) h += `<path class="ants1" d="${d}"/><path class="ants2" d="${d}"/>`;
           else {
-            h += `<path class="p1" d="${d}"/><path class="p2" d="${d}"/>`;
+            h += `<path class="p2" d="${d}"/>`;
             if (mouse && !drag) {
               const a = pts[pts.length - 1];
               h += `<path class="rub" d="${svgD([a, { x: mouse.x, y: mouse.y, h: null }], false)}"/>`;
             }
-            pts.forEach((q) => { if (q.h) h += `<line class="hd" x1="${q.x - q.h.x}" y1="${q.y - q.h.y}" x2="${q.x + q.h.x}" y2="${q.y + q.h.y}"/><circle class="hp" cx="${q.x + q.h.x}" cy="${q.y + q.h.y}" r="${r * 0.6}"/><circle class="hp" cx="${q.x - q.h.x}" cy="${q.y - q.h.y}" r="${r * 0.6}"/>`; });
-            pts.forEach((q, i) => (h += `<circle class="an ${i === 0 ? "first" : ""} ${i === hot ? "hot" : ""}" cx="${q.x}" cy="${q.y}" r="${r}"/>`));
+            pts.forEach((q) => { if (q.h) h += `<line class="hd" x1="${q.x - q.h.x}" y1="${q.y - q.h.y}" x2="${q.x + q.h.x}" y2="${q.y + q.h.y}"/><circle class="hp" cx="${q.x + q.h.x}" cy="${q.y + q.h.y}" r="${r * 0.8}"/><circle class="hp" cx="${q.x - q.h.x}" cy="${q.y - q.h.y}" r="${r * 0.8}"/>`; });
+            pts.forEach((q, i) => (h += `<rect class="an ${i === pts.length - 1 ? "last" : ""} ${i === hot ? "hot" : ""}" x="${q.x - r}" y="${q.y - r}" width="${2 * r}" height="${2 * r}"/>`));
           }
         }
         svg.innerHTML = h;
@@ -226,7 +228,7 @@
         redo.length = 0;
         cur = im; paint(cur); dirty = true; buttons();
       };
-      const buttons = () => { $("peUndo").disabled = !undo.length; $("peRedo").disabled = !redo.length; $("peSave").disabled = !dirty; };
+      const buttons = () => { $("peUndo").disabled = !undo.length; $("peRedo").disabled = !redo.length; $("peSave").disabled = !dirty; $("peSaveAs").disabled = !dirty || o.saveAs === false; };
       const doUndo = () => { if (!undo.length) return; redo.push(cur); cur = undo.pop(); paint(cur); dirty = true; buttons(); };
       const doRedo = () => { if (!redo.length) return; undo.push(cur); cur = redo.pop(); paint(cur); dirty = true; buttons(); };
       const delSel = () => {
@@ -311,8 +313,8 @@
       document.addEventListener("keyup", key, true);
 
       // ---------------------------------------------------------------- 按钮
-      $("peEdge").value = ls.get("st:peEdge", "soft");
-      $("peEdge").onchange = (e) => { ls.set("st:peEdge", e.target.value); e.target.blur(); };
+      $("peEdge").value = ls.get("st:peEdge2", "hard"); // 默认硬（Lee 2026-10-26）
+      $("peEdge").onchange = (e) => { ls.set("st:peEdge2", e.target.value); e.target.blur(); };
       $("peDel").onclick = delSel;
       $("peUndo").onclick = doUndo;
       $("peRedo").onclick = doRedo;
@@ -321,14 +323,17 @@
       $("peWhiteBtn").onclick = () => showWhite(!whiteOn);
       $("peStr").oninput = (e) => { $("peStrV").textContent = e.target.value; runPreview(); };
       $("peWhiteNo").onclick = () => showWhite(false);
-      $("peWhiteOk").onclick = () => { clearTimeout(wt); const im = preview || deWhite(cur, +$("peStr").value); whiteOn = false; preview = null; $("peWhite").classList.remove("show"); $("peWhiteBtn").classList.remove("on"); commit(im); };
+      $("peWhiteOk").onclick = () => { clearTimeout(wt); if (+$("peStr").value === 0) return showWhite(false); /* 0 = 不变 */ const im = preview || deWhite(cur, +$("peStr").value); whiteOn = false; preview = null; $("peWhite").classList.remove("show"); $("peWhiteBtn").classList.remove("on"); commit(im); };
       const finish = (r) => { document.removeEventListener("keydown", key, true); document.removeEventListener("keyup", key, true); L.remove(); resolve(r); };
       const close = () => { if (dirty && !confirm("改过的还没保存，确定不要了？")) return; finish(null); };
       $("peCancel").onclick = close;
-      $("peSave").onclick = () => {
+      const out = (how) => {
         if (whiteOn) $("peWhiteOk").click();
-        cv.toBlob((blob) => finish({ blob, name: newName(o.name), w: W, h: H }), "image/png");
+        const keep = String(o.name || "图片").replace(/\.[^.]+$/, "") + ".png";
+        cv.toBlob((blob) => finish({ how, blob, name: how === "save" ? keep : newName(o.name), w: W, h: H }), "image/png");
       };
+      $("peSave").onclick = () => out("save");
+      $("peSaveAs").onclick = () => { if (o.saveAs !== false) out("saveAs"); };
       L._pe = { get pts() { return pts; }, get closed() { return closed; }, get undo() { return undo.length; } }; // 测试用
       requestAnimationFrame(fit);
     });

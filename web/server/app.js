@@ -173,6 +173,7 @@ app.post("/api/library", async (c) => {
 });
 app.get("/api/library/:id/file", (c) => { const r = lib.raw(c.req.param("id")); return r ? sendFile(c, lib.filePath(r), c.req.query("dl") ? { "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(r.name)}` } : {}) : c.text("404", 404); });
 app.get("/api/library/:id/thumb", (c) => { const id = c.req.param("id"); const t = lib.thumbPath(id); if (fs.existsSync(t)) return sendFile(c, t); const r = lib.raw(id); return r ? sendFile(c, lib.filePath(r)) : c.text("404", 404); });
+app.put("/api/library/:id/file", async (c) => { try { return c.json({ item: await lib.replace(c.req.param("id"), Buffer.from(await c.req.arrayBuffer())) }); } catch (e) { return c.json({ error: e.message }, 400); } });
 app.post("/api/library/delete", async (c) => { const b = await c.req.json(); return c.json({ removed: lib.remove(b.ids) }); });
 app.post("/api/library/send", async (c) => { try { return c.json(await libsend.send(await c.req.json())); } catch (e) { return c.json({ error: e.message }, 400); } });
 app.post("/api/library/zip", async (c) => {

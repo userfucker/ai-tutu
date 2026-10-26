@@ -244,6 +244,15 @@ export async function op(pid, b) {
       if (!b.fromLibrary) { const f = store.getBlob(b.key); if (f) lib.add(f.buf, { grp: p.name, source: "main", tag: b.libTag === "白底图" ? "白底图" : "原图", name: pr.name, used: { type: "main", id: pid, name: p.name } }).catch(() => {}); }
       return p;
     }
+    case "replaceCut": {
+      // 产品图去白边“保存”：换掉抠好的图（已经生成的主图还用着旧图的话，旧图留着）
+      const img = await ST.imgOf(b.key);
+      if (!img) throw new Error("图片打不开");
+      let old = "";
+      const p = editProduct(pid, prid, (pr, q) => { old = pr.cut && pr.cut !== pr.key && pr.cut !== b.key && !q.items.some((it) => it.product === prid) ? pr.cut : ""; pr.cut = b.key; pr.cutBox = ST.alphaBox(img); pr.job = ""; });
+      delBlob(old);
+      return p;
+    }
     case "holes": { const p = editProduct(pid, prid, (pr) => { pr.holes = !!b.holes; }); runProduct(pid, prid, "direct"); return p; }
     case "cutAi": runProduct(pid, prid, "ai"); return store.getProject(pid);
     case "delProduct": return edit(pid, (p) => {

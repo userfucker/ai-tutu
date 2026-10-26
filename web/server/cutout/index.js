@@ -18,7 +18,7 @@ import * as lib from "../library.js";
 
 export const DEFAULT_SETTINGS = {
   mode: "white", ratio: "1:1", background: "white", outSize: "800", format: "jpeg", fill: "85", angle: "keep",
-  retouch: "on", sharp: "keep", contrast: "0", bright: "0", holes: "auto", refineBg: "original", model: "Flash", site: "", batchSize: 10,
+  retouch: "on", sharp: "keep", contrast: "0", bright: "0", holes: "auto", refineBg: "original", formatAuto: true, model: "Flash", site: "", batchSize: 10,
 };
 const SITE_OK = ["gemini", "copilot"];
 const running = new Set();
@@ -103,6 +103,7 @@ function runJob(pid, jid, resume) {
 }
 
 // ------------------------------------------------------------ 网页发来的操作
+const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o && typeof o[k] === "string").map((k) => [k, o[k]]));
 const FILE_KEYS = ["crop", "lasso", "colors", "partsNote", "parts", "rot90", "fine", "curKey", "w", "h", "type", "maskKey", "req", "productName", "skip"];
 export async function op(pid, b) {
   const ST = getST();
@@ -139,7 +140,7 @@ export async function op(pid, b) {
         let rot = q.jobs.length;
         for (const j of list) {
           const old = j.redoOf && q.jobs.find((x) => x.id === j.redoOf);
-          const rec = { id: j.id || ST.uid("j"), fileId: j.fileId, name: j.name, inKey: j.inKey, extraKeys: j.extraKeys || [], prompt: j.prompt, aiRatio: j.aiRatio, inSize: j.inSize, req: j.req || "", productName: j.productName || "", settings: { ...q.settings }, site: SITE_OK.includes(q.settings.site) ? q.settings.site : "", rot: rot++, status: "queued", job: "排队中", created: Date.now() };
+          const rec = { id: j.id || ST.uid("j"), fileId: j.fileId, name: j.name, inKey: j.inKey, extraKeys: j.extraKeys || [], prompt: j.prompt, aiRatio: j.aiRatio, inSize: j.inSize, req: j.req || "", productName: j.productName || "", settings: { ...q.settings, ...pick(j.over, ["format", "refineBg"]) }, site: SITE_OK.includes(q.settings.site) ? q.settings.site : "", rot: rot++, status: "queued", job: "排队中", created: Date.now() };
           if (old) { [old.inKey, ...(old.extraKeys || []), old.aiKey, old.outKey].forEach((k) => k && k !== rec.inKey && delBlob(k)); Object.assign(old, rec, { id: old.id, run: old.run || 0 }); }
           else q.jobs.unshift(rec);
         }
@@ -156,6 +157,30 @@ export async function op(pid, b) {
       for (const j of p.jobs.filter((x) => ids.has(x.id))) [j.inKey, ...(j.extraKeys || []), j.aiKey, j.outKey].forEach((k) => k && delBlob(k));
       p.jobs = p.jobs.filter((x) => !ids.has(x.id));
     });
+    case "replaceFile": {
+      // 产品图去白边“保存”：替换原图（编辑框里的旋转已经在图里了）
+      const f = store.getBlob(b.key);
+      if (!f) throw new Error("图片没传上来");
+      return edit(pid, (p) => {
+        const x = p.files.find((y) => y.id === b.fid);
+        if (!x) return false;
+        if (!p.jobs.some((j) => j.fileId === x.id)) [x.key, x.curKey].forEach((k) => k && k !== b.key && delBlob(k));
+        Object.assign(x, { key: b.key, curKey: b.key, type: f.type, size: f.buf.length, name: String(b.name || x.name).slice(0, 100), w: +b.w || x.w, h: +b.h || x.h, ow: +b.w || x.ow, oh: +b.h || x.oh, rot90: 0, fine: 0 });
+      });
+    }
+    case "replaceOutput": {
+      // 结果去白边“保存”：替换做好的图，素材中心里那张也换掉
+      const j = p0.jobs.find((x) => x.id === b.jid);
+      const f = store.getBlob(b.key);
+      if (!j || !f) throw new Error("这条结果没有了");
+      if (j.libId) await lib.replace(j.libId, f.buf).catch(() => {});
+      return edit(pid, (p) => {
+        const x = p.jobs.find((y) => y.id === b.jid);
+        if (!x) return false;
+        if (x.outKey && x.outKey !== b.key) delBlob(x.outKey);
+        Object.assign(x, { outKey: b.key, w: +b.w || x.w, h: +b.h || x.h });
+      });
+    }
     case "addEdited": {
       // 结果去白边另存：加一条新结果，放在原来那条后面；新图也放进素材中心
       const j = p0.jobs.find((x) => x.id === b.jid);

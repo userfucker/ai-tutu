@@ -389,11 +389,17 @@
       }
       VIEWER.open(out, list.indexOf(it0));
     },
-    // 去白边（lib/pngedit.js）：另存一张新产品图，放在这张后面，也放进素材中心
+    // 去白边（lib/pngedit.js）：保存 = 换掉抠好的图；另存 = 新产品图，放在这张后面，也放进素材中心
     peProduct: async (el) => {
       const p = P(), pr = p.products.find((x) => x.id === el.closest("[data-prid]").dataset.prid);
       const r = await PNGEDIT.open({ src: await ST.urlOf(pr.cut), name: /\.png$/i.test(pr.name) ? pr.name : pr.name.replace(/\.[^.]+$/, "") + ".png" });
       if (!r) return;
+      if (r.how === "save") {
+        const key = `${p.id}:${pr.id}-cut-${Date.now()}`;
+        await ST.saveImage(key, r.blob);
+        await op({ op: "replaceCut", prid: pr.id, key });
+        return APP.toast("去白边保存好了");
+      }
       const id = ST.uid("pr");
       const key = `${p.id}:${id}-orig`;
       await ST.saveImage(key, r.blob);
