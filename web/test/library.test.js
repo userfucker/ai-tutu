@@ -71,8 +71,9 @@ test("发送到主图制作（新建项目）/ 详情页（新建、已有）；
   assert.match(r.body.name, /^主图-钱包\d\d-\d\d-\d+$/);
   const mp = (await api("GET", `/api/projects/${r.body.projectId}`)).body.project;
   assert.equal(mp.products.length, 1, "产品图放进去了");
-  for (let i = 0; i < 50 && !(await api("GET", `/api/projects/${mp.id}`)).body.project.products[0].cut; i++) await sleep(100);
-  assert.ok((await api("GET", `/api/projects/${mp.id}`)).body.project.products[0].cut, "白底图自动去白底");
+  await sleep(800);
+  const pr0 = (await api("GET", `/api/projects/${mp.id}`)).body.project.products[0];
+  assert.ok(!pr0.cut && pr0.edgeWhite, "保留原来的格式，不自动去白底（Lee 2026-10-26），认出是白底图（可以点“去白底”）");
   assert.equal((await api("GET", "/api/library")).body.total.n, 2, "从素材中心发过去的不会再放回来一份");
   const d1 = await api("POST", "/api/library/send", { to: "detail", ids: [a1.id, a2.id], name: "钱包" });
   const dp = (await api("GET", `/api/projects/${d1.body.projectId}`)).body.project;

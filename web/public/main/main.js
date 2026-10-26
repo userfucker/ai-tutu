@@ -94,6 +94,9 @@
   const setFields = (fields) => { Object.assign(P(), fields); return op({ op: "set", fields }); };
   let setT, setPend = {};
   const setSoon = (fields) => { Object.assign(P(), fields); Object.assign(setPend, fields); clearTimeout(setT); setT = setTimeout(() => { const f = setPend; setPend = {}; op({ op: "set", fields: f }); }, 500); };
+  // 产品图原来的格式（看文件名，没有扩展名就当 JPG）
+  const fmtOf = (pr) => { const m = /\.(png|jpe?g|webp|gif)$/i.exec(pr.name || ""); return m ? (/^jpe?g$/i.test(m[1]) ? "JPG" : m[1].toUpperCase()) : "JPG"; };
+  const isPngKey = (pr) => /\.png$/i.test(pr.name || "");
   async function addProducts(files) {
     const p = P();
     let n = 0;
@@ -108,7 +111,7 @@
         n++;
       } catch (e) { APP.toast(`${f.name} 打不开：${e.message}`, true); }
     }
-    if (n) APP.toast(`加了 ${n} 张产品图${P().products.some((x) => !x.cut && !x.job) ? "；不是白底的图点“AI 抠图”" : ""}`);
+    if (n) APP.toast(`加了 ${n} 张产品图（保留原来的格式；“画背景 + 融入”才要抠图）`);
   }
   async function generate() {
     const p = await op({ op: "generate", site });
@@ -299,13 +302,14 @@
     name.title = p.fixedName ? "项目名称建好以后不能改" : "";
     const prods = await Promise.all((p.products || []).map(async (pr) => {
       const st = pr.job || "";
-      return `<div class="mcard ${pr.id === (curProduct() || {}).id ? "cur" : ""}" data-prid="${pr.id}"><div class="pic ${pr.cut ? "checker dark" : ""}" data-act="viewProduct" title="点一下看大图"><img src="${await ST.urlOf(pr.cut || pr.key)}" alt="">
-        ${st ? `<span class="st tag ${/失败/.test(st) ? "bad" : "blue"}">${esc(st)}</span>` : pr.cut ? '<span class="st tag ok">已抠图</span>' : '<span class="st tag warn">没抠图</span>'}</div>
+      return `<div class="mcard ${pr.id === (curProduct() || {}).id ? "cur" : ""}" data-prid="${pr.id}"><div class="pic ${pr.cut || isPngKey(pr) ? "checker dark" : ""}" data-act="viewProduct" title="点一下看大图"><img src="${await ST.urlOf(pr.cut || pr.key)}" alt="">
+        ${st ? `<span class="st tag ${/失败/.test(st) ? "bad" : "blue"}">${esc(st)}</span>` : pr.cut ? '<span class="st tag ok">已抠图</span>' : `<span class="st tag">原图 ${fmtOf(pr)}</span>`}</div>
         <div class="acts"><button class="sm" data-act="useProduct">${pr.id === (curProduct() || {}).id ? "正在用" : "用这张"}</button>
+        ${!pr.cut && pr.edgeWhite ? `<button class="sm" data-act="cutDirect" ${st && !/失败/.test(st) ? "disabled" : ""} title="白底图：直接去掉白色背景，变成透明 PNG（“画背景 + 融入”要用；“AI 直接画”不用）">去白底</button>` : ""}
         ${!pr.cut || pr.white ? `<button class="sm" data-act="cutAi" ${st && !/失败/.test(st) ? "disabled" : ""}>AI 抠图</button>` : ""}
         ${pr.cut ? '<button class="sm" data-act="peProduct" title="钢笔选区删除、一键去白边，另存一张新产品图">去白边</button>' : ""}
         <button class="sm danger" data-act="delProduct">删除</button></div>
-        ${pr.cut !== pr.key && (pr.cut || pr.edgeWhite || pr.white) ? `<label class="row lb" title="手腕绳、提手这种围成圈的地方，中间的白色也抠掉"><input type="checkbox" data-holes ${pr.holes ? "checked" : ""} ${st && !/失败/.test(st) ? "disabled" : ""}> 镂空的白色也抠掉</label>` : ""}</div>`;
+        ${pr.cut && pr.cut !== pr.key ? `<label class="row lb" title="手腕绳、提手这种围成圈的地方，中间的白色也抠掉"><input type="checkbox" data-holes ${pr.holes ? "checked" : ""} ${st && !/失败/.test(st) ? "disabled" : ""}> 镂空的白色也抠掉</label>` : ""}</div>`;
     }));
     const sel = new Set(p.styles || []);
     const myPills = await Promise.all(myStyles.map(async (s) => `<span class="stypill ${sel.has("my:" + s.id) ? "on" : ""}" data-sty="my:${s.id}" title="${esc(s.desc || s.prompt)}">${s.ref ? `<img src="${await ST.urlOf(s.ref)}" alt="">` : ""}${esc(s.name)}<span class="x" data-act="delStyle" data-sid="${s.id}" title="删除这个风格">✕</span></span>`));
@@ -313,7 +317,7 @@
     const placeUrl = p.placeRef ? await ST.urlOf(p.placeRef) : "";
     const pend = p.items.filter((x) => x.state !== "ok"), done = p.items.filter((x) => x.state === "ok");
     const html = `
-      <div class="card"><div class="head"><div><h3>① 产品图</h3><div class="muted">上传白底图（白底的会自动去白底；不是白底的点“AI 抠图”）。抠好的图放在深色格子上，有没有白边一眼能看出来；手腕绳、提手围成的圈里有白色，勾“镂空的白色也抠掉”。</div></div>
+      <div class="card"><div class="head"><div><h3>① 产品图</h3><div class="muted">产品图保留原来的格式，不自动抠图。“AI 直接画场景”直接用原图（白底图最好）；“画背景 + 融入”要抠好的图：白底图点“去白底”，不是白底的点“AI 抠图”。抠好的图放在深色格子上，有没有白边一眼能看出来；手腕绳、提手围成的圈里有白色，勾“镂空的白色也抠掉”。</div></div>
         <div class="sp"><button data-act="fromLib">从素材中心选</button><button data-act="addProducts">上传产品图</button></div></div>
         <label class="row lb" style="margin-bottom:10px">产品名称（可以不填，告诉 AI 这是什么）<input id="pName" value="${esc((p.info && p.info.name) || "")}" placeholder="如：男士保温杯" style="width:240px"></label>
         ${prods.length ? `<div class="mcards">${prods.join("")}</div>` : '<div class="empty" id="dropZone">把白底图拖到这里、按 Ctrl+V 粘贴，或者点“上传产品图”“从素材中心选”</div>'}</div>
@@ -387,6 +391,7 @@
     },
     useProduct: (el) => setFields({ cur: prodOf(el).id }),
     cutAi: (el) => op({ op: "cutAi", prid: prodOf(el).id }),
+    cutDirect: (el) => op({ op: "cutDirect", prid: prodOf(el).id }),
     delProduct: async (el) => { if (await confirm("删除这张产品图？", "删除", true)) op({ op: "delProduct", prid: prodOf(el).id }); },
     learnStyle: () => learnStyle(),
     delStyle: async (el, e) => {
@@ -442,7 +447,7 @@
     viewProduct: async (el) => {
       const prs = P().products;
       const i = prs.findIndex((x) => x.id === el.closest("[data-prid]").dataset.prid);
-      VIEWER.open(await Promise.all(prs.map(async (pr) => ({ src: await ST.urlOf(pr.cut || pr.key), name: pr.name, png: !!pr.cut, info: `${pr.w}×${pr.h}${pr.cut ? " · 抠好的 PNG" : ""}` }))), i);
+      VIEWER.open(await Promise.all(prs.map(async (pr) => ({ src: await ST.urlOf(pr.cut || pr.key), name: pr.name, png: !!pr.cut || isPngKey(pr), info: `${pr.w}×${pr.h}${pr.cut ? " · 抠好的 PNG" : " · 原图 " + fmtOf(pr)}` }))), i);
     },
     dlOne: async (el) => {
       const p = P(), it = itemOf(el);

@@ -278,7 +278,7 @@ ST.P = (() => {
         ref: "- Placement: place the product in the same pose, orientation, camera angle and position in the frame as in the SECOND uploaded image (placement reference only — use the new scene below, not that background).",
       }[placement] || "";
       return [
-        "Generate one image: a photorealistic e-commerce main product photo, square 1:1, featuring EXACTLY the product in the first uploaded image (the product cut out and placed on a plain white background; the white background is NOT part of the product and must be replaced by the new scene; white or light areas inside the product, such as clear lamp lenses, glass, chrome and reflections, ARE part of the product and must keep their real look — never turn them into dark spots or holes).",
+        "Generate one image: a photorealistic e-commerce main product photo, square 1:1, featuring EXACTLY the product in the first uploaded image (the product, cut out and placed on a plain white background or photographed on white; that background is NOT part of the product and must be replaced by the new scene; white or light areas inside the product, such as clear lamp lenses, glass, chrome and reflections, ARE part of the product and must keep their real look — never turn them into dark spots or holes).",
         `- Same product${name ? ` ("${name}", Chinese name)` : ""}: shape, proportions, colors, materials, patterns, printed text, logos and number of parts must stay identical; do not redesign it. Remove any leftover white fringes from the cut-out.`,
         `- Scene: ${style}.`,
         place,

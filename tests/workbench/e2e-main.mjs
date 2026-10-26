@@ -70,8 +70,16 @@ try {
   const fc = page.waitForEvent('filechooser');
   await page.click('[data-act="addProducts"]');
   await (await fc).setFiles({ name: '白底.png', mimeType: 'image/png', buffer: product('#ffffff') });
+  await page.waitForSelector('.mcard[data-prid]');
+  await sleep(1500);
+  {
+    const mid0 = /p=([^&]+)/.exec(page.url())[1];
+    const pr0 = (await api('GET', `/api/projects/${mid0}`)).project.products[0];
+    check('上传白底图：保留原来的格式，不自动抠图（卡片显示“原图 PNG”，有“去白底”按钮）', !pr0.cut && (await page.textContent('.mcard[data-prid] .st')).includes('原图 PNG') && (await page.locator('.mcard[data-prid] [data-act="cutDirect"]').count()) === 1, JSON.stringify({ cut: pr0.cut }));
+  }
+  await page.click('.mcard[data-prid] [data-act="cutDirect"]');
   await page.waitForSelector('.mcard[data-prid] .tag.ok');
-  check('上传白底图：自动去白底', true);
+  check('点“去白底”：抠成透明 PNG', true);
   await page.click('.mcard[data-prid] .pic');
   await page.waitForSelector('#vwLayer [data-vw="dark"]:not([hidden])');
   const bg0 = await page.$eval('#vwLayer .vwimg', (e) => e.className);
@@ -146,7 +154,7 @@ try {
   await page.click('[data-act="generate"]');
   await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 2);
   await idle();
-  const sc1 = ai.asked.filter((a) => /the product cut out and placed on a plain white background/.test(a.prompt));
+  const sc1 = ai.asked.filter((a) => /the product, cut out and placed on a plain white background or photographed on white/.test(a.prompt));
   check('AI 直接画：抠好的图铺白底发给 AI（透明 PNG 发给 Gemini 会出黑点），提示词说透明灯罩、玻璃不要变黑', sc1.length === 2 && /clear lamp lenses/.test(sc1[0].prompt) && sc1[0].files && sc1[0].files[0] && /\.jpg$/.test(sc1[0].files[0]) && sc1[0].mimes[0] === 'image/jpeg', JSON.stringify(sc1[0] && sc1[0].files));
   check('AI 直接画：把抠好的 PNG 发给 AI，让它自由摆放', sc1.length === 2 && sc1.every((a) => a.images === 1 && /you may choose a natural, attractive way/.test(a.prompt)));
   check('每张主图显示时间（北京时间，精确到秒）', (await page.locator('.pendbox .mcard .tag.mtime').count()) === 2 && /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test((await page.locator('.pendbox .mcard .tag.mtime').first().textContent()).trim()), await page.locator('.pendbox .mcard .tag.mtime').first().textContent());
@@ -168,7 +176,7 @@ try {
   await page.click('[data-act="generate"]');
   await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 3);
   await idle();
-  const sc2 = ai.asked.slice(nAsk).find((a) => /cut out and placed on a plain white background/.test(a.prompt));
+  const sc2 = ai.asked.slice(nAsk).find((a) => /cut out and placed on a plain white background or photographed on white/.test(a.prompt));
   check('照参考图摆：产品 PNG + 那张图一起发给 AI', sc2 && sc2.images === 2 && /SECOND uploaded image/.test(sc2.prompt));
   await page.click('[data-place="same"]');
   await page.waitForSelector('[data-place="same"].on');
@@ -176,7 +184,7 @@ try {
   await page.click('[data-act="generate"]');
   await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 4);
   await idle();
-  const sc3 = ai.asked.slice(nAsk).find((a) => /cut out and placed on a plain white background/.test(a.prompt));
+  const sc3 = ai.asked.slice(nAsk).find((a) => /cut out and placed on a plain white background or photographed on white/.test(a.prompt));
   check('和产品图一样：要求保持产品图的角度朝向', sc3 && sc3.images === 1 && /keep the product's orientation/.test(sc3.prompt));
   await page.click('[data-place="ref"] .x');
   await page.waitForFunction(() => !document.querySelector('[data-place="ref"]'));

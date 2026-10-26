@@ -243,7 +243,7 @@ export async function op(pid, b) {
       if (b.isCut || (!pr.edgeWhite && ST.edgeIsClear(img))) { pr.edgeWhite = false; pr.cut = b.key; pr.cutBox = ST.alphaBox(img); }
       // after = 加在这张后面（去白边另存的新图）
       const p = edit(pid, (q) => { const i = b.after ? q.products.findIndex((x) => x.id === b.after) : -1; i >= 0 ? q.products.splice(i + 1, 0, pr) : q.products.push(pr); if (!q.cur) q.cur = pr.id; });
-      if (pr.edgeWhite) runProduct(pid, pr.id, "direct");
+      // 不自动去白底：产品图保留原来的格式（Lee 2026-10-26）。AI 直接画用原图就行；画背景 + 融入要抠好的图，点“去白底”或“AI 抠图”
       // 上传的产品图也放进素材中心（从素材中心发过来的就不用了）
       if (!b.fromLibrary) { const f = store.getBlob(b.key); if (f) lib.add(f.buf, { grp: p.name, source: "main", tag: b.libTag === "白底图" ? "白底图" : "原图", name: pr.name, used: { type: "main", id: pid, name: p.name } }).catch(() => {}); }
       return p;
@@ -259,6 +259,7 @@ export async function op(pid, b) {
     }
     case "holes": { const p = editProduct(pid, prid, (pr) => { pr.holes = !!b.holes; }); runProduct(pid, prid, "direct"); return p; }
     case "cutAi": runProduct(pid, prid, "ai"); return store.getProject(pid);
+    case "cutDirect": runProduct(pid, prid, "direct"); return store.getProject(pid);
     case "delProduct": return edit(pid, (p) => {
       const pr = p.products.find((x) => x.id === prid);
       if (!pr) return false;
@@ -269,7 +270,7 @@ export async function op(pid, b) {
     case "generate": {
       const pr = ST.mainProduct(p0);
       if (!pr) throw new Error("先上传产品图");
-      if (!pr.cut) throw new Error("这张产品图还没抠好（不是白底的图点“AI 抠图”）");
+      if (p0.mode === "paste" && !pr.cut) throw new Error("“画背景 + 融入”要用抠好的产品图：白底图点产品图下面的“去白底”，不是白底的点“AI 抠图”");
       const styles = chosenStyles(p0);
       if (!styles.length) throw new Error("先选至少一种背景风格");
       const list = [];
