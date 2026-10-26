@@ -122,6 +122,18 @@ try {
   await sleep(1200);
   check('主图“自己写”：页面重画时还能接着打字', (await page.inputValue('#custom')) === '浅灰色水泥台面' && await page.evaluate(() => document.activeElement && document.activeElement.id === 'custom'), await page.inputValue('#custom'));
   check('主图“自己写”：写的内容存到服务器', (await api('GET', `/api/projects/${mid}`)).project.custom === '浅灰色水泥台面');
+  // 拼音输入法：选字的时候页面要重画（服务器推送），不能变成“zhongshi2”
+  const cdp = await page.context().newCDPSession(page);
+  await page.click('#custom');
+  await page.keyboard.press('End');
+  await cdp.send('Input.imeSetComposition', { text: 'zhong', selectionStart: 5, selectionEnd: 5 });
+  await cdp.send('Input.imeSetComposition', { text: 'zhongshi', selectionStart: 8, selectionEnd: 8 });
+  await api('POST', `/api/main/${mid}/op`, { op: 'set', fields: { count: 3 } }); // 选字中途网页重画
+  await sleep(1500);
+  await cdp.send('Input.insertText', { text: '中式' }); // 按 2 选了“中式”
+  await sleep(1200);
+  check('主图“自己写”：拼音选字时页面重画，不会变成拼音字母', (await page.inputValue('#custom')) === '浅灰色水泥台面中式', await page.inputValue('#custom'));
+  check('主图“自己写”：选好的字也存到服务器', (await api('GET', `/api/projects/${mid}`)).project.custom === '浅灰色水泥台面中式');
   await page.uncheck('#customOn');
   await api('POST', `/api/main/${mid}/op`, { op: 'set', fields: { count: 1 } });
   await sleep(800);

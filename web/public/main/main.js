@@ -262,8 +262,17 @@
   }
 
   let rendering = false, renderAgain = false;
+  // 拼音输入法正在选字的时候不重画、不保存（Lee 2026-10-26：打“zhongshi”按 2 选字，输入框里变成 zhongshi2）
+  let composing = false, renderLater = false;
+  document.addEventListener("compositionstart", () => { composing = true; });
+  document.addEventListener("compositionend", (e) => {
+    composing = false;
+    e.target.dispatchEvent(new Event("input", { bubbles: true })); // 选好的字现在才保存
+    if (renderLater) { renderLater = false; setTimeout(render, 0); }
+  });
   async function render() {
     if (!P()) return;
+    if (composing) { renderLater = true; return; }
     if (rendering) { renderAgain = true; return; }
     rendering = true;
     try {
@@ -468,7 +477,7 @@
   });
   document.addEventListener("input", (e) => {
     const p = P();
-    if (!p) return;
+    if (!p || e.isComposing || composing) return;
     const t = e.target;
     if (t.id === "projName") { if (!p.fixedName) setSoon({ name: t.value }); }
     else if (t.id === "pName") setSoon({ info: { ...(p.info || {}), name: t.value } });
