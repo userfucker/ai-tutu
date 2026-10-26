@@ -139,6 +139,7 @@ try {
   await sleep(800);
   check('默认做法：AI 直接画场景、AI 自由摆放', await page.isVisible('[data-mode="scene"].on') && await page.isVisible('[data-place="free"].on'));
   await page.click('[data-sty="marble"]');
+  check('每种风格最多 6 张', (await page.locator('#count option').count()) === 6 && (await page.locator('#count option').last().textContent()) === '6');
   await page.selectOption('#count', '1');
   await page.waitForSelector('[data-act="generate"]:has-text("生成 2 张")');
   check('选两种风格：生成 2 张', true);

@@ -273,7 +273,7 @@ export async function op(pid, b) {
       if (!styles.length) throw new Error("先选至少一种背景风格");
       const list = [];
       let n = 0;
-      for (const s of styles) for (let k = 0; k < (p0.count || 1); k++) list.push({ id: ST.uid("it"), mode: p0.mode === "paste" ? "paste" : "scene", placement: p0.placement === "ref" && p0.placeRef ? "ref" : p0.placement === "same" ? "same" : "free", placeRef: p0.placement === "ref" ? p0.placeRef || "" : "", style: s.id, styleName: s.name, prompt: s.prompt, ref: s.ref || "", product: pr.id, bg: "", pos: { x: 0.5, y: 0.53, s: p0.scale || 0.85 }, harm: null, state: "pending", t: Date.now(), rot: n++, job: "排队中", site: SITE_OK.includes(b.site) ? b.site : "" });
+      for (const s of styles) for (let k = 0; k < Math.min(6, Math.max(1, +p0.count || 1)); k++) list.push({ id: ST.uid("it"), mode: p0.mode === "paste" ? "paste" : "scene", placement: p0.placement === "ref" && p0.placeRef ? "ref" : p0.placement === "same" ? "same" : "free", placeRef: p0.placement === "ref" ? p0.placeRef || "" : "", style: s.id, styleName: s.name, prompt: s.prompt, ref: s.ref || "", product: pr.id, bg: "", pos: { x: 0.5, y: 0.53, s: p0.scale || 0.85 }, harm: null, state: "pending", t: Date.now(), rot: n++, job: "排队中", site: SITE_OK.includes(b.site) ? b.site : "" });
       const p = edit(pid, (q) => { q.items.unshift(...list); });
       for (const it of list) runItem(pid, it.id, "full");
       return p;
