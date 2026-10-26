@@ -173,6 +173,10 @@ try {
   await page.mouse.click(...P2(0.5, 0.9), { button: 'right' });
   let st2 = await page.evaluate(() => ({ n: document.getElementById('peLayer')._pe.pts.length, h: !!document.getElementById('peLayer')._pe.pts[2].h }));
   check('钢笔：点一下加锚点、拖动出弧线、右键删锚点', st2.n === 3 && st2.h, JSON.stringify(st2));
+  // 不在锚点上右键：删最近加的那个
+  await page.mouse.click(...P2(0.9, 0.9));
+  await page.mouse.click(...P2(0.1, 0.95), { button: 'right' });
+  check('不在锚点上右键：删掉最近加的锚点', await page.evaluate(() => document.getElementById('peLayer')._pe.pts.length) === 3);
   await page.keyboard.press('Backspace');
   check('退格删最后一个点', await page.evaluate(() => document.getElementById('peLayer')._pe.pts.length) === 2);
   await page.mouse.click(...P2(0.7, 0.7));
@@ -199,6 +203,13 @@ try {
   await sleep(400);
   await page.click('#peWhiteOk');
   check('一键去白边：确定后可以撤销', await page.evaluate(() => document.getElementById('peLayer')._pe.undo) === 2);
+  const dlp = page.waitForEvent('download');
+  await page.click('#peDl');
+  const dlf = await dlp;
+  const dlPath = path.join(out, 'pe-download.png');
+  await dlf.saveAs(dlPath);
+  const dlBuf = fs.readFileSync(dlPath);
+  check('去白边“下载”：把现在这张图存成 PNG', dlBuf[0] === 0x89 && dlBuf[1] === 0x50 && dlBuf.length > 1000, String(dlBuf.length));
   await page.click('#peSaveAs');
   await page.waitForFunction(() => !document.getElementById('peLayer'));
   await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 3);
@@ -217,6 +228,16 @@ try {
     const z = PNGEDIT.deWhite(im, 0).data;
     return { ring: a(8, 20), red: a(12, 20), hole: a(20, 20), zero: z[(20 * W + 8) * 4 + 3] };
   });
+  const pi = await page.evaluate(async () => {
+    // 透明 PNG（中间一个红方块）交给 AI 之前：铺白底（框选过也不会变黑）
+    const c = document.createElement('canvas'); c.width = c.height = 100;
+    const g = c.getContext('2d'); g.fillStyle = '#c81e1e'; g.fillRect(30, 30, 40, 40);
+    const dataUrl = c.toDataURL('image/png');
+    const corner = async (f) => { const r = await prepareInput(f, { single: true }); const im = new Image(); im.src = r.dataUrl; await im.decode(); const k = document.createElement('canvas'); k.width = im.naturalWidth; k.height = im.naturalHeight; const kg = k.getContext('2d'); kg.drawImage(im, 0, 0); return [...kg.getImageData(2, 2, 1, 1).data]; };
+    const base = { dataUrl, base64: dataUrl.split(',')[1], w: 100, h: 100, size: 1000, name: 'a.png', parts: [], colors: [] };
+    return { plain: await corner(base), crop: await corner({ ...base, crop: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } }) };
+  });
+  check('透明 PNG 交给 AI 前铺白底（框选过的也不变黑）', pi.plain[0] > 240 && pi.plain[3] === 255 && pi.crop[0] > 240 && pi.crop[1] > 240, JSON.stringify(pi));
   check('一键去白边：去掉贴着透明处的白边，产品里面的白色不动', dw.ring === 0 && dw.red === 255 && dw.hole === 255 && dw.zero === 255, JSON.stringify(dw));
 
   // 结果去白边另存：加一条新结果，在原来那条后面

@@ -4,7 +4,7 @@
  *    返回 { how: "save" | "saveAs", blob, name, w, h }：save = 替换原图（名字不变），saveAs = 另存新图（原名-去白边.png）；取消返回 null
  *  PNGEDIT.isPngName(name)
  * 钢笔：点一下加锚点（两点之间直线），按住拖动拉出弧线；点回第一个点闭合，出现蚂蚁线；
- *       右键点锚点删掉它，退格删最后一个点，Esc 放弃；闭合以后 Delete（或“删除选区”）把选区变透明。
+ *       右键点锚点删掉它（没点在锚点上就删最近加的那个），退格删最后一个点，Esc 放弃；闭合以后 Delete（或“删除选区”）把选区变透明。
  * 边缘：硬（默认）/ 柔和 1 像素（记在浏览器里）。一键去白边：强度 0~20（默认 0 = 不变），拖动时马上看效果。
  * 撤销 / 重做：Ctrl+Z / Ctrl+Y，最多 20 步。滚轮放大缩小，按住空格（或鼠标中键）拖动看别的地方，默认深色底。
  */
@@ -163,10 +163,10 @@
           <button id="peWhiteBtn" title="不用选，整张图贴着透明处的白边一起去掉">一键去白边</button>
           <button id="peUndo" disabled title="撤销（Ctrl+Z）">撤销</button><button id="peRedo" disabled title="重做（Ctrl+Y）">重做</button>
           <span class="sp"><span class="muted" id="peZoomV">100%</span><button id="peFit">适应窗口</button><button id="peDark">深色底</button>
-          <button id="peCancel">取消</button><button id="peSaveAs" disabled title="${o.saveAs === false ? "这里只能保存" : "另存一张新图，原图不动"}">另存为新图</button><button class="primary" id="peSave" disabled title="替换原图">保存</button></span></div>
+          <button id="peDl" title="把现在这张图下载到电脑（PNG）">下载</button><button id="peCancel">取消</button><button id="peSaveAs" disabled title="${o.saveAs === false ? "这里只能保存" : "另存一张新图，原图不动"}">另存为新图</button><button class="primary" id="peSave" disabled title="替换原图">保存</button></span></div>
         <div class="pewhite" id="peWhite"><b>一键去白边</b> 强度 <input type="range" id="peStr" min="0" max="20" step="1" value="0"> <b id="peStrV">0</b>
           <span class="muted">0 是不变，往右越拉去得越多。只去贴着透明处、偏白的边，产品本身的白色不动</span><span class="sp"><button id="peWhiteNo">取消</button><button class="primary" id="peWhiteOk">确定</button></span></div>
-        <div class="pehint muted">钢笔：点一下加锚点（两点之间是直线），按住拖动拉出弧线；点回第一个点闭合，出现蚂蚁线后按 Delete 或点“删除选区”。右键点锚点删掉它，退格删最后一个点，Esc 放弃。滚轮放大缩小，按住空格（或鼠标中键）拖动看别的地方。</div>
+        <div class="pehint muted">钢笔：点一下加锚点（两点之间是直线），按住拖动拉出弧线；点回第一个点闭合，出现蚂蚁线后按 Delete 或点“删除选区”。右键点锚点删掉它（不在锚点上右键就删最近加的那个），退格删最后一个点，Esc 放弃。“下载”把现在这张图存到电脑。滚轮放大缩小，按住空格（或鼠标中键）拖动看别的地方。</div>
         <div id="peStage"><div id="peWrap"><canvas id="peCv" width="${W}" height="${H}"></canvas></div><svg id="peSvg"></svg></div></div>`;
       document.body.appendChild(L);
       const $ = (id) => L.querySelector("#" + id);
@@ -270,10 +270,10 @@
         if (whiteOn) return;
         const p = toImg(e);
         if (e.button === 2) {
-          // 右键删锚点（闭合以前）
-          if (closed) return;
+          // 右键删锚点（闭合以前）：点在锚点上删那个，没点在锚点上删最近加的那个（Lee 2026-10-26）
+          if (closed || !pts.length) return;
           const i = hitAnchor(p);
-          if (i >= 0) { pts.splice(i, 1); hot = -1; draw(); }
+          pts.splice(i >= 0 ? i : pts.length - 1, 1); hot = -1; draw();
           return;
         }
         if (e.button !== 0) return;
@@ -336,6 +336,16 @@
         cv.toBlob((blob) => finish({ how, blob, name: how === "save" ? keep : newName(o.name), w: W, h: H }), "image/png");
       };
       $("peSave").onclick = () => out("save");
+      $("peDl").onclick = () => {
+        if (whiteOn && preview) paint(preview);
+        cv.toBlob((blob) => {
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = dirty ? newName(o.name) : String(o.name || "图片").replace(/\.[^.]+$/, "") + ".png";
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+        }, "image/png");
+      };
       $("peSaveAs").onclick = () => { if (o.saveAs !== false) out("saveAs"); };
       L._pe = { get pts() { return pts; }, get closed() { return closed; }, get undo() { return undo.length; } }; // 测试用
       requestAnimationFrame(fit);

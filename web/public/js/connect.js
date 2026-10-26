@@ -25,7 +25,7 @@
             ai-web 插件同一时间只连一个服务器：在 ai-web 的选项里把“AI 会议”和“工作台”都存下来，用的时候选一下就行（口令也可以点“自己设”，设成和会议中转站一样）。
             每个 AI 网站要在浏览器里登录一次；插件会单独开窗口干活，别最小化那些窗口。</div></div>
         <div class="card"><h3>现在连着的插件</h3>
-          ${s.workers.length ? s.workers.map((w) => `<div class="worker"><div class="row"><b>${esc(w.appName)}</b><span class="muted">${esc(w.name)}${w.version ? " · v" + esc(w.version) : ""} · 连上 ${W.ago(w.since)}</span></div>
+          ${s.workers.length ? s.workers.map((w) => `<div class="worker"><div class="row"><b>${esc(w.appName)}</b><span class="muted">${esc(w.name)}${w.version ? " · v" + esc(w.version) : ""}${w.ip ? " · " + esc(w.ip) : ""} · 连上 ${W.ago(w.since)}</span>${w.local ? '<span class="tag" title="这台电脑开着工作台网页。别的电脑上有插件在线时，AI 活先交给别的电脑">本机</span>' : ""}</div>
             <div class="muted">${esc(APP_HELP[w.app] || "")}</div>
             <div class="sites">${w.sites.map((x) => {
               const st = s.siteStates[`${w.connId}|${x.site}`] || {};

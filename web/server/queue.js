@@ -224,10 +224,13 @@ export function tick() {
         const bad = badSites.get(row.id);
         if (bad && order.some((x) => !bad.has(x) && bridge.connsFor(x).length)) order = order.filter((x) => !bad.has(x));
         let pick = null;
+        const br = baseRole(role);
+        const able = (c) => !(c.app === "aiweb" && br !== "text" && !(br === "read" && verAtLeast(c.version, "1.4.0"))); // ai-web 只能写文字；1.4.0 起能发图片看详情图
+        // 别的电脑上有能做的插件：就不用开着网页的这台（省得这台弹出一堆浏览器窗口）；只有这台在线才用这台（Lee 2026-10-26）
+        const remoteOnly = order.some((site) => bridge.connsFor(site).some((c) => able(c) && !bridge.isLocal(c)));
         for (const site of order) {
           for (const c of bridge.connsFor(site)) {
-            const br = baseRole(role);
-            if (c.app === "aiweb" && br !== "text" && !(br === "read" && verAtLeast(c.version, "1.4.0"))) continue; // ai-web 只能写文字；1.4.0 起能发图片看详情图
+            if (!able(c) || (remoteOnly && bridge.isLocal(c))) continue;
             const s = st(c.id, site);
             if (!s.busy && now >= s.cooldownUntil && now >= s.nextAt) { pick = { conn: c, site }; break; }
           }

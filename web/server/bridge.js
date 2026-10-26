@@ -8,6 +8,7 @@
 import { EventEmitter } from "node:events";
 import { WebSocketServer } from "ws";
 import { extToken } from "./auth.js";
+import { normIp, viewerIps } from "./events.js";
 
 export const SITE_NAMES = {
   deepseek: "DeepSeek", glm: "智谱清言", kimi: "Kimi", doubao: "豆包",
@@ -45,9 +46,10 @@ class Bridge extends EventEmitter {
         if (m.test) { setTimeout(() => ws.close(), 200); return; }
         const app = m.app === "aitutu" || m.app === "taobao" ? m.app : "aiweb";
         const name = String(m.name || req.socket.remoteAddress || "插件");
-        // 同一台电脑、同一种插件：顶替旧连接
-        for (const [id, c] of this.conns) if (c.app === app && c.name === name && c.ws !== ws) { try { c.ws.close(); } catch {} this.drop(id); }
-        conn = { id: `c${++this.seq}`, ws, app, name, version: String(m.version || ""), since: Date.now(), sites: new Map(), pending: new Map() };
+        const ip = normIp(req.socket.remoteAddress);
+        // 同一台电脑（IP 一样）、同一种插件、同一个名字：顶替旧连接（两台电脑名字一样也不会互相顶掉）
+        for (const [id, c] of this.conns) if (c.app === app && c.name === name && c.ip === ip && c.ws !== ws) { try { c.ws.close(); } catch {} this.drop(id); }
+        conn = { id: `c${++this.seq}`, ws, app, name, ip, version: String(m.version || ""), since: Date.now(), sites: new Map(), pending: new Map() };
         for (const s of m.sites || []) if (s && s.site) conn.sites.set(s.site, { ...s, name: s.name || SITE_NAMES[s.site] || s.site });
         this.conns.set(conn.id, conn);
         this.emit("status");
@@ -110,10 +112,12 @@ class Bridge extends EventEmitter {
   /** 所有插件和网站：[{ connId, app, name, version, since, sites: [...] }] */
   status() {
     return [...this.conns.values()].map((c) => ({
-      connId: c.id, app: c.app, appName: APP_NAMES[c.app], name: c.name, version: c.version, since: c.since,
+      connId: c.id, app: c.app, appName: APP_NAMES[c.app], name: c.name, version: c.version, since: c.since, ip: c.ip === "server" ? "工作台服务器这台" : c.ip, local: this.isLocal(c),
       sites: [...c.sites.values()].map((s) => ({ site: s.site, name: s.name || SITE_NAMES[s.site] || s.site, open: !!s.open, ready: !!s.ready, url: s.url || "" })),
     }));
   }
+  /** 这个插件是不是在开着工作台网页的电脑上 */
+  isLocal(c) { return viewerIps().has(c.ip); }
   /** 能做这个网站的插件连接 */
   connsFor(site) { return [...this.conns.values()].filter((c) => c.sites.has(site)); }
   siteInfo(connId, site) { const c = this.conns.get(connId); return c ? c.sites.get(site) : null; }

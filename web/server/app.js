@@ -69,7 +69,7 @@ app.get("/api/events", (c) => {
     start(ctrl) {
       const enc = new TextEncoder();
       const send = (s) => ctrl.enqueue(enc.encode(s));
-      off = addClient(send);
+      off = addClient(send, c.env && c.env.incoming && c.env.incoming.socket ? c.env.incoming.socket.remoteAddress : "");
       send(": hello\n\n");
       timer = setInterval(() => { try { send(": ping\n\n"); } catch { off(); } }, 20000);
     },

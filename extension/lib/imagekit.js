@@ -203,13 +203,18 @@ async function prepareInput(f, opts = {}) {
   const ox = f.crop ? Math.round(f.crop.x * f.w) : 0, oy = f.crop ? Math.round(f.crop.y * f.h) : 0;
   const { w, h } = inputSize(f);
   let base;
-  if (!f.crop) {
+  // 透明 PNG：先铺白底再交给 AI。不铺的话框选后透明处会变黑，没框选时 AI 也可能把透明处当成黑色 / 花底，
+  // 画出来边缘又带上白边、残留（Lee 2026-10-26：修干净的产品图让 AI 精修，残留又回来了）
+  const isPng = /^data:image\/png/.test(f.dataUrl || "");
+  if (!f.crop && !isPng) {
     // base64 可能没有（刷新后从插件后台恢复的图只存了 dataUrl）
     base = { dataUrl: f.dataUrl, base64: f.base64 || f.dataUrl.split(",")[1], w: f.w, h: f.h, bytes: f.size, name: f.name };
   } else {
     const c = document.createElement("canvas");
     c.width = w; c.height = h;
     const cg = c.getContext("2d");
+    cg.fillStyle = "#ffffff";
+    cg.fillRect(0, 0, w, h);
     cg.drawImage(img, ox, oy, w, h, 0, 0, w, h);
     // 自由框选（任意形状）：框外面的部分涂成白色，只把圈出来的商品交给 AI
     if (f.lasso && f.lasso.length > 2) {
@@ -221,7 +226,7 @@ async function prepareInput(f, opts = {}) {
       cg.fill("evenodd");
     }
     const blob = await canvasToBlob(c, "image/jpeg", 0.95);
-    base = { dataUrl: URL.createObjectURL(blob), base64: await blobToBase64(blob), w, h, bytes: blob.size, name: f.name.replace(/\.[^.]+$/, "") + ".jpg", cropped: true };
+    base = { dataUrl: URL.createObjectURL(blob), base64: await blobToBase64(blob), w, h, bytes: blob.size, name: f.name.replace(/\.[^.]+$/, "") + ".jpg", cropped: !!f.crop };
   }
   base.extras = [];
   const parts = partsInInput(f);
