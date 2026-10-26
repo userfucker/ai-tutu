@@ -111,6 +111,20 @@ try {
   await page.waitForSelector('.nmdrop a[data-nm="library"]', { state: 'visible' });
   check('左上角“工作台”：鼠标移上去弹出 8 个菜单，当前页标出来', (await page.locator('.nmdrop a').count()) === 8 && (await page.getAttribute('.nmdrop a[data-nm="main"]', 'class')).includes('on'));
   await page.mouse.move(700, 600);
+  // “自己写”：打字时服务器推送项目变化（重画页面），输入框不能丢焦点、字不能丢
+  await page.check('#customOn');
+  await page.waitForSelector('#custom:not([hidden])');
+  await page.click('#custom');
+  await page.keyboard.type('浅灰色水泥', { delay: 30 });
+  await api('POST', `/api/main/${mid}/op`, { op: 'set', fields: { count: 2 } }); // 别处改了项目 → 网页重画
+  await sleep(1200);
+  await page.keyboard.type('台面', { delay: 30 });
+  await sleep(1200);
+  check('主图“自己写”：页面重画时还能接着打字', (await page.inputValue('#custom')) === '浅灰色水泥台面' && await page.evaluate(() => document.activeElement && document.activeElement.id === 'custom'), await page.inputValue('#custom'));
+  check('主图“自己写”：写的内容存到服务器', (await api('GET', `/api/projects/${mid}`)).project.custom === '浅灰色水泥台面');
+  await page.uncheck('#customOn');
+  await api('POST', `/api/main/${mid}/op`, { op: 'set', fields: { count: 1 } });
+  await sleep(800);
   check('默认做法：AI 直接画场景、AI 自由摆放', await page.isVisible('[data-mode="scene"].on') && await page.isVisible('[data-place="free"].on'));
   await page.click('[data-sty="marble"]');
   await page.selectOption('#count', '1');

@@ -292,7 +292,7 @@
     const n = chosenStyles(p).length * (p.count || 1);
     const placeUrl = p.placeRef ? await ST.urlOf(p.placeRef) : "";
     const pend = p.items.filter((x) => x.state !== "ok"), done = p.items.filter((x) => x.state === "ok");
-    $("main").innerHTML = `
+    const html = `
       <div class="card"><div class="head"><div><h3>① 产品图</h3><div class="muted">上传白底图（白底的会自动去白底；不是白底的点“AI 抠图”）。抠好的图放在深色格子上，有没有白边一眼能看出来；手腕绳、提手围成的圈里有白色，勾“镂空的白色也抠掉”。</div></div>
         <div class="sp"><button data-act="fromLib">从素材中心选</button><button data-act="addProducts">上传产品图</button></div></div>
         <label class="row lb" style="margin-bottom:10px">产品名称（可以不填，告诉 AI 这是什么）<input id="pName" value="${esc((p.info && p.info.name) || "")}" placeholder="如：男士保温杯" style="width:240px"></label>
@@ -319,6 +319,19 @@
       ${done.length ? `<div class="card"><div class="head"><div><h3>已采用（${done.length}）</h3><div class="muted">下载的是 ${p.size}×${p.size} 的 JPG；“下载全部”里另外带一张白底图。</div></div>
         <div class="sp"><button class="primary" data-act="dlAll">下载全部（zip）</button></div></div>
         <div class="mcards">${(await Promise.all(done.map(itemCard))).join("")}</div></div>` : ""}`;
+    // 重画页面时别把正在打字的输入框弄丢（Lee 2026-10-26：“自己写”点进去就没了）：记下光标和内容，画完放回去
+    const ae = document.activeElement;
+    const keep = ae && ae.id && $("main").contains(ae) && /^(INPUT|TEXTAREA)$/.test(ae.tagName) && !/^(checkbox|radio|file|range)$/.test(ae.type)
+      ? { id: ae.id, value: ae.value, s: ae.selectionStart, e: ae.selectionEnd, top: ae.scrollTop } : null;
+    $("main").innerHTML = html;
+    const el = keep && $(keep.id);
+    if (el) {
+      el.value = keep.value;
+      el.hidden = false;
+      el.focus();
+      try { el.setSelectionRange(keep.s, keep.e); } catch {}
+      el.scrollTop = keep.top;
+    }
   }
 
   // ------------------------------------------------------------ 点击、输入
