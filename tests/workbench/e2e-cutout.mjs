@@ -100,6 +100,12 @@ try {
   // 设置 + 开始
   await page.fill('#productName', '钱包');
   await page.fill('#requirement', '黑色皮质[产品名]，拉链要清楚');
+  check('精修要求：下面显示换好产品名的完整要求', /发给 AI 的要求：黑色皮质钱包，拉链要清楚/.test(await page.textContent('#reqPreview')));
+  const roles = (await api('GET', '/api/status')).roles || {};
+  check('抠图默认只用 Copilot（AI 分工）；“用哪个 AI”默认按 AI 分工', JSON.stringify(roles.ct_draw) === '["copilot"]' && JSON.stringify(roles.mn_cut) === '["copilot"]' && JSON.stringify(roles.dt_cut) === '["copilot"]' && /默认 Copilot/.test(await page.textContent('[data-s="site"] option[value=""]')), JSON.stringify([roles.ct_draw, roles.mn_cut, roles.dt_cut]));
+  await page.selectOption('[data-s="site"]', 'gemini'); // 测试用的假插件只有 Gemini
+  await page.waitForFunction(() => document.querySelector('[data-s="site"]').value === 'gemini');
+  await page.fill('#productName', '钱包'); await page.fill('#requirement', '黑色皮质[产品名]，拉链要清楚');
   await page.selectOption('[data-s="model"]', 'Pro');
   await page.waitForFunction(() => document.querySelector('[data-s="model"]').value === 'Pro');
   await page.click('[data-act="start"]');
@@ -107,6 +113,7 @@ try {
   const asks = ai.asked.filter((a) => /a refined e-commerce product photo/.test(a.prompt));
   check('开始这一批：两张都交给 AI（服务器做），提示词带产品名、要求、配件位置、颜色', asks.length === 2 && asks.some((a) => /"钱包"/.test(a.prompt) && /黑色皮质钱包/.test(a.prompt) && /Accessories:.*\d+%/.test(a.prompt) && /#[0-9A-F]{6}/.test(a.prompt)));
   check('Gemini 模型：按设置切到 Pro', asks.every((a) => a.model === 'Pro'));
+  check('结果里的精修要求显示完整（[产品名] 换成了产品名）', (await page.locator('.job .reqfull', { hasText: '黑色皮质钱包，拉链要清楚' }).count()) === 2);
   check('做完一批自动清空精修要求和产品名', (await page.inputValue('#requirement')) === '' && (await page.inputValue('#productName')) === '');
   p = await proj();
   check('PNG 产品图：透明格子底 + PNG 角标', (await page.locator('.thumb.png .fmt').count()) === 2);

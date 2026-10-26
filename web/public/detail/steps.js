@@ -112,7 +112,7 @@
         const ratio = closestAiRatio(a.w, a.h);
         busy.set(a.id, "AI 抠图中…");
         APP.render();
-        src = await APP.aiImage(ST.P.cutout(p, a, ratio), [{ blob: orig, name: a.name }], `抠图：素材${p.assets.indexOf(a) + 1}`);
+        src = await APP.aiImage(ST.P.cutout(p, a, ratio), [{ blob: orig, name: a.name }], `抠图：素材${p.assets.indexOf(a) + 1}`, { role: "dt_cut" });
         a.white = `${p.id}:${a.id}-white`;
         await ST.saveImage(a.white, src);
       } else src = await ST.db.getBlob(a.white || a.key);

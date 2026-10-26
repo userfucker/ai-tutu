@@ -9,7 +9,9 @@ a.brandmark { text-decoration: none; color: inherit; }
 .modes button.active { background: #18181b; color: #fff; border-color: #18181b; }
 .sgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 .sgrid .f select, .sgrid .f input { width: 100%; }
-#requirement { width: 100%; margin-top: 6px; }
+#requirement { width: 100%; margin-top: 6px; resize: vertical; overflow: hidden; }
+.reqfull { white-space: pre-wrap; overflow-wrap: anywhere; }
+#reqPreview { margin-top: 4px; }
 .status { font-size: 12.5px; padding: 8px 10px; border-radius: 10px; background: #f4f4f5; margin-top: 8px; white-space: pre-wrap; }
 .status.warn { background: #fef9c3; color: #854d0e; } .status.ok { background: #dcfce7; color: #15803d; }
 .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 10px; }

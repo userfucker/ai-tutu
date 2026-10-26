@@ -53,13 +53,15 @@ export const MODULES = {
   // 详情页（Lee 2026-10-23）：多张图一起画时，在勾选的网站之间轮流分
   dt_angle: { name: "多角度图、细节特写（画图）", group: "详情页", follow: "image" },
   dt_blend: { name: "产品融入背景（画图）", group: "详情页", follow: "image" },
+  dt_cut: { name: "AI 抠图（画图，默认 Copilot）", group: "详情页", follow: "image", def: ["copilot"] },
   // 审核（原贴图和 AI 图哪张好）：默认只用豆包，豆包没连上直接报错，不换别的 AI（Lee 2026-10-24：省 AI 次数）。follow read = ai-web 1.4.0 起能发图片
   dt_check: { name: "审核融入的图（看图，默认豆包）", group: "详情页", follow: "read", def: ["doubao"], noWait: true },
   // 抠白底图（网页版，Lee 2026-10-24）
-  ct_draw: { name: "抠白底 / 精修出图（画图）", group: "抠白底图", follow: "image" },
+  // 抠图默认只用 Copilot（Lee 2026-10-26：Gemini 抠出来的透明底边角有白点，Copilot 干净）；可以在“AI 分工”里改
+  ct_draw: { name: "抠白底 / 精修出图（画图，默认 Copilot）", group: "抠白底图", follow: "image", def: ["copilot"] },
   // 主图（Lee 2026-10-23）
   mn_style: { name: "识别背景风格（看图）", group: "主图", follow: "vision" },
-  mn_cut: { name: "AI 抠图（画图）", group: "主图", follow: "image" },
+  mn_cut: { name: "AI 抠图（画图，默认 Copilot）", group: "主图", follow: "image", def: ["copilot"] },
   mn_bg: { name: "画主图背景（画图）", group: "主图", follow: "image" },
   mn_blend: { name: "产品融入背景（画图）", group: "主图", follow: "image" },
   mn_check: { name: "审核融入的图（看图，默认豆包）", group: "主图", follow: "read", def: ["doubao"], noWait: true },

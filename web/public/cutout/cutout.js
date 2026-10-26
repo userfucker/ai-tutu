@@ -21,7 +21,7 @@
     free: { label: "自由模式", locks: {}, outSizes: ["800", "1024", "original"], formats: ["jpeg", "png", "png-alpha"] },
   };
   const LABELS = { outSize: { 800: "800×800", 1024: "1K（1024）", original: "AI 原尺寸" }, format: { jpeg: "JPG", png: "PNG", "png-alpha": "PNG 透明底" } };
-  const SITES = [["", "自动（Gemini / Copilot 轮流）"], ["gemini", "只用 Gemini"], ["copilot", "只用 Copilot"]];
+  const SITES = [["", "按 AI 分工（默认 Copilot）"], ["gemini", "只用 Gemini"], ["copilot", "只用 Copilot"]];
   const blobUrl = (key) => "/api/blobs/" + encodeURIComponent(key);
   let req = "", productName = ""; // 精修要求、产品名：不保存（做完一批自动清空，和插件一样）
 
@@ -178,7 +178,7 @@
         jobs.push({ id, redoOf: redoOf ? redoOf.id : "", fileId: f.id, name: f.name, inKey, prompt: buildWebPrompt(ps, f, aiRatio, {}), aiRatio, inSize: { w: input.w, h: input.h }, req: r0, productName: n0, over });
       }
       await op({ op: "addJobs", jobs });
-      if (!redoOf) { req = ""; productName = ""; $("requirement").value = ""; $("productName").value = ""; } // 做完一批自动清空（和插件一样）
+      if (!redoOf) { req = ""; productName = ""; $("requirement").value = ""; $("productName").value = ""; reqShow(); } // 做完一批自动清空（和插件一样）
       toast(`交给服务器做 ${jobs.length} 张（关掉网页也不停）`);
     } catch (e) { toast("没开始成：" + e.message, true); }
     $("startBtn").disabled = false;
@@ -220,6 +220,7 @@
       <div class="row" style="margin-top:12px"><b>精修要求</b><select id="tplSel" style="margin-left:auto;max-width:60%"><option value="">选择精修模板…</option>${tpls.map((t, i) => `<option value="${i}">${esc(t.name)}</option>`).join("")}</select><button class="sm" data-act="tpls">管理模板</button></div>
       <div class="row" style="margin-top:6px;flex-wrap:nowrap"><span style="white-space:nowrap">这个是：</span><input id="productName" value="${esc(productName)}" placeholder="产品名称（选填，模板里的 [产品名] 会换成它）" style="flex:1"></div>
       <textarea id="requirement" rows="3" placeholder="简单描述产品：是什么、什么材质、怎么摆放的；哪些是背景（例如：放在书上的手机壳，书本是背景）。颜色不用写，需要锁定颜色请用吸管取色。">${esc(req)}</textarea>
+      <div class="muted reqfull" id="reqPreview"></div>
       <div class="sgrid">
         ${s.mode === "refine" ? `<label class="f">背景<select data-s="refineBg">${opt("original", "原图背景", s.refineBg)}${opt("white", "白底图", s.refineBg)}${opt("custom", "自定义（写在精修要求里）", s.refineBg)}</select></label>` : `<label class="f">背景${sel("background", [["white", "白底图"], ["original", "原图背景"]])}</label>`}
         <label class="f">尺寸比例${sel("ratio", [["auto", "自动（跟原图）"], ["1:1", "1:1 正方形"], ["3:4", "3:4 竖版"], ["4:3", "4:3 横版"], ["2:3", "2:3 竖版"], ["3:2", "3:2 横版"], ["4:5", "4:5 竖版"], ["5:4", "5:4 横版"], ["9:16", "9:16 竖屏"], ["16:9", "16:9 宽屏"]])}</label>
@@ -265,6 +266,7 @@
         <div class="row" style="margin-top:12px"><button class="primary grow" id="startBtn" data-act="start">开始这一批</button><button data-act="stop" ${nRun ? "" : "disabled"}>停止</button></div>
         <div class="status ${nRun ? "" : nFail ? "warn" : nDone ? "ok" : ""}" id="status"></div></div></div>
       <div class="cright" id="cright"></div></div>`;
+    reqShow();
     renderRight(jobs, nRun, nDone, nFail, selDone);
   }
   function renderRight(jobs, nRun, nDone, nFail, selDone) {
@@ -295,7 +297,7 @@
       <img src="${blobUrl(j.inKey)}" data-view="in" title="交给 AI 的图" alt="">
       ${j.outKey ? `<div class="outwrap"><img class="checker ${darkThumbs() ? "dk" : ""}" src="${blobUrl(j.outKey)}" data-view="out" title="做好的图（点一下看大图）" alt="">${isPngJob(j) ? '<button class="pe" data-act="peJob" title="钢笔选区删除、一键去白边（只能保存）">去白边</button>' : ""}</div>` : '<div class="ph">…</div>'}
       <div class="col" style="gap:3px"><div class="row"><b class="jname">${esc(j.outName || j.name)}</b>${tag}${j.w ? `<span class="tag">${j.w}×${j.h}</span>` : ""}${j.site ? `<span class="tag">${esc(j.site === "gemini" ? "Gemini" : j.site === "copilot" ? "Copilot" : j.site)}</span>` : ""}</div>
-        ${j.note ? `<div class="muted">${esc(j.note)}</div>` : ""}${j.error ? `<div class="muted bad">${esc(j.error)}</div>` : ""}${j.req ? `<div class="muted">精修要求：${esc(j.req)}</div>` : ""}
+        ${j.note ? `<div class="muted">${esc(j.note)}</div>` : ""}${j.error ? `<div class="muted bad">${esc(j.error)}</div>` : ""}${j.req ? `<div class="muted reqfull">精修要求：${esc(fillProduct(j.req, j.productName) || j.req)}</div>` : ""}
         <div class="row">${j.outKey ? `<a href="${blobUrl(j.outKey)}" download="${esc(j.outName || "结果.jpg")}"><button class="sm">下载</button></a>` : ""}${j.aiKey ? '<button class="sm" data-act="viewAi">看 AI 原图</button>' : ""}
           <button class="sm" data-act="redo" ${j.status === "queued" || j.status === "running" ? "disabled" : ""}>重做</button>${j.outKey ? '<button class="sm" data-act="useOut" title="把这张做好的图放回产品图，接着调整">拿来接着做</button>' : ""}
           <button class="sm danger" data-act="delJob">删除</button></div></div></div>`;
@@ -401,9 +403,18 @@
       op({ op: "settings", settings: set });
     }
     if (t.id === "selAll") { for (const j of P.jobs) t.checked ? sel.add(j.id) : sel.delete(j.id); render(); }
-    if (t.id === "tplSel" && t.value !== "") { const tp = tpls[+t.value]; if (tp) { req = tp.text; $("requirement").value = req; } t.value = ""; }
+    if (t.id === "tplSel" && t.value !== "") { const tp = tpls[+t.value]; if (tp) { req = tp.text; $("requirement").value = req; reqShow(); } t.value = ""; }
   });
-  document.addEventListener("input", (e) => { if (e.target.id === "requirement") req = e.target.value; if (e.target.id === "productName") productName = e.target.value; });
+  document.addEventListener("input", (e) => { if (e.target.id === "requirement") req = e.target.value; if (e.target.id === "productName") productName = e.target.value; if (e.target.id === "requirement" || e.target.id === "productName") reqShow(); });
+  /** 精修要求显示完整（Lee 2026-10-26）：输入框跟着内容变高；用了模板时下面显示换好产品名的完整要求（就是发给 AI 的那句） */
+  function reqShow() {
+    const ta = $("requirement"), pv = $("reqPreview");
+    if (ta) { ta.style.height = "auto"; ta.style.height = Math.max(ta.scrollHeight + 2, 64) + "px"; }
+    if (!pv) return;
+    const has = /[\[{【]产品名[\]}】]/.test(req);
+    pv.textContent = has ? (productName.trim() ? `发给 AI 的要求：${fillProduct(req, productName.trim())}` : "“这个是：”填上产品名，模板里的 [产品名] 会换成它（不填的话，带 [产品名] 的那句不发）") : "";
+    pv.hidden = !has;
+  }
   document.addEventListener("dragover", (e) => { if (P) e.preventDefault(); });
   document.addEventListener("drop", (e) => { if (!P) return; e.preventDefault(); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
   document.addEventListener("paste", (e) => {

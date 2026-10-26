@@ -145,7 +145,7 @@ async function stepCut(p, c) {
       ai++;
       jobs.push((async () => {
         const ratio = kit("closestAiRatio")(a.w, a.h);
-        const white = await c.image(`cut:${a.id}`, ST.P.cutout(p, a, ratio), [await c.img(a.key, a.name, 1536)], `抠图：素材${p.assets.indexOf(a) + 1}`);
+        const white = await c.image(`cut:${a.id}`, ST.P.cutout(p, a, ratio), [await c.img(a.key, a.name, 1536)], `抠图：素材${p.assets.indexOf(a) + 1}`, { role: "dt_cut" });
         a.white = `${p.id}:${a.id}-white`;
         await ST.saveImage(a.white, white);
         await makeCut(p, a, white);

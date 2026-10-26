@@ -36,7 +36,7 @@ before(async () => {
   token = /插件口令 (\w+)/.exec(out)[1];
   await api("POST", "/api/auth/setup", { password: "1234" });
   await api("PUT", "/api/roles", { roles: { text: ["gemini"], vision: ["gemini"], image: ["gemini"], dt_check: ["gemini"] } });
-  plugin = await connect(`ws://127.0.0.1:${PORT}/ext`, { token, name: "测试电脑", version: "0.8.0", app: "aitutu", sites: [{ site: "gemini", name: "Gemini", open: true, ready: true }] }, ai.onCmd);
+  plugin = await connect(`ws://127.0.0.1:${PORT}/ext`, { token, name: "测试电脑", version: "0.8.0", app: "aitutu", sites: [{ site: "gemini", name: "Gemini", open: true, ready: true }, { site: "copilot", name: "Copilot", open: true, ready: true }] }, ai.onCmd); // 抠图默认只用 Copilot
 });
 after(() => { if (plugin) plugin.close(); srv.kill(); if (process.env.KEEP) console.log("数据留在", dataDir); else fs.rmSync(dataDir, { recursive: true, force: true }); });
 

@@ -35,7 +35,7 @@ const api = async (method, url, body) => {
 await api('POST', '/api/auth/setup', { password: '1234' });
 await api('PUT', '/api/roles', { roles: { text: ['gemini'], vision: ['gemini'], image: ['gemini'] } });
 const ai = fakeDetailAI();
-const plugin = await connect(`ws://127.0.0.1:${PORT}/ext`, { token, name: '测试电脑', version: '0.8.0', app: 'aitutu', sites: [{ site: 'gemini', name: 'Gemini', open: true, ready: true }] }, ai.onCmd);
+const plugin = await connect(`ws://127.0.0.1:${PORT}/ext`, { token, name: '测试电脑', version: '0.8.0', app: 'aitutu', sites: [{ site: 'gemini', name: 'Gemini', open: true, ready: true }, { site: 'copilot', name: 'Copilot', open: true, ready: true }] }, ai.onCmd); // 抠图默认只用 Copilot
 
 const zipFile = path.join(out, '测试保温杯.zip');
 fs.writeFileSync(zipFile, tbZip());
