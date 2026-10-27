@@ -14,12 +14,16 @@
   const APP = (globalThis.APP = { project: null });
   const P = () => APP.project;
   const SIZES = [800, 1000];
-  const MODES = [["scene", "AI 直接画场景", "把产品图（铺白底）发给 AI，一步画出带产品的场景（最自然）"], ["paste", "先画背景再融入", "产品最稳：AI 画空背景，程序贴产品，AI 只调光影"], ["poster", "照参考图设计", "虚拟产品、纯文字主图：上传参考图、填行业，AI 照参考图的风格和排版画，文字 AI 自己写（避开违禁词和过度承诺）"]];
+  const MODES = [["scene", "AI 直接画场景", "把产品图（铺白底）发给 AI，一步画出带产品的场景（最自然）"], ["paste", "先画背景再融入", "产品最稳：AI 画空背景，程序贴产品，AI 只调光影"], ["poster", "文字版主图", "虚拟产品、纯文字主图：先让 AI 写文字版方案（字体、字号、文字、配色、风格），你改好了再按方案出图；参考图可选"]];
   const modeOf = (p) => (p.mode === "paste" || p.mode === "poster" ? p.mode : "scene");
   const PLACES = [["free", "AI 自由发挥", "让 AI 自己决定怎么摆（立着、平放、斜着……）"], ["same", "和产品图一样", "保持产品图里的角度和朝向"]];
   const SITES = [["", "自动（按 AI 分工轮流）"], ["gemini", "Gemini"], ["copilot", "Copilot"]];
   const ls = { get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
   let site = ls.get("st:mainSite", "");
+  // 文字版主图：写方案用哪个 AI、写几套；审核用哪个 AI（Lee 2026-10-27：放在主图页，切换方便）
+  const PLAN_SITES = [["deepseek", "DeepSeek"], ["doubao", "豆包"], ["kimi", "Kimi"], ["glm", "智谱清言"], ["gemini", "Gemini"], ["copilot", "Copilot"]];
+  const JUDGE_SITES = [["doubao", "豆包"], ["deepseek", "DeepSeek"], ["kimi", "Kimi"], ["glm", "智谱清言"]];
+  let planSite = ls.get("st:planSite", "doubao"), planCount = +ls.get("st:planCount", "3") || 3, judgeSite = ls.get("st:judgeSite", "doubao");
   let myStyles = []; // [{ id, name, desc, prompt, ref }]
   const thumbs = new Map(); // 主图编号 → { sig, url }
 
@@ -133,6 +137,16 @@
   async function generate() {
     // 刚打的字（行业、想用的信息……）还没存的，先存上
     if (Object.keys(setPend).length) { clearTimeout(setT); const f = setPend; setPend = {}; await op({ op: "set", fields: f }); }
+    // 文字版主图勾了“附上草图”：每套方案先画一张草图存起来，出图时一起发给 AI
+    const p0 = P();
+    if (p0.mode === "poster" && p0.sketch) {
+      for (const pl of (p0.plans || []).filter((x) => x.on !== false)) {
+        const key = `${p0.id}:sketch-${pl.id || ST.uid("pl")}-${Date.now()}`;
+        await ST.saveImage(key, await ST.toBlob(await renderSketch(pl, 800), "image/jpeg", 0.92));
+        pl.sketchKey = key;
+      }
+      await op({ op: "set", fields: { plans: p0.plans } });
+    }
     const p = await op({ op: "generate", site });
     if (p) APP.toast("开始做了，画好放在“待确认”里（在服务器上做，关掉网页也不停）");
   }
@@ -245,6 +259,113 @@
     if (bg && bl && bg !== bl) return `背景 ${bg} · 融入 ${bl}`;
     return bg || bl;
   }
+  // ------------------------------------------------------------ 文字版方案：表格（方案 A），每一格都能改
+  const PLAN_FONTS = ["黑体", "圆体", "宋体", "楷体", "手写体", "综艺体"], PLAN_WEIGHTS = ["常规", "中粗", "粗", "特粗"];
+  function planCard(pl, i, p) {
+    const f = (k, label, wide) => `<label class="pf ${wide ? "wide" : ""}"><span>${label}</span><input id="pl${i}_${k}" data-pf="${i}|${k}" value="${esc(pl[k] || "")}"></label>`;
+    const hitsAll = (pl.blocks || []).flatMap((b) => ST.banHits(b.text, p.posterBan));
+    const opt = (list, v) => list.map((x) => `<option ${x === v ? "selected" : ""}>${x}</option>`).join("");
+    return `<div class="plan ${pl.on === false ? "off" : ""}" data-plan="${i}">
+      <div class="row ph"><label class="row"><input type="checkbox" data-pf="${i}|on" ${pl.on !== false ? "checked" : ""}> 用这套</label>
+        <b>方案 ${i + 1}</b><input class="ptheme" id="pl${i}_theme" data-pf="${i}|theme" value="${esc(pl.theme || "")}" title="这张图讲什么">
+        ${pl.by ? `<span class="tag">${esc((PLAN_SITES.find((x) => x[0] === pl.by) || [0, pl.by])[1])} 写的</span>` : ""}
+        <span class="tag bad" id="pl${i}_ban" ${hitsAll.length ? "" : "hidden"}>有禁用词：${esc([...new Set(hitsAll)].join("、"))}</span>
+        <span class="sp row"><button class="sm" data-act="planSketch" title="程序按方案画一张平面草图，看字的位置、大小、颜色对不对">看草图</button><button class="sm danger" data-act="planDel">删除方案</button></span></div>
+      <div class="pgrid2">${f("style", "风格")}${f("colors", "色系")}
+        <label class="pf"><span>底色</span><span class="row"><input type="color" id="pl${i}_bgColor" data-pf="${i}|bgColor" value="${esc(pl.bgColor || "#f2f4f7")}"> → <input type="color" id="pl${i}_bgColor2" data-pf="${i}|bgColor2" value="${esc(pl.bgColor2 || pl.bgColor || "#ffffff")}"></span></label>
+        ${f("background", "背景", true)}${f("layout", "版式", true)}${f("icons", "图标 / 装饰", true)}${f("note", "补充说明", true)}</div>
+      <table class="ptable"><thead><tr><th>位置</th><th>文字</th><th>字体</th><th>粗细</th><th>字号</th><th>上下位置 %</th><th>颜色</th><th>效果</th><th>底色</th><th></th></tr></thead><tbody>
+        ${(pl.blocks || []).map((b, j) => {
+          const id = (k) => `id="pl${i}_b${j}_${k}" data-pf="${i}|${j}|${k}"`;
+          const hits = ST.banHits(b.text, p.posterBan);
+          return `<tr data-row="${j}"><td><input ${id("pos")} value="${esc(b.pos || "")}" class="w6"></td>
+            <td><input ${id("text")} value="${esc(b.text || "")}" class="w14 ${hits.length ? "banhit" : ""}" title="${hits.length ? "禁用词：" + esc(hits.join("、")) : ""}"></td>
+            <td><select ${id("font")}>${opt(PLAN_FONTS, b.font || "黑体")}</select></td><td><select ${id("weight")}>${opt(PLAN_WEIGHTS, b.weight || "粗")}</select></td>
+            <td><input type="number" ${id("size")} value="${+b.size || 40}" min="12" max="200" class="w4"></td><td><input type="number" ${id("y")} value="${+b.y || 50}" min="2" max="98" class="w4"></td>
+            <td><input type="color" ${id("color")} value="${esc(b.color || "#333333")}"></td><td><input ${id("effect")} value="${esc(b.effect || "")}" class="w8"></td>
+            <td><input ${id("bg")} value="${esc(b.bg || "")}" placeholder="无" class="w6"></td><td><button class="sm ghost" data-act="planDelRow" title="删掉这一行">✕</button></td></tr>`;
+        }).join("")}</tbody></table>
+      <button class="sm" data-act="planAddRow" style="margin-top:6px">＋ 加一行文字</button>
+      <div class="muted" style="margin-top:4px">字号按 800×800 算（像素）；上下位置 = 这行字的中心在画面从上往下的位置；同一个上下位置的几行会排成一排（比如三个标签）。</div></div>`;
+  }
+  /** 改方案里的一格：直接改项目里的数据，半秒后保存；文字改了马上重新查禁用词 */
+  function planEdit(t) {
+    const [i, a, b] = t.dataset.pf.split("|");
+    const pl = P().plans && P().plans[+i];
+    if (!pl) return;
+    const v = t.type === "checkbox" ? t.checked : t.type === "number" ? +t.value : t.value;
+    if (b) pl.blocks[+a][b] = v; else pl[a] = v;
+    setSoon({ plans: P().plans });
+    if (t.type === "checkbox") render();
+    if (b === "text") banRefresh();
+  }
+  function banRefresh() {
+    const p = P();
+    (p.plans || []).forEach((pl, i) => {
+      const all = [];
+      (pl.blocks || []).forEach((b, j) => {
+        const el = $(`pl${i}_b${j}_text`);
+        const h = ST.banHits(b.text, p.posterBan);
+        all.push(...h);
+        if (el) { el.classList.toggle("banhit", !!h.length); el.title = h.length ? "禁用词：" + h.join("、") : ""; }
+      });
+      const tag = $(`pl${i}_ban`);
+      if (tag) { tag.hidden = !all.length; tag.textContent = `有禁用词：${[...new Set(all)].join("、")}`; }
+    });
+  }
+  /**
+   * 草图：程序按方案画的平面图——字、位置、大小、颜色都照方案（字一定对），没有质感、光影和图标。
+   * 用来先看布局；勾“附上草图”时一起发给 AI，让它照着排版再做精致。
+   */
+  async function renderSketch(pl, px = 800) {
+    const c = document.createElement("canvas");
+    c.width = c.height = px;
+    const g = c.getContext("2d");
+    const k = px / 800;
+    const gr = g.createLinearGradient(0, 0, 0, px);
+    gr.addColorStop(0, pl.bgColor || "#f2f4f7"); gr.addColorStop(1, pl.bgColor2 || pl.bgColor || "#ffffff");
+    g.fillStyle = gr; g.fillRect(0, 0, px, px);
+    const fam = (f) => (/宋|楷/.test(f || "") ? '"Noto Serif SC", serif' : '"Noto Sans SC", sans-serif');
+    const wt = (w) => ({ 常规: 400, 中粗: 500, 粗: 700, 特粗: 900 })[w] || 700;
+    const blocks = (pl.blocks || []).filter((b) => String(b.text || "").trim());
+    try { await Promise.all(blocks.map((b) => document.fonts.load(`${wt(b.weight)} ${Math.round((+b.size || 40) * k)}px ${fam(b.font)}`, b.text))); } catch {}
+    // 上下位置差不多的几块排成一排
+    const rows = [];
+    for (const b of [...blocks].sort((x, y) => (+x.y || 50) - (+y.y || 50))) {
+      const r = rows.find((r) => Math.abs(r.y - (+b.y || 50)) < 3);
+      r ? r.items.push(b) : rows.push({ y: +b.y || 50, items: [b] });
+    }
+    for (const r of rows) {
+      const cy = (r.y / 100) * px, n = r.items.length;
+      r.items.forEach((b, idx) => {
+        let size = (+b.size || 40) * k;
+        const font = () => `${wt(b.weight)} ${size}px ${fam(b.font)}`;
+        g.font = font();
+        const maxW = (px * 0.92) / n;
+        while (g.measureText(b.text).width > maxW && size > 10) { size -= 1; g.font = font(); }
+        const w = g.measureText(b.text).width, cx = (px / n) * (idx + 0.5);
+        const ef = b.effect || "";
+        g.save();
+        if (/横条|底条|横幅|通栏/.test(ef)) { g.fillStyle = b.bg || "#1d4ed8"; g.fillRect(0, cy - size * 0.95, px, size * 1.9); }
+        else if (/框|标签|胶囊|底块|色块/.test(ef) || b.bg) {
+          const pw = w + size * 1.2, ph = size * 1.6, x = cx - pw / 2, y = cy - ph / 2, rr = ph / 2;
+          g.beginPath(); g.roundRect ? g.roundRect(x, y, pw, ph, rr) : g.rect(x, y, pw, ph);
+          if (b.bg) { g.fillStyle = b.bg; g.fill(); }
+          if (/虚线/.test(ef)) { g.setLineDash([6 * k, 5 * k]); g.lineWidth = 2 * k; g.strokeStyle = b.color || "#333"; g.stroke(); }
+          else if (!b.bg) { g.lineWidth = 2 * k; g.strokeStyle = b.color || "#333"; g.stroke(); }
+        }
+        g.restore();
+        g.save();
+        g.font = font(); g.textAlign = "center"; g.textBaseline = "middle";
+        if (/阴影/.test(ef)) { g.shadowColor = "rgba(0,0,0,.25)"; g.shadowOffsetY = size * 0.06; g.shadowBlur = size * 0.12; }
+        if (/描边/.test(ef)) { g.lineJoin = "round"; g.lineWidth = size * 0.14; g.strokeStyle = /黑色描边|深色描边/.test(ef) ? "#222" : "#fff"; g.strokeText(b.text, cx, cy); }
+        g.fillStyle = b.color || "#333"; g.fillText(b.text, cx, cy);
+        g.restore();
+      });
+    }
+    return c;
+  }
+
   async function itemCard(it) {
     const st = it.job || "";
     const poster = it.mode === "poster";
@@ -283,7 +404,7 @@
     const aiTag = whoDrew(it);
     return `<div class="mcard" data-iid="${it.id}">
       <div class="pic" data-act="view">${url ? `<img src="${url}" alt="">` : ""}${st ? `<span class="st tag ${/失败/.test(st) ? "bad" : "blue"}">${esc(st)}</span>` : ""}</div>
-      <div class="row"><b>${esc(it.styleName)}${poster ? ' <span class="muted">照参考图</span>' : scene ? ' <span class="muted">AI 直接画</span>' : ""}</b>${aiTag ? `<span class="tag aisite" title="哪个 AI 画的">${esc(aiTag)}</span>` : ""}${it.doneAt || it.t ? `<span class="tag mtime" title="${it.doneAt ? "画好的时间" : "开始画的时间"}（北京时间）">${it.doneAt ? "" : "提交 "}${ST.bj(it.doneAt || it.t, true)}</span>` : ""}${has ? `<span class="sp pills"><span class="pill ${hm.on ? "on" : ""}" data-act="harmView" data-v="1">AI 图</span><span class="pill ${hm.on ? "" : "on"}" data-act="harmView" data-v="0">原贴图</span></span>` : ""}</div>
+      <div class="row"><b>${esc(it.styleName)}${poster ? ' <span class="muted">文字版</span>' : scene ? ' <span class="muted">AI 直接画</span>' : ""}</b>${aiTag ? `<span class="tag aisite" title="哪个 AI 画的">${esc(aiTag)}</span>` : ""}${it.doneAt || it.t ? `<span class="tag mtime" title="${it.doneAt ? "画好的时间" : "开始画的时间"}（北京时间）">${it.doneAt ? "" : "提交 "}${ST.bj(it.doneAt || it.t, true)}</span>` : ""}${has ? `<span class="sp pills"><span class="pill ${hm.on ? "on" : ""}" data-act="harmView" data-v="1">AI 图</span><span class="pill ${hm.on ? "" : "on"}" data-act="harmView" data-v="0">原贴图</span></span>` : ""}</div>
       ${line ? `<div class="muted ${warn ? "warntext" : ""}">${esc(line)}</div>` : ""}
       <div class="acts">
         <button class="sm" data-act="dlOne" ${ready ? "" : "disabled"}>下载</button>
@@ -335,19 +456,28 @@
     const sel = new Set(p.styles || []);
     const myPills = await Promise.all(myStyles.map(async (s) => `<span class="stypill ${sel.has("my:" + s.id) ? "on" : ""}" data-sty="my:${s.id}" title="${esc(s.desc || s.prompt)}">${s.ref ? `<img src="${await ST.urlOf(s.ref)}" alt="">` : ""}${esc(s.name)}<span class="x" data-act="delStyle" data-sid="${s.id}" title="删除这个风格">✕</span></span>`));
     const poster = p.mode === "poster";
-    const n = poster ? Math.min(6, p.count || 1) : chosenStyles(p).length * (p.count || 1);
-    const canGo = poster ? (p.posterRefs || []).length && String(p.industry || "").trim() : n && curProduct();
-    // 照参考图设计（Lee 2026-10-27）：参考图 + 行业 + 想用的信息
+    const plansOn = (p.plans || []).filter((x) => x.on !== false);
+    const n = poster ? plansOn.length * Math.min(3, p.perPlan || 1) : chosenStyles(p).length * (p.count || 1);
+    const canGo = poster ? plansOn.length && !/中$/.test(p.planJob || "") : n && curProduct();
+    // 文字版主图（Lee 2026-10-27）：① 参考图（可选）② 写方案（AI 写、人改）③ 按方案出图
     const refCells = poster ? await Promise.all((p.posterRefs || []).map(async (r) => `<div class="mcard pref" data-pkey="${esc(r.key)}"><div class="pic" data-act="viewPosterRef"><img src="${await ST.urlOf(r.key)}" alt=""></div><div class="row"><span class="muted pname" title="${esc(r.name)}">${esc(r.name)}</span><button class="sm danger" data-act="delPosterRef">删除</button></div></div>`)) : [];
+    const content = p.posterContent != null ? p.posterContent : [p.industry, p.posterNote].filter(Boolean).join("；");
     const posterHtml = poster ? `
-      <div class="card"><div class="head"><div><h3>① 参考图</h3><div class="muted">上传 1～3 张你觉得好的主图。AI 学它的风格和排版（配色、字体感觉、标题 / 标签 / 底部横条的位置和大小），不会照抄上面的字。</div></div>
+      <div class="card"><div class="head"><div><h3>① 参考图（可以不放）</h3><div class="muted">放 1～3 张你觉得好的主图，写方案和出图时都让 AI 学它的风格和排版，不照抄上面的字。</div></div>
         <div class="sp"><button data-act="posterFromLib">从素材中心选</button><button data-act="posterUpload">上传参考图</button></div></div>
-        ${refCells.length ? `<div class="mcards">${refCells.join("")}</div>` : '<div class="empty">还没有参考图。点右上角“上传参考图”或“从素材中心选”（最多 3 张）。</div>'}</div>
-      <div class="card"><h3>② 你做的行业 / 产品</h3>
-        <label class="row lb" style="margin-top:8px">行业 / 产品 <input id="industry" value="${esc(p.industry || "")}" placeholder="如：远程安装电脑系统" style="flex:1;max-width:420px"></label>
-        <div class="lb" style="margin-top:10px">想用的信息（可以不填；卖点、服务内容、版本、售后……AI 挑合适的写，字会尽量少）</div>
-        <textarea id="posterNote" rows="2" placeholder="如：支持 Win7 / Win10 / Win11；远程一对一；U 盘启动盘制作；硬盘分区；装不好不收费">${esc(p.posterNote || "")}</textarea>
-        <div class="muted" style="margin-top:6px">手机上“一眼见”：大标题最多两行、每行不超过 8 个字，整张图大约 30 个字以内；自动避开广告法违禁词（最、第一、唯一、100%……）和过度承诺（保证、包过、根治……），不写联系方式。</div></div>` : "";
+        ${refCells.length ? `<div class="mcards">${refCells.join("")}</div>` : '<div class="empty">还没有参考图（可以不放）。点右上角“上传参考图”或“从素材中心选”，也可以拖进来、Ctrl+V。</div>'}</div>
+      <div class="card"><div class="head"><div><h3>② 文字版方案</h3><div class="muted">先让 AI 写方案（字体、字号、文字、配色、风格、版式），你改好了再出图，效果好控制。</div></div></div>
+        <div class="lb">要表达的内容（卖什么、卖点、服务、售后……）</div>
+        <textarea id="posterContent" rows="2" placeholder="如：远程安装电脑系统，纯净原版，支持 Win7 / Win10 / Win11，远程一对一，U 盘启动盘制作，硬盘分区，装不好不收费">${esc(content)}</textarea>
+        <label class="row lb" style="margin-top:8px">禁止出现的词（逗号隔开） <input id="posterBan" value="${esc(p.posterBan || "")}" placeholder="如：秒装, 包售后, 某某品牌" style="flex:1"></label>
+        <div class="muted" style="margin-top:4px">广告法违禁词和过度承诺（${ST.BAN_WORDS.slice(0, 8).join("、")}……）默认就禁，不用填。</div>
+        <div class="row" style="margin-top:10px;gap:10px;flex-wrap:wrap">
+          <label class="row lb">写方案用 <select id="planSite">${PLAN_SITES.map(([v, t]) => `<option value="${v}" ${v === planSite ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+          <label class="row lb">写 <select id="planCount">${[1, 2, 3, 4, 5, 6].map((k) => `<option ${planCount === k ? "selected" : ""}>${k}</option>`).join("")}</select> 套</label>
+          <button class="primary" data-act="writePlans" ${/中$/.test(p.planJob || "") ? "disabled" : ""}>AI 写方案</button>
+          ${p.planJob ? `<span class="tag ${/失败/.test(p.planJob) ? "bad" : "blue"}">${esc(p.planJob)}</span>` : ""}
+          ${planSite === "deepseek" && (p.posterRefs || []).length ? '<span class="muted warntext">DeepSeek 看不懂参考图的风格（只能认字），有参考图时建议用豆包、Kimi、Gemini、Copilot</span>' : ""}</div>
+        ${(p.plans || []).length ? `<div class="plans">${p.plans.map((pl, i) => planCard(pl, i, p)).join("")}</div>` : '<div class="empty" style="margin-top:10px">还没有方案。填好“要表达的内容”，点“AI 写方案”。</div>'}</div>` : "";
     const placeUrl = p.placeRef ? await ST.urlOf(p.placeRef) : "";
     const pend = p.items.filter((x) => x.state !== "ok"), done = p.items.filter((x) => x.state === "ok");
     const html = `
@@ -365,13 +495,14 @@
         <span class="lb">做法</span><span class="pills">${MODES.map(([v, t, tip]) => `<span class="pill ${modeOf(p) === v ? "on" : ""}" data-mode="${v}" title="${esc(tip)}">${t}</span>`).join("")}</span>
         <span class="lb">尺寸</span><span class="pills">${SIZES.map((s) => `<span class="pill ${p.size === s ? "on" : ""}" data-size="${s}">${s}×${s}</span>`).join("")}</span>
         ${modeOf(p) === "scene" ? `<span class="lb">摆放</span><span class="pills">${PLACES.map(([v, t, tip]) => `<span class="pill ${(p.placement || "free") === v ? "on" : ""}" data-place="${v}" title="${esc(tip)}">${t}</span>`).join("")}${p.placeRef ? `<span class="pill ${p.placement === "ref" ? "on" : ""}" data-place="ref" title="照这张图里的摆法"><img src="${esc(placeUrl)}" class="placeimg" alt="">照“${esc(p.placeRefName || "")}”那张摆<span class="x" data-act="clearPlace" title="不用这张了">✕</span></span>` : ""}</span>` : ""}
-        ${poster ? `<label class="row lb">内容 <select id="posterTheme"><option value="set" ${p.posterTheme !== "hero" ? "selected" : ""}>一套主图（每张一个重点：${ST.POSTER_THEMES.map((t) => t.name).join(" / ")}）</option><option value="hero" ${p.posterTheme === "hero" ? "selected" : ""}>都画第 1 张（核心卖点，多出几张对比）</option></select></label>` : ""}
-        <label class="row lb">${poster ? "一共" : "每种风格"} <select id="count">${[1, 2, 3, 4, 5, 6].map((k) => `<option ${(p.count || 1) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张</label>
+        ${poster ? `<label class="row lb">每套方案出 <select id="perPlan">${[1, 2, 3].map((k) => `<option ${(p.perPlan || 1) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张</label>
+        <label class="row lb" title="程序按方案画一张平面草图（字、位置、大小、颜色都准，但没有质感和图标），一起发给 AI，让它照草图排版"><input type="checkbox" id="sketch" ${p.sketch ? "checked" : ""}> 附上草图（让 AI 照草图排版）</label>` : `<label class="row lb">每种风格 <select id="count">${[1, 2, 3, 4, 5, 6].map((k) => `<option ${(p.count || 1) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张</label>`}
         ${p.mode !== "paste" ? "" : `<label class="row lb">产品大小 <input type="range" id="scale" min="40" max="95" value="${Math.round((p.scale || 0.85) * 100)}"><span id="scaleV">${Math.round((p.scale || 0.85) * 100)}%</span></label>
         <label class="row lb"><input type="checkbox" id="blend" ${p.blend !== false ? "checked" : ""}> 融入背景（AI 只调光影）</label>`}
-        <label class="row lb">用哪个 AI <select id="site">${SITES.map(([v, t]) => `<option value="${v}" ${v === site ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+        <label class="row lb">审核用 <select id="judgeSite">${JUDGE_SITES.map(([v, t]) => `<option value="${v}" ${v === judgeSite ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+        <label class="row lb">${poster ? "出图用" : "用哪个 AI"} <select id="site">${SITES.map(([v, t]) => `<option value="${v}" ${v === site ? "selected" : ""}>${t}</option>`).join("")}</select></label>
         <button class="primary" data-act="generate" ${canGo ? "" : "disabled"}>生成 ${n} 张</button></div>
-        <div class="note" style="margin-top:10px">${poster ? "照参考图设计：每张都把参考图发给 AI，让它照参考图的风格和排版、按你的行业自己写字来画。AI 画字偶尔会错，点图片下面的“AI 审核”让审核 AI 读一遍图上的字，查违禁词、错字。" : p.mode !== "paste" ? "AI 直接画：把抠好的产品图（铺白底）发给 AI，一步画出带产品的场景，最自然；产品可能被 AI 改一点，不放心就点图片下面的“AI 审核”。喜欢哪张的摆法，点那张的“用这个摆放”。" : "先画背景再融入：AI 画空背景 → 程序把抠好的 PNG 贴到中间 → AI 调光影融入，直接显示 AI 图（原贴图留着可以切换，想让 AI 判断哪张好点“AI 审核”）。"}
+        <div class="note" style="margin-top:10px">${poster ? "文字版主图：勾上的方案每套出几张，方案里的字一字不差地交给 AI 画（参考图、草图可选）。AI 画字偶尔会错，点图片下面的“AI 审核”，让审核 AI 对照方案读一遍图上的字。" : p.mode !== "paste" ? "AI 直接画：把抠好的产品图（铺白底）发给 AI，一步画出带产品的场景，最自然；产品可能被 AI 改一点，不放心就点图片下面的“AI 审核”。喜欢哪张的摆法，点那张的“用这个摆放”。" : "先画背景再融入：AI 画空背景 → 程序把抠好的 PNG 贴到中间 → AI 调光影融入，直接显示 AI 图（原贴图留着可以切换，想让 AI 判断哪张好点“AI 审核”）。"}
           在服务器上做，关掉网页也不停。${poster ? "" : "默认不加文字。"}</div></div>
       ${pend.length ? `<div class="card pendbox"><div class="head"><div><h3>待确认（${pend.length}）</h3><div class="muted">看过点“采用”；不满意可以调整产品、重新融入、重画背景，或者不要。</div></div></div>
         <div class="mcards">${(await Promise.all(pend.map(itemCard))).join("")}</div></div>` : ""}
@@ -458,7 +589,23 @@
     reblend: (el) => op({ op: "reblend", iid: itemOf(el).id, site }),
     redraw: (el) => op({ op: "redraw", iid: itemOf(el).id, site }),
     delItem: (el) => op({ op: "delItem", iid: itemOf(el).id }),
-    judge: (el) => op({ op: "judge", iid: itemOf(el).id }),
+    judge: (el) => op({ op: "judge", iid: itemOf(el).id, site: judgeSite }),
+    // 文字版方案
+    writePlans: async () => {
+      const p = P();
+      if (Object.keys(setPend).length) { clearTimeout(setT); const f = setPend; setPend = {}; await op({ op: "set", fields: f }); }
+      if (!String(p.posterContent || p.industry || "").trim() && !(p.posterRefs || []).length) return APP.toast("先写“要表达的内容”（或者放参考图）", true);
+      if ((p.plans || []).length && !(await confirm("重新写会替换现在的方案（你改过的也会没了），继续吗？", "重新写"))) return;
+      op({ op: "writePlans", site: planSite, n: planCount });
+    },
+    planSketch: async (el) => {
+      const pl = P().plans[+el.closest("[data-plan]").dataset.plan];
+      const c = await renderSketch(pl, 800);
+      VIEWER.open([{ src: URL.createObjectURL(await ST.toBlob(c, "image/png")), name: `草图：${pl.theme}`, png: false, info: "程序按方案画的平面草图：字、位置、大小、颜色都准，没有质感和图标（那些由 AI 画）" }], 0);
+    },
+    planDel: async (el) => { const i = +el.closest("[data-plan]").dataset.plan; if (!(await confirm("删除这套方案？", "删除", true))) return; const plans = P().plans.filter((_, k) => k !== i); setFields({ plans }); render(); },
+    planAddRow: (el) => { const pl = P().plans[+el.closest("[data-plan]").dataset.plan]; pl.blocks.push({ pos: "文字", text: "", font: "黑体", weight: "粗", size: 40, y: 60, color: "#333333", effect: "", bg: "" }); setFields({ plans: P().plans }); render(); },
+    planDelRow: (el) => { const pl = P().plans[+el.closest("[data-plan]").dataset.plan]; pl.blocks.splice(+el.closest("[data-row]").dataset.row, 1); setFields({ plans: P().plans }); render(); },
     placeRef: async (el) => { const p = await op({ op: "placeRef", iid: itemOf(el).id }); if (p) APP.toast("以后“AI 直接画场景”都照这张的摆法放（在“③ 生成 → 摆放”里可以改回去）"); },
     clearPlace: (el, e) => { e.stopPropagation(); op({ op: "placeRef", clear: true }); },
     // 看大图（滚轮缩放、拖动、← → 切换所有画好的主图）
@@ -470,7 +617,7 @@
       const out = [];
       for (const it of list) {
         const c = await compose(it, 1000);
-        out.push({ src: URL.createObjectURL(await ST.toBlob(c.canvas, "image/jpeg", 0.92)), name: `${it.styleName}（${it.mode === "poster" ? "照参考图" : it.mode === "scene" ? "AI 直接画" : c.used ? "AI 图" : "原贴图"}）${whoDrew(it) ? " · " + whoDrew(it) : ""}`, png: false });
+        out.push({ src: URL.createObjectURL(await ST.toBlob(c.canvas, "image/jpeg", 0.92)), name: `${it.styleName}（${it.mode === "poster" ? "文字版" : it.mode === "scene" ? "AI 直接画" : c.used ? "AI 图" : "原贴图"}）${whoDrew(it) ? " · " + whoDrew(it) : ""}`, png: false });
       }
       VIEWER.open(out, list.indexOf(it0));
     },
@@ -545,8 +692,9 @@
     if (t.id === "projName") { if (!p.fixedName) setSoon({ name: t.value }); }
     else if (t.id === "pName") setSoon({ info: { ...(p.info || {}), name: t.value } });
     else if (t.id === "custom") setSoon({ custom: t.value });
-    else if (t.id === "industry") setSoon({ industry: t.value });
-    else if (t.id === "posterNote") setSoon({ posterNote: t.value });
+    else if (t.id === "posterContent") setSoon({ posterContent: t.value });
+    else if (t.id === "posterBan") { setSoon({ posterBan: t.value }); banRefresh(); }
+    else if (t.dataset.pf && t.tagName !== "SELECT" && t.type !== "checkbox") planEdit(t);
     else if (t.id === "scale") { $("scaleV").textContent = t.value + "%"; setSoon({ scale: +t.value / 100 }); }
   });
   document.addEventListener("change", (e) => {
@@ -555,7 +703,12 @@
     const t = e.target;
     if (t.id === "customOn") setFields({ customOn: t.checked });
     else if (t.id === "count") setFields({ count: +t.value });
-    else if (t.id === "posterTheme") setFields({ posterTheme: t.value });
+    else if (t.id === "perPlan") setFields({ perPlan: +t.value });
+    else if (t.id === "sketch") setFields({ sketch: t.checked });
+    else if (t.id === "planSite") { planSite = t.value; ls.set("st:planSite", planSite); render(); }
+    else if (t.id === "planCount") { planCount = +t.value; ls.set("st:planCount", String(planCount)); }
+    else if (t.id === "judgeSite") { judgeSite = t.value; ls.set("st:judgeSite", judgeSite); }
+    else if (t.dataset.pf) planEdit(t);
     else if (t.id === "blend") setFields({ blend: t.checked });
     else if (t.dataset.holes !== undefined) op({ op: "holes", prid: prodOf(t).id, holes: t.checked });
     else if (t.id === "site") { site = t.value; ls.set("st:mainSite", site); }

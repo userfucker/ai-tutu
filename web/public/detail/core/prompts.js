@@ -308,11 +308,56 @@ ST.P = (() => {
         "Reply with the image only.",
       ].filter(Boolean).join("\n");
     },
-    /** 审核“照参考图设计”的主图：读出图上的字，查违禁词、过度承诺、错字、手机上看不看得清 */
-    posterCheck(p) {
+    /**
+     * 文字版主图第一步（Lee 2026-10-27）：AI 写“文字版方案”，人改好了再出图。
+     * 字号按 800×800 的画布算（像素），y = 这块字的中心在画面从上往下的百分比。
+     */
+    posterPlan(p, n, hasRefs) {
+      const ban = ST.banList(p.posterBan);
       return [
-        `这是一张电商主图（行业：${String(p.industry || "").trim() || "未填"}），图上的字是 AI 画的。请：`,
+        `请为一款电商商品设计 ${n} 套淘宝 / 天猫主图（正方形 800×800）的“文字版方案”。${hasRefs ? "附上的图片是参考图：学它的风格和排版（配色、字体感觉、标题 / 标签 / 底部横条的位置和大小），但文字不要照抄。" : ""}`,
+        `【要表达的内容】${String(p.posterContent != null ? p.posterContent : [p.industry, p.posterNote].filter(Boolean).join("；")).trim() || "（没写，按参考图的行业来）"}`,
+        n > 1 ? `每套方案讲一个重点，依次是：${ST.POSTER_THEMES.slice(0, n).map((t) => t.name).join("、")}。` : "这套方案讲核心卖点（吸引点击的第一张主图）。",
+        "要求：",
+        "1. 手机上“一眼见”：大标题最大、最醒目，最多两行、每行不超过 8 个字；整张图最多 4～6 块文字、一共大约 30 个字以内；文字和背景对比要强，不要小字、密字。",
+        `2. 不能用广告法违禁词和过度承诺：${ban.join("、")}；不写联系方式、价格（除非内容里给了）、别的品牌。`,
+        "3. 字体从这些里选：黑体、圆体、宋体、楷体、手写体、综艺体；粗细写：常规 / 中粗 / 粗 / 特粗。",
+        "4. 字号按 800×800 的画布写像素：大标题一般 80～120，副标题 36～50，标签 28～40，底部横条文字 40～56。",
+        "5. y 是这块字的中心在画面从上往下的位置（0～100，单位 %）；颜色用 #RRGGBB；effect 写效果（如：白色描边、浅阴影、圆角底框、虚线圆角框、深色底横条、无）；bg 是这块字底下色块 / 横条 / 底框的颜色，没有就写空字符串。",
+        "只回复一个 JSON 代码块，格式：",
+        '{"plans":[{"theme":"核心卖点","style":"科技简约，干净明亮","colors":"主色 宝蓝 #2B5BFF；强调色 橙 #FF7A1A；文字 深灰 #333333","bgColor":"#F2F4F7","bgColor2":"#FFFFFF","background":"浅灰到白的渐变，右下角淡淡的电路线条","layout":"上：小标签；中：两行大标题；下：三个圆角标签；底部：深蓝横条","icons":"左下一个电脑图标","blocks":[{"pos":"顶部标签","text":"纯净原版 不带捆绑软件","font":"黑体","weight":"中粗","size":34,"y":12,"color":"#333333","effect":"虚线圆角框","bg":""}]}]}',
+      ].join("\n");
+    },
+    /** 文字版主图第二步：按改好的方案出图（文字一字不差） */
+    posterFromPlan(p, plan, o = {}) {
+      const blocks = (plan.blocks || []).filter((b) => String(b.text || "").trim());
+      const pct = (v) => Math.round((+v || 0) / 8); // 800 画布的像素 → 占画面宽度的百分比
+      const ban = ST.banList(p.posterBan);
+      return [
+        "Generate one image: a square 1:1 e-commerce main image (Taobao / Tmall listing image) following EXACTLY the design spec below (written in Chinese).",
+        o.refs ? `- The reference image${o.refs > 1 ? "s" : ""} (the first ${o.refs} uploaded) show the visual style to follow (colors, font feel, decorations); do not copy their words.` : "",
+        o.sketch ? `- The ${o.refs ? "last" : "only"} uploaded image is a flat layout sketch made from this spec: keep the same text, positions, sizes and colors, but turn it into a polished, professional design (better typography, depth, icons, background details).` : "",
+        `- Style: ${plan.style || ""}`,
+        `- Colors: ${plan.colors || ""}; background base ${plan.bgColor || ""}${plan.bgColor2 ? " → " + plan.bgColor2 : ""}`,
+        `- Background: ${plan.background || ""}`,
+        `- Layout: ${plan.layout || ""}`,
+        plan.icons ? `- Icons / decorations (no text in them): ${plan.icons}` : "",
+        "- Text blocks — render EXACTLY these Chinese texts, character for character, and NO other text anywhere:",
+        ...blocks.map((b, i) => `  ${i + 1}. [${b.pos || ""}] 「${String(b.text).trim()}」 — font: ${b.font || "黑体"} ${b.weight || ""}; character height about ${pct(b.size)}% of the image width; vertical center at ${+b.y || 50}% from the top; color ${b.color || ""}${b.effect && b.effect !== "无" ? "; effect: " + b.effect : ""}${b.bg ? "; on a " + b.bg + " shape" : ""}`),
+        plan.note ? `- Extra notes (Chinese): ${plan.note}` : "",
+        "- Every Chinese character must be correct, complete, standard Simplified Chinese: no typos, no missing strokes, no garbled or made-up characters, no extra English or filler text, no watermark, no logos of other brands.",
+        `- Never add any of these words: ${ban.join(", ")}.`,
+        "- Mobile one-glance: big, bold, high-contrast headline; nothing small or crowded.",
+        "Reply with the image only.",
+      ].filter(Boolean).join("\n");
+    },
+    /** 审核“照参考图设计”的主图：读出图上的字，查违禁词、过度承诺、错字、手机上看不看得清；有方案就对照方案里的字 */
+    posterCheck(p, plan) {
+      const want = plan ? (plan.blocks || []).map((b) => String(b.text || "").trim()).filter(Boolean) : [];
+      return [
+        `这是一张电商主图，图上的字是 AI 画的。请：`,
         "1. 把图上所有文字按顺序读出来；",
+        ...(want.length ? [`1.1 对照下面这些“应该出现的文字”逐条比：有没有少、有没有错字、有没有多出来的字：\n${want.map((t, i) => `   ${i + 1}）${t}`).join("\n")}`] : []),
         "2. 检查有没有广告法违禁词（最、第一、唯一、顶级、极致、国家级、全网、100%、绝对、永久、万能等）和过度承诺（保证、包过、根治、立即见效、零风险、无效退款等），有没有联系方式（微信、QQ、电话、网址）；",
         "3. 检查有没有错别字、缺笔画、乱码字；",
         "4. 在手机上缩成小图时，大标题能不能一眼看清。",
@@ -330,6 +375,12 @@ ST.P = (() => {
     },
   };
 })();
+
+/** 广告法违禁词、过度承诺（默认都禁）；extra = 用户填的，逗号 / 顿号 / 空格隔开 */
+ST.BAN_WORDS = ["最", "第一", "首个", "唯一", "顶级", "极致", "国家级", "世界级", "全网", "100%", "绝对", "永久", "万能", "独家", "保证", "包过", "包会", "根治", "立即见效", "无效退款", "零风险", "稳赚", "秒杀全网"];
+ST.banList = (extra) => [...new Set([...ST.BAN_WORDS, ...String(extra || "").split(/[,，、;；\s]+/).map((x) => x.trim()).filter(Boolean)])];
+/** 一段字里出现了哪些禁用词 */
+ST.banHits = (text, extra) => ST.banList(extra).filter((w) => String(text || "").includes(w));
 
 /** 照参考图设计：一套 1～6 张，每张一个重点（主图的常见分工） */
 ST.POSTER_THEMES = [

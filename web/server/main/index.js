@@ -12,6 +12,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as Q from "../queue.js";
+import { SITE_NAMES } from "../bridge.js";
 import * as store from "../detail/store.js";
 import { getST, kit } from "../detail/runtime.js";
 import { FILES_DIR } from "../config.js";
@@ -19,7 +20,7 @@ import * as lib from "../library.js";
 
 const running = new Set(); // 正在做的“项目:主图/产品”
 const SITE_OK = ["gemini", "copilot"]; // 画图可以临时指定的网站（空 = 按 AI 分工轮流）
-const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode", "placement", "industry", "posterNote", "posterTheme"];
+const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode", "placement", "industry", "posterNote", "posterTheme", "posterContent", "posterBan", "plans", "perPlan", "sketch"];
 
 export function newProject(o = {}) {
   const ST = getST();
@@ -52,7 +53,7 @@ function aiOf(pid, tag) {
     fs.writeFileSync(path.join(tmpDir, file), Buffer.from(await out.arrayBuffer()));
     return { file: `tmp/${pid}/${tag}/${file}`, name: name || "图片.jpg", mime: raw ? blob.type || "image/png" : "image/jpeg" };
   }
-  const ask = async (key, kind, prompt, images, label, opt = {}) => Q.ensure({ key: `mn:${pid}:${tag}:${key}`, kind, label: `${(store.getProject(pid) || {}).name || "主图"}：${label}`, ownerType: "project", ownerId: pid, retryFailed: true, payload: { prompt, images: images.filter(Boolean), role: opt.role, rotate: opt.rotate || undefined, sites: opt.site ? [opt.site] : undefined } });
+  const ask = async (key, kind, prompt, images, label, opt = {}) => Q.ensure({ key: `mn:${pid}:${tag}:${key}`, kind, label: `${(store.getProject(pid) || {}).name || "主图"}：${label}`, ownerType: "project", ownerId: pid, retryFailed: true, payload: { prompt, images: images.filter(Boolean), role: opt.role, rotate: opt.rotate || undefined, sites: opt.site ? [opt.site] : undefined, noWait: opt.noWait || undefined } });
   return {
     img,
     async image(key, prompt, images, label, opt) {
@@ -136,8 +137,17 @@ function runItem(pid, iid, what, resume) {
       set({ job: "照参考图设计中" });
       const refs = [];
       for (const [n, r] of (p.posterRefs || []).slice(0, 3).entries()) refs.push(await ai.img(await ST.db.getBlob(r.key), `参考图${n + 1}.jpg`, 1536));
-      if (!refs.filter(Boolean).length) throw new Error("参考图没有了，先上传参考图");
-      const blob = await ai.image("poster", ST.P.mainPoster(p, it), refs, `主图（照参考图）：${it.styleName}`, { role: "mn_bg", rotate: rot, site: it.site });
+      let prompt, imgs = refs.filter(Boolean);
+      if (it.plan) {
+        // 文字版主图：按改好的方案画；参考图、草图都是可选的
+        const sk = it.sketchKey ? await ai.img(await ST.db.getBlob(it.sketchKey), "草图.jpg", 1024) : null;
+        prompt = ST.P.posterFromPlan(p, it.plan, { refs: imgs.length, sketch: !!sk });
+        if (sk) imgs.push(sk);
+      } else {
+        if (!imgs.length) throw new Error("参考图没有了，先上传参考图");
+        prompt = ST.P.mainPoster(p, it);
+      }
+      const blob = await ai.image("poster", prompt, imgs, `主图（文字版）：${it.styleName}`, { role: "mn_bg", rotate: rot, site: it.site });
       const key = `${pid}:${iid}-poster-${Date.now()}`;
       await ST.saveImage(key, blob);
       const old = it.scene;
@@ -194,7 +204,34 @@ function runItem(pid, iid, what, resume) {
 }
 
 // ------------------------------------------------------------ AI 审核（可选，点了才做；默认豆包，没连上直接报错）
-function runJudge(pid, iid) {
+const PLAN_OK = ["deepseek", "doubao", "kimi", "glm", "gemini", "copilot"];
+const JUDGE_OK = ["doubao", "deepseek", "kimi", "glm"];
+/** 文字版主图第一步：AI 写方案（JSON），写好放进 p.plans（替换原来的） */
+function writePlans(pid, site, n) {
+  let ai = null;
+  (async () => {
+    const ST = getST();
+    const p = store.getProject(pid);
+    ai = aiOf(pid, `plan-${Date.now()}`);
+    const refs = [];
+    for (const [i, r] of (p.posterRefs || []).slice(0, 3).entries()) refs.push(await ai.img(await ST.db.getBlob(r.key), `参考图${i + 1}.jpg`, 1280));
+    const imgs = refs.filter(Boolean);
+    // 有参考图要能看图：国内的走 ai-web（1.4.0 起能发图），所以按“看详情图”那一类派活；没参考图就是写文字
+    const r = await ai.json("plan", ST.P.posterPlan(p, n, imgs.length), imgs, `主图文字方案（${n} 套）`, { role: imgs.length ? "read" : "text", site, noWait: true });
+    const hex = (v, d) => (/^#[0-9a-f]{6}$/i.test(String(v || "").trim()) ? String(v).trim() : d);
+    const plans = (Array.isArray(r.plans) ? r.plans : Array.isArray(r) ? r : []).slice(0, n).map((x, i) => ({
+      id: ST.uid("pl"), on: true, by: site,
+      theme: String(x.theme || (ST.POSTER_THEMES[i] || {}).name || "方案").slice(0, 30), style: String(x.style || "").slice(0, 200), colors: String(x.colors || "").slice(0, 200),
+      bgColor: hex(x.bgColor, "#F2F4F7"), bgColor2: hex(x.bgColor2, ""), background: String(x.background || "").slice(0, 300), layout: String(x.layout || "").slice(0, 300), icons: String(x.icons || "").slice(0, 200), note: "",
+      blocks: (Array.isArray(x.blocks) ? x.blocks : []).slice(0, 8).map((b) => ({ pos: String(b.pos || "").slice(0, 20), text: String(b.text || "").slice(0, 40), font: String(b.font || "黑体").slice(0, 10), weight: String(b.weight || "粗").slice(0, 6), size: Math.min(200, Math.max(12, Math.round(+b.size || 40))), y: Math.min(98, Math.max(2, Math.round(+b.y || 50))), color: hex(b.color, "#333333"), effect: String(b.effect || "").slice(0, 40), bg: hex(b.bg, "") })),
+    })).filter((x) => x.blocks.length);
+    if (!plans.length) throw new Error("AI 没写出方案（格式不对），再点一次");
+    edit(pid, (q) => { q.plans = plans; q.planJob = ""; });
+  })().catch((e) => edit(pid, (q) => { q.planJob = "失败：" + String(e.message || e).slice(0, 200); }))
+    .finally(() => { if (ai) ai.cleanup(); });
+}
+
+function runJudge(pid, iid, site) {
   const k = `${pid}:${iid}`;
   if (running.has(k)) return;
   running.add(k);
@@ -206,12 +243,13 @@ function runJudge(pid, iid) {
     const p = store.getProject(pid);
     const it = p.items.find((x) => x.id === iid);
     ai = aiOf(pid, `${iid}-j${it.jn}`);
-    const json = async (prompt, imgs, label) => ai.json("judge", prompt, await Promise.all(imgs.map((x) => ai.img(x.blob, x.name, 1024))), label, { role: "mn_check" });
+    // 审核用哪个 AI：网页上选（豆包 / DeepSeek / Kimi / 智谱，Lee 2026-10-27），没选就按 AI 分工（默认豆包）
+    const json = async (prompt, imgs, label) => ai.json("judge", prompt, await Promise.all(imgs.map((x) => ai.img(x.blob, x.name, 1024))), label, { role: "mn_check", site: JUDGE_OK.includes(site) ? site : undefined });
     if (it.mode === "poster") {
       if (!it.scene) throw new Error("还没画好");
       let judge;
       try {
-        const r = await json(ST.P.posterCheck(p), [{ blob: await ST.db.getBlob(it.scene), name: "主图.jpg" }], `AI 审核（文字）：${it.styleName}`);
+        const r = await json(ST.P.posterCheck(p, it.plan), [{ blob: await ST.db.getBlob(it.scene), name: "主图.jpg" }], `AI 审核（文字）：${it.styleName}`);
         const bad = Array.isArray(r.bad) ? r.bad.map(String).filter(Boolean).slice(0, 10) : [];
         judge = { ok: !(r.ok === false || r.ok === "false") && !bad.length, why: String(r.why || "").slice(0, 300), bad, text: String(r.text || "").slice(0, 300) };
       } catch (e) { judge = { ok: null, why: "", note: `审核没做成：${String(e.message || e).slice(0, 120)}` }; }
@@ -293,6 +331,18 @@ export async function op(pid, b) {
       if (!p.items.some((it) => it.product === pr.id)) [pr.key, pr.cut, pr.white].forEach(delBlob);
     });
     case "generate": {
+      if (p0.mode === "poster" && (p0.plans || []).length) {
+        // 文字版主图第二步：勾上的方案，每套出 perPlan 张
+        const plans = p0.plans.filter((x) => x.on !== false && (x.blocks || []).some((b) => String(b.text || "").trim()));
+        if (!plans.length) throw new Error("没有勾上的方案（或者方案里没有字）");
+        const per = Math.min(3, Math.max(1, +p0.perPlan || 1));
+        const list = [];
+        let k = 0;
+        for (const pl of plans) for (let j = 0; j < per; j++) list.push({ id: ST.uid("it"), mode: "poster", plan: JSON.parse(JSON.stringify(pl)), sketchKey: p0.sketch && pl.sketchKey ? pl.sketchKey : "", theme: 0, style: "poster", styleName: pl.theme || "方案", prompt: "", ref: "", product: "", bg: "", pos: { x: 0.5, y: 0.53, s: 0.85 }, harm: null, state: "pending", t: Date.now(), rot: k++, job: "排队中", site: SITE_OK.includes(b.site) ? b.site : "" });
+        const p = edit(pid, (q) => { q.items.unshift(...list); });
+        for (const it of list) runItem(pid, it.id, "full");
+        return p;
+      }
       if (p0.mode === "poster") {
         // 照参考图设计：一共 count 张；posterTheme = "set" 每张一个重点（一套主图），"hero" 都画核心卖点（多出几张对比）
         if (!(p0.posterRefs || []).length) throw new Error("先上传参考图");
@@ -319,7 +369,14 @@ export async function op(pid, b) {
       for (const it of list) runItem(pid, it.id, "full");
       return p;
     }
-    case "judge": runJudge(pid, iid); return store.getProject(pid);
+    case "judge": runJudge(pid, iid, b.site); return store.getProject(pid);
+    case "writePlans": {
+      // 文字版主图第一步：AI 写方案（网页上选哪个 AI 写：DeepSeek / 豆包 / Kimi / 智谱 / Gemini / Copilot）
+      if (!PLAN_OK.includes(b.site)) throw new Error("选一个写方案的 AI");
+      if (p0.planJob && !/失败/.test(p0.planJob)) throw new Error("正在写方案，等一下");
+      writePlans(pid, b.site, Math.min(6, Math.max(1, +b.n || 1)));
+      return edit(pid, (p) => { p.planJob = `${SITE_NAMES[b.site] || b.site} 写方案中`; });
+    }
     case "addPosterRef": {
       // 参考图（最多 3 张）
       const img = await ST.imgOf(b.key);
