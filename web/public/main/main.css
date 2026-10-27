@@ -26,3 +26,4 @@
 .mcard .tag.aisite { margin-left: 6px; background: #eef4ff; color: #1d4ed8; }
 .mcard .tag.mtime { margin-left: 6px; }
 .mcard .row { flex-wrap: wrap; row-gap: 4px; }
+.mcard.pref .pname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }

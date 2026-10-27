@@ -43,7 +43,7 @@ const doubao = [];
 const plugin2 = await connect(`ws://127.0.0.1:${PORT}/ext`, { token, name: '测试电脑', version: '1.5.0', app: 'aiweb', sites: [{ site: 'doubao', name: '豆包', open: true, ready: true }] }, async (m) => {
   if (m.cmd !== 'ask') return { error: '不支持' };
   doubao.push({ t: Date.now(), text: m.args.text, files: (m.args.files || []).length });
-  const out = /哪张更适合/.test(m.args.text) ? { better: 2, why: '去掉了白边，光线更自然' } : { ok: true, why: '形状颜色 logo 都一样' };
+  const out = /哪张更适合/.test(m.args.text) ? { better: 2, why: '去掉了白边，光线更自然' } : /图上的字是 AI 画的/.test(m.args.text) ? { ok: false, text: '最专业的远程装系统', bad: ['最'], why: '有违禁词“最”' } : { ok: true, why: '形状颜色 logo 都一样' };
   return { answer: '```json\n' + JSON.stringify(out) + '\n```' };
 });
 
@@ -347,6 +347,46 @@ try {
   const after = (await api('GET', '/api/library')).items.find((x) => x.id === lb0.id);
   check('素材中心：去白边“保存”换掉原图（名字不变、张数不变）', after && after.name === '白底.png' && after.v !== lb0.v && (await page.locator('.lit').count()) === nLit + 1, JSON.stringify([lb0.v, after && after.v]));
   await api('DELETE', `/api/projects/${dl3[0].id}`);
+
+  // 照参考图设计（虚拟产品 / 纯文字主图）：参考图 + 行业 → AI 照风格和排版画 1～6 张
+  {
+    const np = await api('POST', '/api/main', { name: '装系统' });
+    await page.goto(BASE + `/main/#p=${np.id}`);
+    await page.waitForSelector('[data-mode="poster"]');
+    await page.click('[data-mode="poster"]');
+    await page.waitForSelector('#industry');
+    check('照参考图设计：没参考图、没填行业时不能生成', await page.isDisabled('[data-act="generate"]'));
+    const fcp = page.waitForEvent('filechooser');
+    await page.click('[data-act="posterUpload"]');
+    await (await fcp).setFiles({ name: '参考.png', mimeType: 'image/png', buffer: product('#eeeeee') });
+    await page.waitForSelector('.mcard.pref');
+    await page.fill('#industry', '远程安装电脑系统');
+    await page.fill('#posterNote', '支持 Win7/10/11；远程一对一');
+    await page.selectOption('#count', '3');
+    await page.waitForFunction(() => document.querySelector('[data-act="generate"]').textContent.includes('3') && !document.querySelector('[data-act="generate"]').disabled);
+    await page.screenshot({ path: path.join(out, '6-poster.png'), fullPage: true });
+    check('照参考图设计：没有产品图、风格那两块，只有参考图和行业', (await page.locator('[data-act="addProducts"]').count()) === 0 && (await page.locator('[data-sty]').count()) === 0);
+    const na = ai.asked.length;
+    await page.click('[data-act="generate"]');
+    await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 3);
+    await page.waitForFunction(() => !document.querySelector('.pendbox .tag.blue'), null, { timeout: 60000 });
+    const pa = ai.asked.slice(na).filter((a) => /STYLE AND LAYOUT REFERENCE ONLY/.test(a.prompt));
+    check('照参考图设计：3 张都把参考图发给 AI，提示词带行业、想用的信息、一眼见和违禁词要求', pa.length === 3 && pa.every((a) => a.files[0] === '参考图1.jpg' && /远程安装电脑系统/.test(a.prompt) && /Win7\/10\/11/.test(a.prompt) && /200 pixels wide/.test(a.prompt) && /最, 第一/.test(a.prompt)), JSON.stringify(pa.map((a) => a.files)));
+    const names = await page.locator('.pendbox .mcard[data-iid] b').allTextContents();
+    check('一套主图：每张一个重点（核心卖点 / 服务内容 / 流程步骤）', ['核心卖点', '服务内容', '流程步骤'].every((n) => names.some((x) => x.startsWith(n))) && names.every((x) => /照参考图/.test(x)), names.join(','));
+    check('照参考图设计的图：有 AI 标签、时间，没有“用这个摆放”', (await page.locator('.pendbox .tag.aisite').count()) === 3 && (await page.locator('.pendbox .tag.mtime').count()) === 3 && (await page.locator('.pendbox [data-act="placeRef"]').count()) === 0);
+    await page.click('.pendbox [data-act="judge"] >> nth=0');
+    await page.waitForSelector('.pendbox .mcard:has-text("文字有问题")', { timeout: 30000 });
+    check('AI 审核（照参考图）：豆包读图上的字，查出违禁词标出来', /“最”/.test(await page.textContent('.pendbox .mcard:has-text("文字有问题")')) && /图上的字是 AI 画的/.test(doubao[doubao.length - 1].text));
+    await page.click('.pendbox [data-act="accept"] >> nth=0');
+    await page.waitForFunction(() => document.querySelectorAll('.mcard[data-iid]').length === 3 && !!document.querySelector('[data-act="dlAll"]'));
+    const dlp = page.waitForEvent('download');
+    await page.click('[data-act="dlAll"]');
+    const zp = path.join(out, 'poster.zip');
+    await (await dlp).saveAs(zp);
+    check('照参考图设计：采用后可以下载（没有产品图也能打包）', fs.statSync(zp).size > 1000);
+    await api('DELETE', `/api/projects/${np.id}`);
+  }
 
   // 工作台“主图”列表：点名称打开，后面只有“删除”
   await page.goto(BASE + '/#/main');

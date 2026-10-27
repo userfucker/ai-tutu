@@ -19,7 +19,7 @@ var ST = globalThis.ST || (globalThis.ST = {});
     const cover = (img) => { const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height, s = Math.max(px / iw, px / ih); g.drawImage(img, (px - iw * s) / 2, (px - ih * s) / 2, iw * s, ih * s); };
     g.fillStyle = "#f2f2f2";
     g.fillRect(0, 0, px, px);
-    if (it.mode === "scene") {
+    if (it.mode === "scene" || it.mode === "poster") {
       const sc = it.scene ? await ST.imgOf(it.scene) : null;
       if (sc) cover(sc);
       return { canvas: c, box: null, sig: "", used: !!sc, stale: false };

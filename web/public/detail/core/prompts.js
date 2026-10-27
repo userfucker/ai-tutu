@@ -288,6 +288,37 @@ ST.P = (() => {
         "Reply with the image only.",
       ].filter(Boolean).join("\n");
     },
+    /**
+     * 照参考图设计（Lee 2026-10-27）：虚拟产品 / 纯文字主图。参考图只学风格 + 排版，文字由 AI 按行业自己写；
+     * 手机上“一眼见”：大标题够大、字少、对比强；避开广告法违禁词和过度承诺。
+     */
+    mainPoster(p, it) {
+      const th = ST.POSTER_THEMES[it.theme || 0] || ST.POSTER_THEMES[0];
+      const n = (p.posterRefs || []).length || 1;
+      const note = String(p.posterNote || "").trim();
+      return [
+        `Generate one image: a square 1:1 e-commerce main image (Taobao / Tmall product listing image) for this business: "${String(p.industry || "").trim()}" (written in Chinese).`,
+        `- The uploaded image${n > 1 ? "s are" : " is"} a STYLE AND LAYOUT REFERENCE ONLY. Follow ${n > 1 ? "their" : "its"} visual style (color scheme, font weight and feel, decorations, icons, background treatment) and ${n > 1 ? "their" : "its"} layout structure (where the headline, sub-headline, tag pills, bottom banner and icons sit, and how big they are).`,
+        "- Do NOT copy any words, numbers, logos, brand names, mascots or prices from the reference. Write NEW, natural Simplified Chinese copy that fits this business.",
+        note ? `- Information the shop wants to use (Chinese; use only what fits, keep it short): ${note}` : "",
+        `- This image's focus: ${th.en}`,
+        "- Mobile one-glance readability: the main headline is by far the biggest element, 1-2 lines of at most 8 Chinese characters each, spanning about 70% of the width; no more than 4 text blocks and about 30 Chinese characters in total; very strong contrast between text and background; no small or dense text; everything must still be readable when the image is shown only 200 pixels wide on a phone.",
+        "- Text quality: every Chinese character must be correct, complete and standard Simplified Chinese — no typos, no missing strokes, no garbled or made-up characters, no fake English filler, no watermark.",
+        "- Advertising-law compliance (China): no absolute or superlative words (最, 第一, 首个, 唯一, 顶级, 极致, 国家级, 世界级, 全网, 100%, 绝对, 永久, 万能, 独家); no over-promises or guarantees of results (保证, 包过, 包会, 根治, 立即见效, 无效退款, 零风险, 稳赚, 秒杀全网); no medical or financial claims; no made-up prices, discounts or sales numbers; no contact details (微信, QQ, phone numbers, website addresses); no other brands' names or logos.",
+        "Reply with the image only.",
+      ].filter(Boolean).join("\n");
+    },
+    /** 审核“照参考图设计”的主图：读出图上的字，查违禁词、过度承诺、错字、手机上看不看得清 */
+    posterCheck(p) {
+      return [
+        `这是一张电商主图（行业：${String(p.industry || "").trim() || "未填"}），图上的字是 AI 画的。请：`,
+        "1. 把图上所有文字按顺序读出来；",
+        "2. 检查有没有广告法违禁词（最、第一、唯一、顶级、极致、国家级、全网、100%、绝对、永久、万能等）和过度承诺（保证、包过、根治、立即见效、零风险、无效退款等），有没有联系方式（微信、QQ、电话、网址）；",
+        "3. 检查有没有错别字、缺笔画、乱码字；",
+        "4. 在手机上缩成小图时，大标题能不能一眼看清。",
+        '只回复一个 JSON 代码块，格式：{"ok":true,"text":"图上的字","bad":["有问题的词或字"],"why":"理由"}。有任何一项不合格 ok 就是 false，why 用中文说清楚。',
+      ].join("\n");
+    },
     /** 审核“AI 直接画”的场景图：产品有没有被改 */
     sceneCheck(p) {
       const name = (p.info && p.info.name) || "";
@@ -299,6 +330,16 @@ ST.P = (() => {
     },
   };
 })();
+
+/** 照参考图设计：一套 1～6 张，每张一个重点（主图的常见分工） */
+ST.POSTER_THEMES = [
+  { name: "核心卖点", en: "the hero image — what the product or service is and the single strongest reason to choose it (this is the click-attracting first image)." },
+  { name: "服务内容", en: "what is included or which options are available (e.g. versions, packages), shown as a few short tags or icons." },
+  { name: "流程步骤", en: "how simple it is — 3 or 4 short numbered steps with small icons." },
+  { name: "售后保障", en: "after-sales support and trust — what happens if something goes wrong, response time, support period (stated factually, no guarantees of results)." },
+  { name: "适用人群", en: "who it is for / which common problems it solves, as 3 or 4 short scenarios." },
+  { name: "主图变体", en: "an alternative version of the hero image with a different headline wording and a different accent color, same overall style." },
+];
 
 /** 多角度图可选的角度（Lee 2026-10-23） */
 ST.ANGLES = [

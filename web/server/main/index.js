@@ -19,7 +19,7 @@ import * as lib from "../library.js";
 
 const running = new Set(); // 正在做的“项目:主图/产品”
 const SITE_OK = ["gemini", "copilot"]; // 画图可以临时指定的网站（空 = 按 AI 分工轮流）
-const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode", "placement"];
+const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode", "placement", "industry", "posterNote", "posterTheme"];
 
 export function newProject(o = {}) {
   const ST = getST();
@@ -124,13 +124,27 @@ function runItem(pid, iid, what, resume) {
   let ai = null;
   (async () => {
     const ST = getST();
-    const it0 = editItem(pid, iid, (it) => { it.run = resume ? it.run || 1 : (it.run || 0) + 1; it.job = what === "blend" ? "融入：排队中" : it.mode === "scene" ? "AI 画场景：排队中" : "画背景：排队中"; it.what = what; });
+    const it0 = editItem(pid, iid, (it) => { it.run = resume ? it.run || 1 : (it.run || 0) + 1; it.job = what === "blend" ? "融入：排队中" : it.mode === "poster" ? "照参考图设计：排队中" : it.mode === "scene" ? "AI 画场景：排队中" : "画背景：排队中"; it.what = what; });
     if (!it0) return;
     let p = store.getProject(pid);
     let it = p.items.find((x) => x.id === iid);
     ai = aiOf(pid, `${iid}-r${it.run}`);
     const rot = it.rot || 0;
     const set = (patch) => { const q = editItem(pid, iid, (x) => { Object.assign(x, patch); }); if (!q) throw new Error("主图已经删掉了"); p = q; it = p.items.find((x) => x.id === iid); };
+    if (it.mode === "poster") {
+      // 照参考图设计（Lee 2026-10-27）：参考图学风格 + 排版，文字 AI 按行业自己写
+      set({ job: "照参考图设计中" });
+      const refs = [];
+      for (const [n, r] of (p.posterRefs || []).slice(0, 3).entries()) refs.push(await ai.img(await ST.db.getBlob(r.key), `参考图${n + 1}.jpg`, 1536));
+      if (!refs.filter(Boolean).length) throw new Error("参考图没有了，先上传参考图");
+      const blob = await ai.image("poster", ST.P.mainPoster(p, it), refs, `主图（照参考图）：${it.styleName}`, { role: "mn_bg", rotate: rot, site: it.site });
+      const key = `${pid}:${iid}-poster-${Date.now()}`;
+      await ST.saveImage(key, blob);
+      const old = it.scene;
+      set({ scene: key, sceneSite: blob.site, doneAt: Date.now(), job: "", judge: null });
+      delBlob(old);
+      return;
+    }
     if (it.mode === "scene") {
       // AI 直接画场景：把抠好的透明 PNG 发过去；摆放照 it.placement（free / same / ref = 照某张图的摆法）
       const pr = ST.mainProduct(p, it.product);
@@ -193,6 +207,17 @@ function runJudge(pid, iid) {
     const it = p.items.find((x) => x.id === iid);
     ai = aiOf(pid, `${iid}-j${it.jn}`);
     const json = async (prompt, imgs, label) => ai.json("judge", prompt, await Promise.all(imgs.map((x) => ai.img(x.blob, x.name, 1024))), label, { role: "mn_check" });
+    if (it.mode === "poster") {
+      if (!it.scene) throw new Error("还没画好");
+      let judge;
+      try {
+        const r = await json(ST.P.posterCheck(p), [{ blob: await ST.db.getBlob(it.scene), name: "主图.jpg" }], `AI 审核（文字）：${it.styleName}`);
+        const bad = Array.isArray(r.bad) ? r.bad.map(String).filter(Boolean).slice(0, 10) : [];
+        judge = { ok: !(r.ok === false || r.ok === "false") && !bad.length, why: String(r.why || "").slice(0, 300), bad, text: String(r.text || "").slice(0, 300) };
+      } catch (e) { judge = { ok: null, why: "", note: `审核没做成：${String(e.message || e).slice(0, 120)}` }; }
+      editItem(pid, iid, (x) => { x.judge = judge; x.job = ""; });
+      return;
+    }
     if (it.mode === "scene") {
       if (!it.scene) throw new Error("还没画好");
       const white = await ST.toBlob(await ST.mainWhite(p, 1024), "image/jpeg", 0.92);
@@ -268,6 +293,20 @@ export async function op(pid, b) {
       if (!p.items.some((it) => it.product === pr.id)) [pr.key, pr.cut, pr.white].forEach(delBlob);
     });
     case "generate": {
+      if (p0.mode === "poster") {
+        // 照参考图设计：一共 count 张；posterTheme = "set" 每张一个重点（一套主图），"hero" 都画核心卖点（多出几张对比）
+        if (!(p0.posterRefs || []).length) throw new Error("先上传参考图");
+        if (!String(p0.industry || "").trim()) throw new Error("先填你做的行业 / 产品");
+        const cnt = Math.min(6, Math.max(1, +p0.count || 1));
+        const list = [];
+        for (let k = 0; k < cnt; k++) {
+          const theme = p0.posterTheme === "hero" ? 0 : k % ST.POSTER_THEMES.length;
+          list.push({ id: ST.uid("it"), mode: "poster", theme, style: "poster", styleName: ST.POSTER_THEMES[theme].name, prompt: "", ref: "", product: "", bg: "", pos: { x: 0.5, y: 0.53, s: 0.85 }, harm: null, state: "pending", t: Date.now(), rot: k, job: "排队中", site: SITE_OK.includes(b.site) ? b.site : "" });
+        }
+        const p = edit(pid, (q) => { q.items.unshift(...list); });
+        for (const it of list) runItem(pid, it.id, "full");
+        return p;
+      }
       const pr = ST.mainProduct(p0);
       if (!pr) throw new Error("先上传产品图");
       if (p0.mode === "paste" && !pr.cut) throw new Error("“画背景 + 融入”要用抠好的产品图：白底图点产品图下面的“去白底”，不是白底的点“AI 抠图”");
@@ -281,6 +320,18 @@ export async function op(pid, b) {
       return p;
     }
     case "judge": runJudge(pid, iid); return store.getProject(pid);
+    case "addPosterRef": {
+      // 参考图（最多 3 张）
+      const img = await ST.imgOf(b.key);
+      if (!img) throw new Error("图片打不开");
+      return edit(pid, (p) => { p.posterRefs = [...(p.posterRefs || []), { key: b.key, name: String(b.name || "参考图").slice(0, 80) }].slice(-3); });
+    }
+    case "delPosterRef": return edit(pid, (p) => {
+      const r = (p.posterRefs || []).find((x) => x.key === b.key);
+      if (!r) return false;
+      p.posterRefs = p.posterRefs.filter((x) => x !== r);
+      if (!p.items.some((it) => it.mode === "poster" && it.job)) delBlob(r.key);
+    });
     case "placeRef": {
       // 用这张的摆法：把这张图复制一份当摆放参考（这张删了也不影响）
       const it = p0.items.find((x) => x.id === iid);
