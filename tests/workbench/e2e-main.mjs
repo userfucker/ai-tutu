@@ -44,7 +44,7 @@ const plugin2 = await connect(`ws://127.0.0.1:${PORT}/ext`, { token, name: '测�
   if (m.cmd !== 'ask') return { error: '不支持' };
   doubao.push({ t: Date.now(), text: m.args.text, files: (m.args.files || []).length, site: m.site });
   if (/文字版方案/.test(m.args.text)) {
-    const plan = (theme, extra) => ({ theme, style: '科技简约', colors: '主色 宝蓝 #2B5BFF；文字 深灰 #333333', bgColor: '#F2F4F7', bgColor2: '#FFFFFF', background: '浅灰渐变', layout: '上标签 中标题 下横条', icons: '电脑图标', blocks: [{ pos: '顶部标签', text: '纯净原版 无捆绑', font: '黑体', weight: '中粗', size: 34, y: 12, color: '#333333', effect: '虚线圆角框', bg: '' }, { pos: '大标题', text: '远程安装系统', font: '黑体', weight: '特粗', size: 100, y: 40, color: '#2B5BFF', effect: '白色描边', bg: '' }, { pos: '标签', text: extra, font: '黑体', weight: '粗', size: 32, y: 70, color: '#2B5BFF', effect: '圆角底框', bg: '#E8EEFF' }, { pos: '底部横条', text: '装不好不收费', font: '黑体', weight: '粗', size: 48, y: 90, color: '#FFFFFF', effect: '深色底横条', bg: '#1D3FA8' }] });
+    const plan = (theme, extra) => ({ theme, style: '科技简约', colors: '主色 宝蓝 #2B5BFF；文字 深灰 #333333', bgColor: '#F2F4F7', bgColor2: '#FFFFFF', background: '浅灰渐变', layout: '上标签 中标题 下横条', icons: '电脑图标', blocks: [{ pos: '顶部标签', text: '纯净原版 无捆绑', font: '黑体', weight: '中粗', size: 34, y: 12, color: '#333333', effect: '虚线圆角框', bg: '' }, { pos: '大标题', text: '远程安装系统', font: '黑体', weight: '特粗', size: 100, y: 40, color: '#2B5BFF', effect: '白色描边', bg: '' }, { pos: '标签', text: extra, font: '黑体', weight: '粗', size: 32, y: 70, color: '#2B5BFF', effect: '圆角底框', bg: '#E8EEFF' }, { pos: '左栏', text: 'Win7/10/11', font: '黑体', weight: '粗', size: 28, x: 27, y: 58, color: '#FFFFFF', effect: '圆角底框', bg: '#D7263D' }, { pos: '右栏卖点', text: '支持远程一对一', font: '黑体', weight: '中粗', size: 30, x: 72, y: 58, color: '#D7263D', effect: '无', bg: '' }, { pos: '底部横条', text: '装不好不收费', font: '黑体', weight: '粗', size: 48, y: 90, color: '#FFFFFF', effect: '深色底横条', bg: '#1D3FA8' }] });
     return { answer: '```json\n' + JSON.stringify({ plans: [plan('核心卖点', '秒装 Win11'), plan('服务内容', 'Win7/10/11')] }) + '\n```' };
   }
   const out = /哪张更适合/.test(m.args.text) ? { better: 2, why: '去掉了白边，光线更自然' } : /图上的字是 AI 画的/.test(m.args.text) ? { ok: false, text: '最专业的远程装系统', bad: ['最'], why: '有违禁词“最”' } : { ok: true, why: '形状颜色 logo 都一样' };
@@ -373,7 +373,9 @@ try {
     await page.waitForSelector('.plan[data-plan="1"]', { timeout: 30000 });
     const ask = doubao[nd];
     check('AI 写方案：发给选的 AI（豆包），带参考图、要表达的内容、禁止词，要 2 套', ask && ask.site === 'doubao' && ask.files === 1 && /远程安装电脑系统/.test(ask.text) && /秒装/.test(ask.text) && /2 套/.test(ask.text), JSON.stringify(ask && { site: ask.site, files: ask.files }));
-    check('方案是表格：每行文字有字体、字号、上下位置、颜色、效果，都能改', (await page.locator('.plan[data-plan="0"] .ptable tbody tr').count()) === 4 && (await page.inputValue('#pl0_b1_text')) === '远程安装系统' && (await page.inputValue('#pl0_b1_size')) === '100');
+    check('方案是表格：每行文字有字体、字号、上下位置、颜色、效果，都能改', (await page.locator('.plan[data-plan="0"] .ptable tbody tr').count()) === 6 && (await page.inputValue('#pl0_b1_text')) === '远程安装系统' && (await page.inputValue('#pl0_b1_size')) === '100');
+    check('有参考图时：写方案要参考参考图的文案（说法、卖点、字的多少），不照抄别家店名品牌', /文案的说法、卖点的组织方式/.test(ask.text) && /不要照抄参考图里别家的店名/.test(ask.text) && !/30 个字以内/.test(ask.text));
+    check('方案有“左右 %”：左右分栏的字按位置放', (await page.inputValue('#pl0_b4_x')) === '72' && (await page.inputValue('#pl0_b3_x')) === '27' && (await page.inputValue('#pl0_b1_x')) === '50');
     check('方案上标出是哪个 AI 写的', /豆包 写的/.test(await page.textContent('.plan[data-plan="0"] .ph')));
     check('禁止词（自己填的）在方案里标红', await page.evaluate(() => document.getElementById('pl0_b2_text').classList.contains('banhit')) && !(await page.isHidden('#pl0_ban')));
     await page.fill('#pl0_b2_text', '一对一远程');
@@ -396,7 +398,7 @@ try {
     await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 1);
     await page.waitForFunction(() => !document.querySelector('.pendbox .tag.blue'), null, { timeout: 60000 });
     const pa = ai.asked.slice(na).find((a) => /following EXACTLY the design spec/.test(a.prompt));
-    check('按方案出图：只出勾上的那套；方案里的字一字不差交给 AI，附参考图和草图', pa && /「远程装系统」/.test(pa.prompt) && /「一对一远程」/.test(pa.prompt) && !/秒装 Win11/.test(pa.prompt) && pa.files.join(',') === '参考图1.jpg,草图.jpg' && /layout sketch/.test(pa.prompt), JSON.stringify(pa && pa.files));
+    check('按方案出图：只出勾上的那套；方案里的字一字不差交给 AI，附参考图和草图', pa && /「远程装系统」/.test(pa.prompt) && /「一对一远程」/.test(pa.prompt) && !/秒装 Win11/.test(pa.prompt) && pa.files.join(',') === '参考图1.jpg,草图.jpg' && /layout sketch/.test(pa.prompt) && /center at 72% from the left/.test(pa.prompt), JSON.stringify(pa && pa.files));
     check('文字版主图的卡片：标“文字版”、有 AI 标签和时间，没有“用这个摆放”', /文字版/.test(await page.textContent('.pendbox .mcard[data-iid] b')) && (await page.locator('.pendbox .tag.aisite').count()) === 1 && (await page.locator('.pendbox [data-act="placeRef"]').count()) === 0);
     check('审核用哪个 AI 在主图页选：豆包 / DeepSeek / Kimi / 智谱', (await page.locator('#judgeSite option').count()) === 4);
     await page.selectOption('#judgeSite', 'deepseek');

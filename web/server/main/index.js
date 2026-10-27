@@ -223,7 +223,7 @@ function writePlans(pid, site, n) {
       id: ST.uid("pl"), on: true, by: site,
       theme: String(x.theme || (ST.POSTER_THEMES[i] || {}).name || "方案").slice(0, 30), style: String(x.style || "").slice(0, 200), colors: String(x.colors || "").slice(0, 200),
       bgColor: hex(x.bgColor, "#F2F4F7"), bgColor2: hex(x.bgColor2, ""), background: String(x.background || "").slice(0, 300), layout: String(x.layout || "").slice(0, 300), icons: String(x.icons || "").slice(0, 200), note: "",
-      blocks: (Array.isArray(x.blocks) ? x.blocks : []).slice(0, 8).map((b) => ({ pos: String(b.pos || "").slice(0, 20), text: String(b.text || "").slice(0, 40), font: String(b.font || "黑体").slice(0, 10), weight: String(b.weight || "粗").slice(0, 6), size: Math.min(200, Math.max(12, Math.round(+b.size || 40))), y: Math.min(98, Math.max(2, Math.round(+b.y || 50))), color: hex(b.color, "#333333"), effect: String(b.effect || "").slice(0, 40), bg: hex(b.bg, "") })),
+      blocks: (Array.isArray(x.blocks) ? x.blocks : []).slice(0, 16).map((b) => ({ pos: String(b.pos || "").slice(0, 20), text: String(b.text || "").slice(0, 40), font: String(b.font || "黑体").slice(0, 10), weight: String(b.weight || "粗").slice(0, 6), size: Math.min(200, Math.max(12, Math.round(+b.size || 40))), x: Math.min(98, Math.max(2, Math.round(+b.x || 50))), y: Math.min(98, Math.max(2, Math.round(+b.y || 50))), color: hex(b.color, "#333333"), effect: String(b.effect || "").slice(0, 40), bg: hex(b.bg, "") })),
     })).filter((x) => x.blocks.length);
     if (!plans.length) throw new Error("AI 没写出方案（格式不对），再点一次");
     edit(pid, (q) => { q.plans = plans; q.planJob = ""; });

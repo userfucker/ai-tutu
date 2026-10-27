@@ -274,19 +274,19 @@
       <div class="pgrid2">${f("style", "风格")}${f("colors", "色系")}
         <label class="pf"><span>底色</span><span class="row"><input type="color" id="pl${i}_bgColor" data-pf="${i}|bgColor" value="${esc(pl.bgColor || "#f2f4f7")}"> → <input type="color" id="pl${i}_bgColor2" data-pf="${i}|bgColor2" value="${esc(pl.bgColor2 || pl.bgColor || "#ffffff")}"></span></label>
         ${f("background", "背景", true)}${f("layout", "版式", true)}${f("icons", "图标 / 装饰", true)}${f("note", "补充说明", true)}</div>
-      <table class="ptable"><thead><tr><th>位置</th><th>文字</th><th>字体</th><th>粗细</th><th>字号</th><th>上下位置 %</th><th>颜色</th><th>效果</th><th>底色</th><th></th></tr></thead><tbody>
+      <table class="ptable"><thead><tr><th>位置</th><th>文字</th><th>字体</th><th>粗细</th><th>字号</th><th>左右 %</th><th>上下 %</th><th>颜色</th><th>效果</th><th>底色</th><th></th></tr></thead><tbody>
         ${(pl.blocks || []).map((b, j) => {
           const id = (k) => `id="pl${i}_b${j}_${k}" data-pf="${i}|${j}|${k}"`;
           const hits = ST.banHits(b.text, p.posterBan);
           return `<tr data-row="${j}"><td><input ${id("pos")} value="${esc(b.pos || "")}" class="w6"></td>
             <td><input ${id("text")} value="${esc(b.text || "")}" class="w14 ${hits.length ? "banhit" : ""}" title="${hits.length ? "禁用词：" + esc(hits.join("、")) : ""}"></td>
             <td><select ${id("font")}>${opt(PLAN_FONTS, b.font || "黑体")}</select></td><td><select ${id("weight")}>${opt(PLAN_WEIGHTS, b.weight || "粗")}</select></td>
-            <td><input type="number" ${id("size")} value="${+b.size || 40}" min="12" max="200" class="w4"></td><td><input type="number" ${id("y")} value="${+b.y || 50}" min="2" max="98" class="w4"></td>
+            <td><input type="number" ${id("size")} value="${+b.size || 40}" min="12" max="200" class="w4"></td><td><input type="number" ${id("x")} value="${+b.x || 50}" min="2" max="98" class="w4"></td><td><input type="number" ${id("y")} value="${+b.y || 50}" min="2" max="98" class="w4"></td>
             <td><input type="color" ${id("color")} value="${esc(b.color || "#333333")}"></td><td><input ${id("effect")} value="${esc(b.effect || "")}" class="w8"></td>
             <td><input ${id("bg")} value="${esc(b.bg || "")}" placeholder="无" class="w6"></td><td><button class="sm ghost" data-act="planDelRow" title="删掉这一行">✕</button></td></tr>`;
         }).join("")}</tbody></table>
       <button class="sm" data-act="planAddRow" style="margin-top:6px">＋ 加一行文字</button>
-      <div class="muted" style="margin-top:4px">字号按 800×800 算（像素）；上下位置 = 这行字的中心在画面从上往下的位置；同一个上下位置的几行会排成一排（比如三个标签）。</div></div>`;
+      <div class="muted" style="margin-top:4px">字号按 800×800 算（像素）；左右 / 上下 = 这行字的中心在画面里的位置（%，左右 50 就是居中；左右分栏一般左 25～30、右 70～75）；左右都是 50、上下也一样的几行会自动排成一排（比如三个标签）。</div></div>`;
   }
   /** 改方案里的一格：直接改项目里的数据，半秒后保存；文字改了马上重新查禁用词 */
   function planEdit(t) {
@@ -330,10 +330,12 @@
     const blocks = (pl.blocks || []).filter((b) => String(b.text || "").trim());
     try { await Promise.all(blocks.map((b) => document.fonts.load(`${wt(b.weight)} ${Math.round((+b.size || 40) * k)}px ${fam(b.font)}`, b.text))); } catch {}
     // 上下位置差不多的几块排成一排
+    // 左右位置是 50（居中）、上下位置差不多的几块排成一排；指定了左右位置的按位置放
     const rows = [];
     for (const b of [...blocks].sort((x, y) => (+x.y || 50) - (+y.y || 50))) {
-      const r = rows.find((r) => Math.abs(r.y - (+b.y || 50)) < 3);
-      r ? r.items.push(b) : rows.push({ y: +b.y || 50, items: [b] });
+      const free = (+b.x || 50) === 50;
+      const r = free && rows.find((r) => r.free && Math.abs(r.y - (+b.y || 50)) < 3);
+      r ? r.items.push(b) : rows.push({ y: +b.y || 50, free, items: [b] });
     }
     for (const r of rows) {
       const cy = (r.y / 100) * px, n = r.items.length;
@@ -341,9 +343,10 @@
         let size = (+b.size || 40) * k;
         const font = () => `${wt(b.weight)} ${size}px ${fam(b.font)}`;
         g.font = font();
-        const maxW = (px * 0.92) / n;
+        const bx = r.free ? (px / n) * (idx + 0.5) : ((+b.x || 50) / 100) * px;
+        const maxW = r.free ? (px * 0.92) / n : Math.min(bx, px - bx) * 2 * 0.96;
         while (g.measureText(b.text).width > maxW && size > 10) { size -= 1; g.font = font(); }
-        const w = g.measureText(b.text).width, cx = (px / n) * (idx + 0.5);
+        const w = g.measureText(b.text).width, cx = bx;
         const ef = b.effect || "";
         g.save();
         if (/横条|底条|横幅|通栏/.test(ef)) { g.fillStyle = b.bg || "#1d4ed8"; g.fillRect(0, cy - size * 0.95, px, size * 1.9); }
@@ -463,7 +466,7 @@
     const refCells = poster ? await Promise.all((p.posterRefs || []).map(async (r) => `<div class="mcard pref" data-pkey="${esc(r.key)}"><div class="pic" data-act="viewPosterRef"><img src="${await ST.urlOf(r.key)}" alt=""></div><div class="row"><span class="muted pname" title="${esc(r.name)}">${esc(r.name)}</span><button class="sm danger" data-act="delPosterRef">删除</button></div></div>`)) : [];
     const content = p.posterContent != null ? p.posterContent : [p.industry, p.posterNote].filter(Boolean).join("；");
     const posterHtml = poster ? `
-      <div class="card"><div class="head"><div><h3>① 参考图（可以不放）</h3><div class="muted">放 1～3 张你觉得好的主图，写方案和出图时都让 AI 学它的风格和排版，不照抄上面的字。</div></div>
+      <div class="card"><div class="head"><div><h3>① 参考图（可以不放）</h3><div class="muted">放 1～3 张你觉得好的主图。写方案时 AI 参考它的风格、排版和文案（说法、卖点、字的多少），改成你的内容；出图时再按它的风格画。别家的店名、品牌、价格不会照抄。</div></div>
         <div class="sp"><button data-act="posterFromLib">从素材中心选</button><button data-act="posterUpload">上传参考图</button></div></div>
         ${refCells.length ? `<div class="mcards">${refCells.join("")}</div>` : '<div class="empty">还没有参考图（可以不放）。点右上角“上传参考图”或“从素材中心选”，也可以拖进来、Ctrl+V。</div>'}</div>
       <div class="card"><div class="head"><div><h3>② 文字版方案</h3><div class="muted">先让 AI 写方案（字体、字号、文字、配色、风格、版式），你改好了再出图，效果好控制。</div></div></div>
@@ -476,7 +479,7 @@
           <label class="row lb">写 <select id="planCount">${[1, 2, 3, 4, 5, 6].map((k) => `<option ${planCount === k ? "selected" : ""}>${k}</option>`).join("")}</select> 套</label>
           <button class="primary" data-act="writePlans" ${/中$/.test(p.planJob || "") ? "disabled" : ""}>AI 写方案</button>
           ${p.planJob ? `<span class="tag ${/失败/.test(p.planJob) ? "bad" : "blue"}">${esc(p.planJob)}</span>` : ""}
-          ${planSite === "deepseek" && (p.posterRefs || []).length ? '<span class="muted warntext">DeepSeek 看不懂参考图的风格（只能认字），有参考图时建议用豆包、Kimi、Gemini、Copilot</span>' : ""}</div>
+          ${planSite === "deepseek" && (p.posterRefs || []).length ? '<span class="muted warntext">DeepSeek 能认出参考图里的文案，但看不懂配色和排版；想连风格一起学，用豆包、Kimi、Gemini、Copilot</span>' : ""}</div>
         ${(p.plans || []).length ? `<div class="plans">${p.plans.map((pl, i) => planCard(pl, i, p)).join("")}</div>` : '<div class="empty" style="margin-top:10px">还没有方案。填好“要表达的内容”，点“AI 写方案”。</div>'}</div>` : "";
     const placeUrl = p.placeRef ? await ST.urlOf(p.placeRef) : "";
     const pend = p.items.filter((x) => x.state !== "ok"), done = p.items.filter((x) => x.state === "ok");
@@ -604,7 +607,7 @@
       VIEWER.open([{ src: URL.createObjectURL(await ST.toBlob(c, "image/png")), name: `草图：${pl.theme}`, png: false, info: "程序按方案画的平面草图：字、位置、大小、颜色都准，没有质感和图标（那些由 AI 画）" }], 0);
     },
     planDel: async (el) => { const i = +el.closest("[data-plan]").dataset.plan; if (!(await confirm("删除这套方案？", "删除", true))) return; const plans = P().plans.filter((_, k) => k !== i); setFields({ plans }); render(); },
-    planAddRow: (el) => { const pl = P().plans[+el.closest("[data-plan]").dataset.plan]; pl.blocks.push({ pos: "文字", text: "", font: "黑体", weight: "粗", size: 40, y: 60, color: "#333333", effect: "", bg: "" }); setFields({ plans: P().plans }); render(); },
+    planAddRow: (el) => { const pl = P().plans[+el.closest("[data-plan]").dataset.plan]; pl.blocks.push({ pos: "文字", text: "", font: "黑体", weight: "粗", size: 40, x: 50, y: 60, color: "#333333", effect: "", bg: "" }); setFields({ plans: P().plans }); render(); },
     planDelRow: (el) => { const pl = P().plans[+el.closest("[data-plan]").dataset.plan]; pl.blocks.splice(+el.closest("[data-row]").dataset.row, 1); setFields({ plans: P().plans }); render(); },
     placeRef: async (el) => { const p = await op({ op: "placeRef", iid: itemOf(el).id }); if (p) APP.toast("以后“AI 直接画场景”都照这张的摆法放（在“③ 生成 → 摆放”里可以改回去）"); },
     clearPlace: (el, e) => { e.stopPropagation(); op({ op: "placeRef", clear: true }); },

@@ -315,17 +315,18 @@ ST.P = (() => {
     posterPlan(p, n, hasRefs) {
       const ban = ST.banList(p.posterBan);
       return [
-        `请为一款电商商品设计 ${n} 套淘宝 / 天猫主图（正方形 800×800）的“文字版方案”。${hasRefs ? "附上的图片是参考图：学它的风格和排版（配色、字体感觉、标题 / 标签 / 底部横条的位置和大小），但文字不要照抄。" : ""}`,
+        `请为一款电商商品设计 ${n} 套淘宝 / 天猫主图（正方形 800×800）的“文字版方案”。`,
+        hasRefs ? "附上的图片是参考图，风格、排版和文案都要参考：配色、字体感觉、色块和横条的分区、标题 / 标签 / 卖点列表 / 底部横条的位置和大小；文案的说法、卖点的组织方式、句式、字的多少也可以借鉴，改写成符合【要表达的内容】的话。不要照抄参考图里别家的店名、品牌、logo、价格。" : "",
         `【要表达的内容】${String(p.posterContent != null ? p.posterContent : [p.industry, p.posterNote].filter(Boolean).join("；")).trim() || "（没写，按参考图的行业来）"}`,
         n > 1 ? `每套方案讲一个重点，依次是：${ST.POSTER_THEMES.slice(0, n).map((t) => t.name).join("、")}。` : "这套方案讲核心卖点（吸引点击的第一张主图）。",
         "要求：",
-        "1. 手机上“一眼见”：大标题最大、最醒目，最多两行、每行不超过 8 个字；整张图最多 4～6 块文字、一共大约 30 个字以内；文字和背景对比要强，不要小字、密字。",
+        hasRefs ? "1. 手机上“一眼见”：字的多少、分区可以和参考图差不多（参考图字多、卖点列表长都可以照着来），但大标题必须最大、最醒目（一行不超过 8 个字），最小的字也不能小于 26 像素，文字和底色对比要强。" : "1. 手机上“一眼见”：大标题最大、最醒目，最多两行、每行不超过 8 个字；可以有标签、卖点列表、底部横条，但整张图别太挤（一般 50 个字以内），最小的字不小于 26 像素，文字和背景对比要强。",
         `2. 不能用广告法违禁词和过度承诺：${ban.join("、")}；不写联系方式、价格（除非内容里给了）、别的品牌。`,
         "3. 字体从这些里选：黑体、圆体、宋体、楷体、手写体、综艺体；粗细写：常规 / 中粗 / 粗 / 特粗。",
-        "4. 字号按 800×800 的画布写像素：大标题一般 80～120，副标题 36～50，标签 28～40，底部横条文字 40～56。",
-        "5. y 是这块字的中心在画面从上往下的位置（0～100，单位 %）；颜色用 #RRGGBB；effect 写效果（如：白色描边、浅阴影、圆角底框、虚线圆角框、深色底横条、无）；bg 是这块字底下色块 / 横条 / 底框的颜色，没有就写空字符串。",
+        "4. 字号按 800×800 的画布写像素：大标题一般 80～120，副标题 36～50，标签 / 卖点 26～40，底部横条文字 40～56。",
+        "5. y 是这块字的中心在画面从上往下的位置（0～100，单位 %），x 是从左往右的位置（0～100，单位 %，居中就是 50；左右分栏时左边一般 25～30、右边 70～75）；颜色用 #RRGGBB；effect 写效果（如：白色描边、浅阴影、圆角底框、虚线圆角框、深色底横条、无）；bg 是这块字底下色块 / 横条 / 底框的颜色，没有就写空字符串。",
         "只回复一个 JSON 代码块，格式：",
-        '{"plans":[{"theme":"核心卖点","style":"科技简约，干净明亮","colors":"主色 宝蓝 #2B5BFF；强调色 橙 #FF7A1A；文字 深灰 #333333","bgColor":"#F2F4F7","bgColor2":"#FFFFFF","background":"浅灰到白的渐变，右下角淡淡的电路线条","layout":"上：小标签；中：两行大标题；下：三个圆角标签；底部：深蓝横条","icons":"左下一个电脑图标","blocks":[{"pos":"顶部标签","text":"纯净原版 不带捆绑软件","font":"黑体","weight":"中粗","size":34,"y":12,"color":"#333333","effect":"虚线圆角框","bg":""}]}]}',
+        '{"plans":[{"theme":"核心卖点","style":"科技简约，干净明亮","colors":"主色 宝蓝 #2B5BFF；强调色 橙 #FF7A1A；文字 深灰 #333333","bgColor":"#F2F4F7","bgColor2":"#FFFFFF","background":"浅灰到白的渐变，右下角淡淡的电路线条","layout":"上：小标签；中：两行大标题；下：三个圆角标签；底部：深蓝横条","icons":"左下一个电脑图标","blocks":[{"pos":"顶部标签","text":"纯净原版 不带捆绑软件","font":"黑体","weight":"中粗","size":34,"x":50,"y":12,"color":"#333333","effect":"虚线圆角框","bg":""}]}]}',
       ].join("\n");
     },
     /** 文字版主图第二步：按改好的方案出图（文字一字不差） */
@@ -343,11 +344,11 @@ ST.P = (() => {
         `- Layout: ${plan.layout || ""}`,
         plan.icons ? `- Icons / decorations (no text in them): ${plan.icons}` : "",
         "- Text blocks — render EXACTLY these Chinese texts, character for character, and NO other text anywhere:",
-        ...blocks.map((b, i) => `  ${i + 1}. [${b.pos || ""}] 「${String(b.text).trim()}」 — font: ${b.font || "黑体"} ${b.weight || ""}; character height about ${pct(b.size)}% of the image width; vertical center at ${+b.y || 50}% from the top; color ${b.color || ""}${b.effect && b.effect !== "无" ? "; effect: " + b.effect : ""}${b.bg ? "; on a " + b.bg + " shape" : ""}`),
+        ...blocks.map((b, i) => `  ${i + 1}. [${b.pos || ""}] 「${String(b.text).trim()}」 — font: ${b.font || "黑体"} ${b.weight || ""}; character height about ${pct(b.size)}% of the image width; center at ${+b.x || 50}% from the left and ${+b.y || 50}% from the top; color ${b.color || ""}${b.effect && b.effect !== "无" ? "; effect: " + b.effect : ""}${b.bg ? "; on a " + b.bg + " shape" : ""}`),
         plan.note ? `- Extra notes (Chinese): ${plan.note}` : "",
         "- Every Chinese character must be correct, complete, standard Simplified Chinese: no typos, no missing strokes, no garbled or made-up characters, no extra English or filler text, no watermark, no logos of other brands.",
         `- Never add any of these words: ${ban.join(", ")}.`,
-        "- Mobile one-glance: big, bold, high-contrast headline; nothing small or crowded.",
+        "- Mobile one-glance: the headline is the biggest, boldest element; every text block is bold and high-contrast enough to read on a phone; use clear color blocks / bars to separate areas like the spec says.",
         "Reply with the image only.",
       ].filter(Boolean).join("\n");
     },
