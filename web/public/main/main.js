@@ -323,8 +323,15 @@
     if (t.type === "checkbox") render();
     if (b === "text" || a === "slots") banRefresh();
   }
+  /** 自己填的禁止词，在“要表达的内容”里也出现了（会让 AI 写出意思不对的话） */
+  function banConflict(p) {
+    const content = String(p.posterContent != null ? p.posterContent : "");
+    return String(p.posterBan || "").split(/[,，、;；\s]+/).map((x) => x.trim()).filter((w) => w && content.includes(w));
+  }
   function banRefresh() {
     const p = P();
+    const bc = $("banConflict");
+    if (bc) { const c = banConflict(p); bc.hidden = !c.length; bc.textContent = `注意：禁止词里的“${c.join("”“")}”在“要表达的内容”里也有——AI 写方案时会避开它，可能写出意思不对的话（比如不让写“退款”，就写成“不成功也收费”）。`; }
     (p.plans || []).forEach((pl, i) => {
       const all = [];
       const tp = pl.tpl && ST.posterTpl(pl.tpl);
@@ -506,6 +513,7 @@
         <div class="lb">要表达的内容（卖什么、卖点、服务、售后……）</div>
         <textarea id="posterContent" rows="2" placeholder="如：远程安装 MySQL，5.x～8.x 任意版本，Win / Linux / Mac，赠送可视化工具，一对一远程，安装不成功全额退款">${esc(content)}</textarea>
         <label class="row lb" style="margin-top:8px">禁止出现的词（逗号隔开） <input id="posterBan" value="${esc(p.posterBan || "")}" placeholder="如：秒装, 包售后, 某某品牌" style="flex:1"></label>
+        <div class="muted warntext" id="banConflict" ${banConflict(p).length ? "" : "hidden"}>注意：禁止词里的“${esc(banConflict(p).join("”“"))}”在“要表达的内容”里也有——AI 写方案时会避开它，可能写出意思不对的话（比如不让写“退款”，就写成“不成功也收费”）。</div>
         <div class="muted" style="margin-top:4px">广告法违禁词和虚假承诺（${ST.BAN_WORDS.slice(0, 8).join("、")}……）默认就禁，不用填；“安装不成功全额退款”这种真实的售后承诺可以写。</div>
         <div class="row" style="margin-top:12px;gap:8px"><span class="lb">做法</span><span class="pills"><span class="pill ${kind === "tpl" ? "on" : ""}" data-pkind="tpl">给定版式</span><span class="pill ${kind === "free" ? "on" : ""}" data-pkind="free">自由发挥</span></span></div>
         ${kind === "free" ? `<div class="row" style="margin-top:10px;gap:10px;flex-wrap:wrap">
@@ -538,6 +546,7 @@
         <span class="lb">做法</span><span class="pills">${MODES.map(([v, t, tip]) => `<span class="pill ${modeOf(p) === v ? "on" : ""}" data-mode="${v}" title="${esc(tip)}">${t}</span>`).join("")}</span>
         <span class="lb">尺寸</span><span class="pills">${SIZES.map((s) => `<span class="pill ${p.size === s ? "on" : ""}" data-size="${s}">${s}×${s}</span>`).join("")}</span>
         ${modeOf(p) === "scene" ? `<span class="lb">摆放</span><span class="pills">${PLACES.map(([v, t, tip]) => `<span class="pill ${(p.placement || "free") === v ? "on" : ""}" data-place="${v}" title="${esc(tip)}">${t}</span>`).join("")}${p.placeRef ? `<span class="pill ${p.placement === "ref" ? "on" : ""}" data-place="ref" title="照这张图里的摆法"><img src="${esc(placeUrl)}" class="placeimg" alt="">照“${esc(p.placeRefName || "")}”那张摆<span class="x" data-act="clearPlace" title="不用这张了">✕</span></span>` : ""}</span>` : ""}
+        ${poster && !freeMode && (p.posterRefs || []).length ? `<label class="row lb" title="默认不发：参考图的版式和版式模板不一样，会打架，还会带出参考图上的字。勾上也只让 AI 学配色和质感"><input type="checkbox" id="tplRefs" ${p.tplRefs ? "checked" : ""}> 出图时也参考参考图的风格</label>` : ""}
         ${freeMode ? "" : poster ? `<label class="row lb">每套方案出 <select id="perPlan">${[1, 2, 3].map((k) => `<option ${(p.perPlan || 1) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张</label>
         ${(p.plans || []).some((x) => !x.tpl) ? `<label class="row lb" title="程序按方案画一张平面草图（字、位置、大小、颜色都准，但没有质感和图标），一起发给 AI，让它照草图排版"><input type="checkbox" id="sketch" ${p.sketch ? "checked" : ""}> 附上草图（让 AI 照草图排版）</label>` : ""}` : `<label class="row lb">每种风格 <select id="count">${[1, 2, 3, 4, 5, 6].map((k) => `<option ${(p.count || 1) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张</label>`}
         ${p.mode !== "paste" ? "" : `<label class="row lb">产品大小 <input type="range" id="scale" min="40" max="95" value="${Math.round((p.scale || 0.85) * 100)}"><span id="scaleV">${Math.round((p.scale || 0.85) * 100)}%</span></label>
@@ -763,7 +772,7 @@
     if (t.id === "projName") { if (!p.fixedName) setSoon({ name: t.value }); }
     else if (t.id === "pName") setSoon({ info: { ...(p.info || {}), name: t.value } });
     else if (t.id === "custom") setSoon({ custom: t.value });
-    else if (t.id === "posterContent") setSoon({ posterContent: t.value });
+    else if (t.id === "posterContent") { setSoon({ posterContent: t.value }); banRefresh(); }
     else if (t.id === "freeStyleText") setSoon({ freeStyleText: t.value });
     else if (t.id === "posterBan") { setSoon({ posterBan: t.value }); banRefresh(); }
     else if (t.dataset.pf && t.tagName !== "SELECT" && t.type !== "checkbox") planEdit(t);
@@ -778,6 +787,7 @@
     else if (t.id === "perPlan") setFields({ perPlan: +t.value });
     else if (t.id === "freeStyle") { setFields({ freeStyle: t.value }); render(); }
     else if (t.id === "freeCount") setFields({ freeCount: +t.value });
+    else if (t.id === "tplRefs") setFields({ tplRefs: t.checked });
     else if (t.id === "sketch") setFields({ sketch: t.checked });
     else if (t.id === "planSite") { planSite = t.value; ls.set("st:planSite", planSite); render(); }
     else if (t.id === "planCount") { planCount = +t.value; ls.set("st:planCount", String(planCount)); }

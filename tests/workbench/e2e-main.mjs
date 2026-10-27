@@ -373,7 +373,11 @@ try {
     await (await fcp).setFiles({ name: '参考.png', mimeType: 'image/png', buffer: product('#eeeeee') });
     await page.waitForSelector('.mcard.pref');
     await page.fill('#posterContent', '远程安装 MySQL，5.x～8.x 任意版本，一对一远程，安装不成功全额退款');
+    await page.fill('#posterBan', '秒装, 包售后, 退款');
+    await page.waitForSelector('#banConflict:not([hidden])');
+    check('禁止词和要表达的内容冲突（都有“退款”）：提醒', /退款/.test(await page.textContent('#banConflict')));
     await page.fill('#posterBan', '秒装, 包售后');
+    await page.waitForSelector('#banConflict', { state: 'hidden' });
     await page.click('.tplc[data-tpl="E"] img');
     await page.waitForSelector('.tplc[data-tpl="E"].on');
     await page.click('.tplc[data-tpl="F2"] img');
@@ -414,9 +418,21 @@ try {
     await page.waitForFunction(() => !document.querySelector('.pendbox .tag.blue'), null, { timeout: 60000 });
     const gens = ai.asked.slice(na).filter((a) => /LAYOUT WIREFRAME/.test(a.prompt));
     const gE = gens.find((a) => /黑底大字报/.test(a.prompt)), gF = gens.find((a) => /深蓝科技/.test(a.prompt));
-    check('按方案出图（版式 E）：参考图 + 线框图，说明卡、配色、格子里的字一字不差', gE && gE.files.join(',') === '参考图1.jpg,版式线框图.png' && /超大白字：「远程装库」/.test(gE.prompt) && /方块 1：「快速装好」/.test(gE.prompt) && /yellow #FFE14D/.test(gE.prompt) && /2x2 grid of red boxes/.test(gE.prompt), JSON.stringify(gE && gE.files));
-    check('按方案出图（版式 F2）：换了配色、带店铺图标和图标描述', gF && gF.files.join(',') === '参考图1.jpg,店铺图标.png,版式线框图.png' && /deep purple/.test(gF.prompt) && /笔记本电脑和客服耳机/.test(gF.prompt) && /shop's own logo/.test(gF.prompt), JSON.stringify(gF && gF.files));
+    check('按方案出图（版式 E）：默认只发灰色线框图（参考图不发，免得打架），说明卡、配色、格子里的字一字不差，要做成精致成品、字不准改', gE && gE.files.join(',') === '版式线框图.png' && /GREY LAYOUT WIREFRAME/.test(gE.prompt) && /FINISHED premium commercial design/.test(gE.prompt) && /do not fix, rephrase/.test(gE.prompt) && /超大白字：「远程装库」/.test(gE.prompt) && /方块 1：「快速装好」/.test(gE.prompt) && /yellow #FFE14D/.test(gE.prompt) && /2x2 grid of red boxes/.test(gE.prompt), JSON.stringify(gE && gE.files));
+    check('按方案出图（版式 F2）：换了配色、带店铺图标和图标描述', gF && gF.files.join(',') === '店铺图标.png,版式线框图.png' && /deep purple/.test(gF.prompt) && /笔记本电脑和客服耳机/.test(gF.prompt) && /shop's own logo/.test(gF.prompt), JSON.stringify(gF && gF.files));
     check('文字版主图的卡片：标“文字版”、有 AI 标签和时间', /文字版/.test(await page.textContent('.pendbox .mcard[data-iid] b')) && (await page.locator('.pendbox .tag.aisite').count()) === 2);
+    // 勾“出图时也参考参考图的风格”：参考图一起发，只学配色质感
+    await page.check('#tplRefs');
+    await page.waitForFunction(() => document.getElementById('tplRefs').checked);
+    await sleep(300);
+    const nr = ai.asked.length;
+    await page.click('.pendbox .mcard[data-iid]:has-text("核心卖点") [data-act="redraw"]');
+    await page.waitForFunction((n) => true, nr);
+    for (let k = 0; k < 100 && !ai.asked.slice(nr).some((a) => /LAYOUT WIREFRAME/.test(a.prompt)); k++) await sleep(200);
+    const gr = ai.asked.slice(nr).find((a) => /LAYOUT WIREFRAME/.test(a.prompt));
+    check('勾了“出图时也参考参考图的风格”：参考图一起发，只学配色质感、忽略版式和字', gr && gr.files.join(',') === '参考图1.jpg,版式线框图.png' && /borrow ONLY colors/.test(gr.prompt), JSON.stringify(gr && gr.files));
+    await page.waitForFunction(() => !document.querySelector('.pendbox .tag.blue'), null, { timeout: 60000 });
+    await page.uncheck('#tplRefs');
     check('审核用哪个 AI 在主图页选：豆包 / DeepSeek / Kimi / 智谱', (await page.locator('#judgeSite option').count()) === 4);
     await page.selectOption('#judgeSite', 'deepseek');
     const nj = doubao.length;

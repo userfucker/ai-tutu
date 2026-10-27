@@ -6,7 +6,7 @@ import path from "node:path";
 import vm from "node:vm";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
-const ctx = { ST: {} };
+const ctx = { ST: { P: {} } };
 vm.runInNewContext(fs.readFileSync(path.join(ROOT, "public/detail/core/postertpl.js"), "utf8"), ctx);
 const TPLS = ctx.ST.POSTER_TPLS;
 
@@ -107,7 +107,9 @@ for (const t of TPLS) {
   // 线框图里的字 = 格子名（去掉空格、括号），不比示例文字长，免得撑破版式
   const wire = Object.fromEntries(t.slots.map(([k, n]) => [k, [...n.replace(/（.*）/, "").replace(/\s+/g, "")].slice(0, Math.max(2, [...EX[t.id][k]].length)).join("")]));
   for (const [suffix, v, w] of [["", EX[t.id], false], ["-wire", wire, true]]) {
-    await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${CSS}</style></head><body>${H[t.id](v, w)}</body></html>`);
+    // 线框图做成灰色：只看得出位置和大小，没有配色和设计感，出图 AI 就不会照着它的样子画（Lee 2026-10-27：成品和线框图一模一样，很平）
+    const gray = w ? ".b{filter:grayscale(1) contrast(.75) brightness(1.08)}" : "";
+    await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${CSS}${gray}</style></head><body>${H[t.id](v, w)}</body></html>`);
     await page.waitForTimeout(150);
     await page.screenshot({ path: path.join(out, `${t.id}${suffix}.png`), clip: { x: 0, y: 0, width: 360, height: 360 } });
   }

@@ -20,7 +20,7 @@ import * as lib from "../library.js";
 
 const running = new Set(); // 正在做的“项目:主图/产品”
 const SITE_OK = ["gemini", "copilot"]; // 画图可以临时指定的网站（空 = 按 AI 分工轮流）
-const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode", "placement", "industry", "posterNote", "posterTheme", "posterContent", "posterBan", "plans", "perPlan", "sketch", "posterKind", "freeStyle", "freeStyleText", "freeCount", "tplPick"];
+const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode", "placement", "industry", "posterNote", "posterTheme", "posterContent", "posterBan", "plans", "perPlan", "sketch", "posterKind", "freeStyle", "freeStyleText", "freeCount", "tplPick", "tplRefs"];
 
 export function newProject(o = {}) {
   const ST = getST();
@@ -139,7 +139,8 @@ function runItem(pid, iid, what, resume) {
       for (const [n, r] of (p.posterRefs || []).slice(0, 3).entries()) refs.push(await ai.img(await ST.db.getBlob(r.key), `参考图${n + 1}.jpg`, 1536));
       let prompt, imgs = refs.filter(Boolean);
       if (it.plan && it.plan.tpl && ST.posterTpl(it.plan.tpl)) {
-        // 给定版式：参考图（可选）+ 店铺自己的图标（可选）+ 模板线框图（我们自己画的）
+        // 给定版式：参考图（默认不发——版式不同会打架，还会带出参考图上的字；勾了“出图时也参考参考图的风格”才发）+ 店铺图标（可选）+ 灰色线框图
+        if (!p.tplRefs) imgs = [];
         const nRef = imgs.length;
         const icon = it.plan.iconKey ? await ai.img(await ST.db.getBlob(it.plan.iconKey), "店铺图标.png", 1024) : null;
         if (icon) imgs.push(icon);
