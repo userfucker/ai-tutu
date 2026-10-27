@@ -15,12 +15,12 @@ import * as Q from "../queue.js";
 import { SITE_NAMES } from "../bridge.js";
 import * as store from "../detail/store.js";
 import { getST, kit } from "../detail/runtime.js";
-import { FILES_DIR } from "../config.js";
+import { FILES_DIR, PUBLIC_DIR } from "../config.js";
 import * as lib from "../library.js";
 
 const running = new Set(); // 正在做的“项目:主图/产品”
 const SITE_OK = ["gemini", "copilot"]; // 画图可以临时指定的网站（空 = 按 AI 分工轮流）
-const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode", "placement", "industry", "posterNote", "posterTheme", "posterContent", "posterBan", "plans", "perPlan", "sketch"];
+const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode", "placement", "industry", "posterNote", "posterTheme", "posterContent", "posterBan", "plans", "perPlan", "sketch", "posterKind", "freeStyle", "freeStyleText", "freeCount", "tplPick"];
 
 export function newProject(o = {}) {
   const ST = getST();
@@ -138,7 +138,17 @@ function runItem(pid, iid, what, resume) {
       const refs = [];
       for (const [n, r] of (p.posterRefs || []).slice(0, 3).entries()) refs.push(await ai.img(await ST.db.getBlob(r.key), `参考图${n + 1}.jpg`, 1536));
       let prompt, imgs = refs.filter(Boolean);
-      if (it.plan) {
+      if (it.plan && it.plan.tpl && ST.posterTpl(it.plan.tpl)) {
+        // 给定版式：参考图（可选）+ 店铺自己的图标（可选）+ 模板线框图（我们自己画的）
+        const nRef = imgs.length;
+        const icon = it.plan.iconKey ? await ai.img(await ST.db.getBlob(it.plan.iconKey), "店铺图标.png", 1024) : null;
+        if (icon) imgs.push(icon);
+        const wf = path.join(PUBLIC_DIR, "main", "tpl", `${it.plan.tpl}-wire.png`);
+        imgs.push(await ai.img(new Blob([fs.readFileSync(wf)], { type: "image/png" }), "版式线框图.png", 1024, true));
+        prompt = ST.P.posterFromTpl(p, it.plan, { refs: nRef, icon: !!icon });
+      } else if (it.free) {
+        prompt = ST.P.posterFree(p, it, { refs: imgs.length });
+      } else if (it.plan) {
         // 文字版主图：按改好的方案画；参考图、草图都是可选的
         const sk = it.sketchKey ? await ai.img(await ST.db.getBlob(it.sketchKey), "草图.jpg", 1024) : null;
         prompt = ST.P.posterFromPlan(p, it.plan, { refs: imgs.length, sketch: !!sk });
@@ -207,7 +217,7 @@ function runItem(pid, iid, what, resume) {
 const PLAN_OK = ["deepseek", "doubao", "kimi", "glm", "gemini", "copilot"];
 const JUDGE_OK = ["doubao", "deepseek", "kimi", "glm"];
 /** 文字版主图第一步：AI 写方案（JSON），写好放进 p.plans（替换原来的） */
-function writePlans(pid, site, n) {
+function writePlans(pid, site, n, tpls) {
   let ai = null;
   (async () => {
     const ST = getST();
@@ -217,6 +227,23 @@ function writePlans(pid, site, n) {
     for (const [i, r] of (p.posterRefs || []).slice(0, 3).entries()) refs.push(await ai.img(await ST.db.getBlob(r.key), `参考图${i + 1}.jpg`, 1280));
     const imgs = refs.filter(Boolean);
     // 有参考图要能看图：国内的走 ai-web（1.4.0 起能发图），所以按“看详情图”那一类派活；没参考图就是写文字
+    if (tpls && tpls.length) {
+      // 给定版式：每套方案一个模板，AI 只填格子
+      const r = await ai.json("plan", ST.P.posterTplPlan(p, tpls, imgs.length), imgs, `主图文字方案（${tpls.length} 套，固定版式）`, { role: imgs.length ? "read" : "text", site, noWait: true });
+      const list = Array.isArray(r.plans) ? r.plans : Array.isArray(r) ? r : [];
+      const plans = tpls.map((id, i) => {
+        const t = ST.posterTpl(id);
+        const x = list.find((y) => y && y.tpl === id && !y._used) || list[i] || {};
+        x._used = true;
+        const slots = {}, icons = {};
+        for (const [k] of t.slots) slots[k] = String((x.slots || {})[k] || "").trim().slice(0, 40);
+        for (const [k] of t.icons || []) icons[k] = String((x.icons || {})[k] || "").trim().slice(0, 120);
+        return { id: ST.uid("pl"), on: true, by: site, tpl: id, palette: 0, theme: String(x.theme || t.name).slice(0, 20), slots, icons, note: "" };
+      });
+      if (!plans.some((x) => Object.values(x.slots).some(Boolean))) throw new Error("AI 没写出方案（格式不对），再点一次");
+      edit(pid, (q) => { q.plans = plans; q.planJob = ""; });
+      return;
+    }
     const r = await ai.json("plan", ST.P.posterPlan(p, n, imgs.length), imgs, `主图文字方案（${n} 套）`, { role: imgs.length ? "read" : "text", site, noWait: true });
     const hex = (v, d) => (/^#[0-9a-f]{6}$/i.test(String(v || "").trim()) ? String(v).trim() : d);
     const plans = (Array.isArray(r.plans) ? r.plans : Array.isArray(r) ? r : []).slice(0, n).map((x, i) => ({
@@ -331,9 +358,18 @@ export async function op(pid, b) {
       if (!p.items.some((it) => it.product === pr.id)) [pr.key, pr.cut, pr.white].forEach(delBlob);
     });
     case "generate": {
+      if (p0.mode === "poster" && p0.posterKind === "free") {
+        // 自由发挥：不定版式；一共 freeCount 张，每张一个重点（一套主图）
+        const cnt = Math.min(6, Math.max(1, +p0.freeCount || 1));
+        const list = [];
+        for (let k = 0; k < cnt; k++) list.push({ id: ST.uid("it"), mode: "poster", free: true, theme: k % ST.POSTER_THEMES.length, style: "poster", styleName: ST.POSTER_THEMES[k % ST.POSTER_THEMES.length].name, prompt: "", ref: "", product: "", bg: "", pos: { x: 0.5, y: 0.53, s: 0.85 }, harm: null, state: "pending", t: Date.now(), rot: k, job: "排队中", site: SITE_OK.includes(b.site) ? b.site : "" });
+        const p = edit(pid, (q) => { q.items.unshift(...list); });
+        for (const it of list) runItem(pid, it.id, "full");
+        return p;
+      }
       if (p0.mode === "poster" && (p0.plans || []).length) {
         // 文字版主图第二步：勾上的方案，每套出 perPlan 张
-        const plans = p0.plans.filter((x) => x.on !== false && (x.blocks || []).some((b) => String(b.text || "").trim()));
+        const plans = p0.plans.filter((x) => x.on !== false && ((x.blocks || []).some((b) => String(b.text || "").trim()) || Object.values(x.slots || {}).some((v) => String(v || "").trim())));
         if (!plans.length) throw new Error("没有勾上的方案（或者方案里没有字）");
         const per = Math.min(3, Math.max(1, +p0.perPlan || 1));
         const list = [];
@@ -374,7 +410,8 @@ export async function op(pid, b) {
       // 文字版主图第一步：AI 写方案（网页上选哪个 AI 写：DeepSeek / 豆包 / Kimi / 智谱 / Gemini / Copilot）
       if (!PLAN_OK.includes(b.site)) throw new Error("选一个写方案的 AI");
       if (p0.planJob && !/失败/.test(p0.planJob)) throw new Error("正在写方案，等一下");
-      writePlans(pid, b.site, Math.min(6, Math.max(1, +b.n || 1)));
+      const tpls = (Array.isArray(b.tpls) ? b.tpls : []).filter((id) => getST().posterTpl(id)).slice(0, 6);
+      writePlans(pid, b.site, Math.min(6, Math.max(1, +b.n || 1)), tpls);
       return edit(pid, (p) => { p.planJob = `${SITE_NAMES[b.site] || b.site} 写方案中`; });
     }
     case "addPosterRef": {

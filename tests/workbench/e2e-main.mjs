@@ -43,6 +43,14 @@ const doubao = [];
 const plugin2 = await connect(`ws://127.0.0.1:${PORT}/ext`, { token, name: '测试电脑', version: '1.5.0', app: 'aiweb', sites: [{ site: 'doubao', name: '豆包', open: true, ready: true }, { site: 'deepseek', name: 'DeepSeek', open: true, ready: true }] }, async (m) => {
   if (m.cmd !== 'ask') return { error: '不支持' };
   doubao.push({ t: Date.now(), text: m.args.text, files: (m.args.files || []).length, site: m.site });
+  if (/固定版式模板/.test(m.args.text)) {
+    const ids = [...m.args.text.matchAll(/方案 \d+：模板 (\w+)/g)].map((x) => x[1]);
+    const SL = {
+      E: { tag1: '升级', tag2: '远程', tag3: '装库', tag4: '调试', shop: '装机专家', title: '远程安装', sub: 'MySQL 各版本都能装', box1: '秒装环境', box2: '版本任选', box3: '赠送工具', box4: '一对一', foot1: '不成功退', foot2: '售后无忧' },
+      F2: { tag: '专业服务 · 快速响应', title: '远程装环境', pill: '环境搭建 · 问题解决', card: '一对一 快速解决', g1: 'MySQL', g2: 'JDK', g3: 'Node', g4: 'IDEA', g5: 'Redis', g6: 'Nginx', g7: 'Navicat', g8: 'Tomcat', a1: '专业团队', a2: '快速响应', a3: '质量保障', a4: '售后无忧' },
+    };
+    return { answer: '```json\n' + JSON.stringify({ plans: ids.map((id) => ({ tpl: id, theme: id === 'E' ? '核心卖点' : '服务内容', slots: SL[id] || {}, icons: id === 'F2' ? { hero: '笔记本电脑和客服耳机', grid: '各软件的图标' } : {} })) }) + '\n```' };
+  }
   if (/文字版方案/.test(m.args.text)) {
     const plan = (theme, extra) => ({ theme, style: '科技简约', colors: '主色 宝蓝 #2B5BFF；文字 深灰 #333333', bgColor: '#F2F4F7', bgColor2: '#FFFFFF', background: '浅灰渐变', layout: '上标签 中标题 下横条', icons: '电脑图标', blocks: [{ pos: '顶部标签', text: '纯净原版 无捆绑', font: '黑体', weight: '中粗', size: 34, y: 12, color: '#333333', effect: '虚线圆角框', bg: '' }, { pos: '大标题', text: '远程安装系统', font: '黑体', weight: '特粗', size: 100, y: 40, color: '#2B5BFF', effect: '白色描边', bg: '' }, { pos: '标签', text: extra, font: '黑体', weight: '粗', size: 32, y: 70, color: '#2B5BFF', effect: '圆角底框', bg: '#E8EEFF' }, { pos: '左栏', text: 'Win7/10/11', font: '黑体', weight: '粗', size: 28, x: 27, y: 58, color: '#FFFFFF', effect: '圆角底框', bg: '#D7263D' }, { pos: '右栏卖点', text: '支持远程一对一', font: '黑体', weight: '中粗', size: 30, x: 72, y: 58, color: '#D7263D', effect: '无', bg: '' }, { pos: '底部横条', text: '装不好不收费', font: '黑体', weight: '粗', size: 48, y: 90, color: '#FFFFFF', effect: '深色底横条', bg: '#1D3FA8' }] });
     return { answer: '```json\n' + JSON.stringify({ plans: [plan('核心卖点', '秒装 Win11'), plan('服务内容', 'Win7/10/11')] }) + '\n```' };
@@ -352,69 +360,91 @@ try {
   check('素材中心：去白边“保存”换掉原图（名字不变、张数不变）', after && after.name === '白底.png' && after.v !== lb0.v && (await page.locator('.lit').count()) === nLit + 1, JSON.stringify([lb0.v, after && after.v]));
   await api('DELETE', `/api/projects/${dl3[0].id}`);
 
-  // 文字版主图：① 参考图（可选）② AI 写方案（选写方案的 AI）、人改 ③ 按方案出图（可附草图），审核可以选 DeepSeek
+  // 文字版主图：给定版式（9 个固定版式，AI 只填格子，人改，出图带线框图）/ 自由发挥；写方案、审核的 AI 在主图页选
   {
     const np = await api('POST', '/api/main', { name: '装系统' });
     await page.goto(BASE + `/main/#p=${np.id}`);
     await page.waitForSelector('[data-mode="poster"]');
     await page.click('[data-mode="poster"]');
-    await page.waitForSelector('#posterContent');
-    check('文字版主图：没有方案时不能出图；没有产品图、风格那两块', await page.isDisabled('[data-act="generate"]') && (await page.locator('[data-act="addProducts"]').count()) === 0 && (await page.locator('[data-sty]').count()) === 0 && (await page.locator('#industry').count()) === 0);
+    await page.waitForSelector('.tplgrid');
+    check('文字版主图：默认“给定版式”，有 9 个版式可选；没有产品图、风格那两块', (await page.locator('.tplc').count()) === 9 && (await page.locator('[data-pkind="tpl"].on').count()) === 1 && (await page.locator('[data-act="addProducts"]').count()) === 0 && await page.isDisabled('[data-act="writePlans"]'));
     const fcp = page.waitForEvent('filechooser');
     await page.click('[data-act="posterUpload"]');
     await (await fcp).setFiles({ name: '参考.png', mimeType: 'image/png', buffer: product('#eeeeee') });
     await page.waitForSelector('.mcard.pref');
-    await page.fill('#posterContent', '远程安装电脑系统，纯净原版，支持 Win7/10/11，装不好不收费');
+    await page.fill('#posterContent', '远程安装 MySQL，5.x～8.x 任意版本，一对一远程，安装不成功全额退款');
     await page.fill('#posterBan', '秒装, 包售后');
+    await page.click('.tplc[data-tpl="E"] img');
+    await page.waitForSelector('.tplc[data-tpl="E"].on');
+    await page.click('.tplc[data-tpl="F2"] img');
+    await page.waitForSelector('.tplc[data-tpl="F2"].on');
+    check('选版式：点一下选上，按顺序标号', (await page.textContent('.tplc[data-tpl="E"] .tcount')) === '1' && (await page.textContent('.tplc[data-tpl="F2"] .tcount')) === '2' && /AI 写方案（2 套）/.test(await page.textContent('[data-act="writePlans"]')));
     check('写方案的 AI 在主图页选：DeepSeek / 豆包 / Kimi / 智谱 / Gemini / Copilot', (await page.locator('#planSite option').count()) === 6 && (await page.inputValue('#planSite')) === 'doubao');
-    await page.selectOption('#planCount', '2');
+    await sleep(700);
     const nd = doubao.length;
     await page.click('[data-act="writePlans"]');
     await page.waitForSelector('.plan[data-plan="1"]', { timeout: 30000 });
     const ask = doubao[nd];
-    check('AI 写方案：发给选的 AI（豆包），带参考图、要表达的内容、禁止词，要 2 套', ask && ask.site === 'doubao' && ask.files === 1 && /远程安装电脑系统/.test(ask.text) && /秒装/.test(ask.text) && /2 套/.test(ask.text), JSON.stringify(ask && { site: ask.site, files: ask.files }));
-    check('方案是表格：每行文字有字体、字号、上下位置、颜色、效果，都能改', (await page.locator('.plan[data-plan="0"] .ptable tbody tr').count()) === 6 && (await page.inputValue('#pl0_b1_text')) === '远程安装系统' && (await page.inputValue('#pl0_b1_size')) === '100');
-    check('有参考图时：写方案要参考参考图的文案（说法、卖点、字的多少），不照抄别家店名品牌', /文案的说法、卖点的组织方式/.test(ask.text) && /不要照抄参考图里别家的店名/.test(ask.text) && !/30 个字以内/.test(ask.text));
-    check('方案有“左右 %”：左右分栏的字按位置放', (await page.inputValue('#pl0_b4_x')) === '72' && (await page.inputValue('#pl0_b3_x')) === '27' && (await page.inputValue('#pl0_b1_x')) === '50');
-    check('方案上标出是哪个 AI 写的', /豆包 写的/.test(await page.textContent('.plan[data-plan="0"] .ph')));
-    check('禁止词（自己填的）在方案里标红', await page.evaluate(() => document.getElementById('pl0_b2_text').classList.contains('banhit')) && !(await page.isHidden('#pl0_ban')));
-    await page.fill('#pl0_b2_text', '一对一远程');
-    await page.waitForFunction(() => !document.getElementById('pl0_b2_text').classList.contains('banhit'));
-    await page.fill('#pl0_b1_text', '远程装系统');
+    check('AI 写方案：发给豆包，带参考图；按选的版式给出格子和字数上限，借鉴参考图文案，可以写真实退款承诺', ask && ask.site === 'doubao' && ask.files === 1 && /模板 E「黑底大字报/.test(ask.text) && /模板 F2/.test(ask.text) && /title（超大白字）：≤4 字/.test(ask.text) && /参考它们的说法/.test(ask.text) && /安装不成功全额退款/.test(ask.text) && /秒装/.test(ask.text), ask && ask.text.slice(0, 80));
+    check('方案：左边版式缩略图，右边“格子 → 文字 → 字数”', (await page.locator('.plan[data-plan="0"] .ptable tbody tr').count()) === 14 && (await page.inputValue('#pl0_s_title')) === '远程安装' && (await page.textContent('#pl0_c_title')) === '4/4' && (await page.locator('.plan[data-plan="0"] .tplthumb img').count()) === 1);
+    check('禁止词（自己填的）标红', await page.evaluate(() => document.getElementById('pl0_s_box1').classList.contains('banhit')) && !(await page.isHidden('#pl0_ban')));
+    await page.fill('#pl0_s_box1', '快速装好');
+    await page.waitForFunction(() => !document.getElementById('pl0_s_box1').classList.contains('banhit'));
+    await page.fill('#pl0_s_title', '远程装库啊啊');
+    await page.waitForFunction(() => document.getElementById('pl0_s_title').classList.contains('banhit'));
+    check('超出字数也标红，字数实时更新', (await page.textContent('#pl0_c_title')) === '6/4');
+    await page.fill('#pl0_s_title', '远程装库');
+    await page.selectOption('#pl1_palette', '1');
+    check('F2 有图标描述格子', (await page.inputValue('#pl1_i_hero')) === '笔记本电脑和客服耳机');
+    const fci = page.waitForEvent('filechooser');
+    await page.click('.plan[data-plan="1"] [data-act="planIcon"]');
+    await (await fci).setFiles({ name: 'logo.png', mimeType: 'image/png', buffer: product('#ffffff') });
+    await page.waitForSelector('.plan[data-plan="1"] .plicon');
     await sleep(1200);
     const sp = (await api('GET', `/api/projects/${np.id}`)).project;
-    check('改方案：改完自动存（禁用词也不标红了）', sp.plans[0].blocks[2].text === '一对一远程' && sp.plans[0].blocks[1].text === '远程装系统' && await page.isHidden('#pl0_ban'));
-    await page.click('.plan[data-plan="0"] [data-act="planSketch"]');
+    check('改方案：改完自动存（文字、配色、店铺图标）', sp.plans[0].slots.box1 === '快速装好' && sp.plans[0].slots.title === '远程装库' && sp.plans[1].palette === 1 && !!sp.plans[1].iconKey);
+    await page.click('.plan[data-plan="0"] .tplthumb img');
     await page.waitForSelector('#vwLayer .vwimg');
-    check('看草图：程序按方案画的平面草图', /草图/.test(await page.textContent('#vwLayer')));
-    await page.screenshot({ path: path.join(out, '6-plan.png'), fullPage: true });
+    check('点版式缩略图：看示例和线框图', /版式 E/.test(await page.textContent('#vwLayer')));
     await page.keyboard.press('Escape');
-    await page.uncheck('.plan[data-plan="1"] input[data-pf="1|on"]');
-    await page.waitForFunction(() => document.querySelector('[data-act="generate"]').textContent.includes('1 张'));
-    await page.check('#sketch');
-    await page.waitForFunction(() => document.getElementById('sketch').checked);
+    await page.screenshot({ path: path.join(out, '6-plan.png'), fullPage: true });
     const na = ai.asked.length;
     await page.click('[data-act="generate"]');
-    await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 1);
+    await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 2);
     await page.waitForFunction(() => !document.querySelector('.pendbox .tag.blue'), null, { timeout: 60000 });
-    const pa = ai.asked.slice(na).find((a) => /following EXACTLY the design spec/.test(a.prompt));
-    check('按方案出图：只出勾上的那套；方案里的字一字不差交给 AI，附参考图和草图', pa && /「远程装系统」/.test(pa.prompt) && /「一对一远程」/.test(pa.prompt) && !/秒装 Win11/.test(pa.prompt) && pa.files.join(',') === '参考图1.jpg,草图.jpg' && /layout sketch/.test(pa.prompt) && /center at 72% from the left/.test(pa.prompt), JSON.stringify(pa && pa.files));
-    check('文字版主图的卡片：标“文字版”、有 AI 标签和时间，没有“用这个摆放”', /文字版/.test(await page.textContent('.pendbox .mcard[data-iid] b')) && (await page.locator('.pendbox .tag.aisite').count()) === 1 && (await page.locator('.pendbox [data-act="placeRef"]').count()) === 0);
+    const gens = ai.asked.slice(na).filter((a) => /LAYOUT WIREFRAME/.test(a.prompt));
+    const gE = gens.find((a) => /黑底大字报/.test(a.prompt)), gF = gens.find((a) => /深蓝科技/.test(a.prompt));
+    check('按方案出图（版式 E）：参考图 + 线框图，说明卡、配色、格子里的字一字不差', gE && gE.files.join(',') === '参考图1.jpg,版式线框图.png' && /超大白字：「远程装库」/.test(gE.prompt) && /方块 1：「快速装好」/.test(gE.prompt) && /yellow #FFE14D/.test(gE.prompt) && /2x2 grid of red boxes/.test(gE.prompt), JSON.stringify(gE && gE.files));
+    check('按方案出图（版式 F2）：换了配色、带店铺图标和图标描述', gF && gF.files.join(',') === '参考图1.jpg,店铺图标.png,版式线框图.png' && /deep purple/.test(gF.prompt) && /笔记本电脑和客服耳机/.test(gF.prompt) && /shop's own logo/.test(gF.prompt), JSON.stringify(gF && gF.files));
+    check('文字版主图的卡片：标“文字版”、有 AI 标签和时间', /文字版/.test(await page.textContent('.pendbox .mcard[data-iid] b')) && (await page.locator('.pendbox .tag.aisite').count()) === 2);
     check('审核用哪个 AI 在主图页选：豆包 / DeepSeek / Kimi / 智谱', (await page.locator('#judgeSite option').count()) === 4);
     await page.selectOption('#judgeSite', 'deepseek');
     const nj = doubao.length;
-    await page.click('.pendbox [data-act="judge"]');
+    await page.click('.pendbox .mcard[data-iid]:has-text("核心卖点") [data-act="judge"]');
     await page.waitForSelector('.pendbox .mcard:has-text("文字有问题")', { timeout: 30000 });
     const ja = doubao.slice(nj).find((x) => /图上的字是 AI 画的/.test(x.text));
-    check('AI 审核选 DeepSeek：发给 DeepSeek，对照方案里的字', ja && ja.site === 'deepseek' && /远程装系统/.test(ja.text), JSON.stringify(ja && ja.site));
-    await page.click('.pendbox [data-act="accept"]');
+    check('AI 审核选 DeepSeek：发给 DeepSeek，对照方案格子里的字', ja && ja.site === 'deepseek' && /远程装库/.test(ja.text), JSON.stringify(ja && ja.site));
+    await page.selectOption('#judgeSite', 'doubao');
+    // 自由发挥
+    await page.click('[data-pkind="free"]');
+    await page.waitForSelector('#freeStyle');
+    await page.selectOption('#freeStyle', 'E');
+    await page.waitForFunction(() => document.getElementById('freeStyle').value === 'E');
+    await page.selectOption('#freeCount', '2');
+    await page.waitForFunction(() => document.querySelector('[data-act="generate"]').textContent.includes('2 张'));
+    const nf = ai.asked.length;
+    await page.click('[data-act="generate"]');
+    await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 4);
+    await page.waitForFunction(() => !document.querySelector('.pendbox .tag.blue'), null, { timeout: 60000 });
+    const fr = ai.asked.slice(nf).filter((a) => /Wanted style/.test(a.prompt));
+    check('自由发挥：不定版式，告诉 AI 风格（选了 E）、要表达的内容、禁止词，参考图一起发', fr.length === 2 && fr.every((a) => /street-promotion/.test(a.prompt) && /远程安装 MySQL/.test(a.prompt) && /秒装/.test(a.prompt) && a.files.join(',') === '参考图1.jpg' && !/WIREFRAME/.test(a.prompt)));
+    await page.click('.pendbox [data-act="accept"] >> nth=0');
     await page.waitForSelector('[data-act="dlAll"]');
     const dlp = page.waitForEvent('download');
     await page.click('[data-act="dlAll"]');
     const zp = path.join(out, 'poster.zip');
     await (await dlp).saveAs(zp);
     check('文字版主图：采用后可以下载（没有产品图也能打包）', fs.statSync(zp).size > 1000);
-    await page.selectOption('#judgeSite', 'doubao');
     await api('DELETE', `/api/projects/${np.id}`);
   }
 

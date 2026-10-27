@@ -45,3 +45,17 @@
 .plan .ptable input.w14 { min-width: 180px; }
 .plan .ptable input.w4 { width: 64px; }
 .plan input.banhit { border-color: #dc2626; background: #fef2f2; color: #b91c1c; }
+
+/* 版式库 */
+.tplgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 8px; }
+.tplc { position: relative; border: 2px solid #e4e4e7; border-radius: 10px; padding: 6px; cursor: pointer; background: #fff; }
+.tplc.on { border-color: #2563eb; background: #eef4ff; }
+.tplc img { width: 100%; aspect-ratio: 1; display: block; border-radius: 6px; }
+.tplc .tn { font-size: 13px; margin-top: 4px; }
+.tplc .tu { font-size: 11.5px; }
+.tplc .tcount { position: absolute; left: 10px; top: 10px; background: #2563eb; color: #fff; border-radius: 99px; padding: 1px 8px; font-size: 12px; font-weight: 700; }
+.tplc .tplus { position: absolute; right: 10px; top: 10px; padding: 0 7px; }
+.tplbody { display: flex; gap: 12px; align-items: flex-start; }
+.tplthumb { width: 150px; flex: none; }
+.tplthumb img { width: 150px; border-radius: 8px; cursor: zoom-in; display: block; }
+.plicon { width: 40px; height: 40px; object-fit: contain; border: 1px solid #e4e4e7; border-radius: 6px; }

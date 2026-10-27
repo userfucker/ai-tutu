@@ -49,7 +49,7 @@ const bufToImage = (buf) => new Promise((resolve, reject) => {
 
 const FILES = [
   ["extension/lib/imagekit.js", REPO_DIR],
-  ...["data", "util", "store", "text", "icons", "templates", "render", "prompts", "check", "export", "refsplit", "harmony", "mainimg"].map((n) => [`detail/core/${n}.js`, PUBLIC_DIR]),
+  ...["data", "util", "store", "text", "icons", "templates", "render", "prompts", "postertpl", "check", "export", "refsplit", "harmony", "mainimg"].map((n) => [`detail/core/${n}.js`, PUBLIC_DIR]),
 ];
 
 let ctx = null;

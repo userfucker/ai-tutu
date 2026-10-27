@@ -354,7 +354,7 @@ ST.P = (() => {
     },
     /** 审核“照参考图设计”的主图：读出图上的字，查违禁词、过度承诺、错字、手机上看不看得清；有方案就对照方案里的字 */
     posterCheck(p, plan) {
-      const want = plan ? (plan.blocks || []).map((b) => String(b.text || "").trim()).filter(Boolean) : [];
+      const want = plan ? (plan.slots ? Object.values(plan.slots) : (plan.blocks || []).map((b) => b.text)).map((t) => String(t || "").trim()).filter(Boolean) : [];
       return [
         `这是一张电商主图，图上的字是 AI 画的。请：`,
         "1. 把图上所有文字按顺序读出来；",
@@ -388,7 +388,7 @@ ST.POSTER_THEMES = [
   { name: "核心卖点", en: "the hero image — what the product or service is and the single strongest reason to choose it (this is the click-attracting first image)." },
   { name: "服务内容", en: "what is included or which options are available (e.g. versions, packages), shown as a few short tags or icons." },
   { name: "流程步骤", en: "how simple it is — 3 or 4 short numbered steps with small icons." },
-  { name: "售后保障", en: "after-sales support and trust — what happens if something goes wrong, response time, support period (stated factually, no guarantees of results)." },
+  { name: "售后保障", en: "after-sales support and trust — what happens if something goes wrong, response time, support period (stated concretely; a real promise such as a refund if the installation fails is fine)." },
   { name: "适用人群", en: "who it is for / which common problems it solves, as 3 or 4 short scenarios." },
   { name: "主图变体", en: "an alternative version of the hero image with a different headline wording and a different accent color, same overall style." },
 ];
