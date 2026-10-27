@@ -65,14 +65,18 @@ var W = (globalThis.W = { pages: {}, status: null, cur: null, params: [] });
   const NEW = { cutout: ["抠白底图", "白底图", "/api/cutout", "/cutout/"], main: ["主图", "主图", "/api/main", "/main/"], detail: ["详情页", "详情图", "/api/detail", "/detail/"] };
   W.newProject = async (kind) => {
     const [title, prefix, url, page] = NEW[kind];
-    let name = null;
-    const ok = await W.modal(`新建${title}项目`, `<input id="npName" style="width:100%" placeholder="如：钱包"><div class="muted" style="margin-top:6px">只填名字，会自动变成“${prefix}-钱包10-24-1”（月-日-当天第几个项目），建好以后不能改。</div>
+    let name = null, textMode = false;
+    // 主图：建的时候选“实物主图”还是“文字主图”（Lee 2026-10-27），建好不能改
+    const kindHtml = kind === "main" ? `<div class="lb" style="margin:10px 0 6px">做哪种主图（建好以后不能改）</div>
+      <label class="row lb"><input type="radio" name="npKind" value="real" checked> 实物主图 <span class="muted">有产品照片：AI 直接画场景 / 先画背景再融入</span></label>
+      <label class="row lb"><input type="radio" name="npKind" value="text"> 文字主图 <span class="muted">虚拟产品、服务：用模板（线框）或让 AI 照参考图自由发挥</span></label>` : "";
+    const ok = await W.modal(`新建${title}项目`, `<input id="npName" style="width:100%" placeholder="如：钱包"><div class="muted" style="margin-top:6px">只填名字，会自动变成“${prefix}-钱包10-24-1”（月-日-当天第几个项目），建好以后不能改。</div>${kindHtml}
       <div class="mf"><button data-ret="">取消</button><button class="primary" data-ret="ok">新建并打开</button></div>`, {
       onOpen: (m) => { const i = m.querySelector("#npName"); i.focus(); i.onkeydown = (e) => { if (e.key === "Enter") m.querySelector('[data-ret="ok"]').click(); }; },
-      check: (v, m) => { name = m.querySelector("#npName").value.trim(); },
+      check: (v, m) => { name = m.querySelector("#npName").value.trim(); textMode = !!m.querySelector('input[name="npKind"][value="text"]:checked'); },
     });
     if (ok !== "ok") return;
-    const d = await W.api("POST", url, { name });
+    const d = await W.api("POST", url, kind === "main" ? { name, textMode } : { name });
     location.href = `${page}#p=${encodeURIComponent(d.id)}`;
   };
 

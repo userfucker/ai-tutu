@@ -20,11 +20,27 @@ import * as lib from "../library.js";
 
 const running = new Set(); // 正在做的“项目:主图/产品”
 const SITE_OK = ["gemini", "copilot"]; // 画图可以临时指定的网站（空 = 按 AI 分工轮流）
-const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode", "placement", "industry", "posterNote", "posterTheme", "posterContent", "posterBan", "plans", "perPlan", "sketch", "posterKind", "freeStyle", "freeStyleText", "freeCount", "tplPick", "tplRefs"];
+const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode", "placement", "industry", "posterNote", "posterTheme", "posterContent", "posterBan", "plans", "perPlan", "sketch", "posterKind", "freeStyle", "freeStyleText", "freeCount", "tplPick", "tplRefs", "boxPick", "freeRefs"];
 
 export function newProject(o = {}) {
   const ST = getST();
-  return { id: ST.uid("m"), kind: "main", fixedName: !!o.fixedName, name: o.name || `主图 ${ST.bj().slice(5, 16)}`, info: { name: "" }, size: 800, products: [], cur: "", styles: ["studio"], custom: "", customOn: false, count: 1, scale: 0.85, blend: true, mode: "scene", placement: "free", placeRef: "", items: [] }; // 默认 AI 直接画场景（Lee 2026-10-24）
+  const p = { id: ST.uid("m"), kind: "main", fixedName: !!o.fixedName, name: o.name || `主图 ${ST.bj().slice(5, 16)}`, info: { name: "" }, size: 800, products: [], cur: "", styles: ["studio"], custom: "", customOn: false, count: 1, scale: 0.85, blend: true, mode: "scene", placement: "free", placeRef: "", items: [] }; // 默认 AI 直接画场景（Lee 2026-10-24）
+  // 新建时选“文字主图”（Lee 2026-10-27）：mode 固定 poster，默认用框模板
+  if (o.textMode) Object.assign(p, { mode: "poster", textMode: true, posterKind: "box", freeRefs: true });
+  return p;
+}
+
+/** 框模板：内置 A～I + 用户的（meta posterBoxTpls） */
+const myBoxTpls = () => store.getMeta("posterBoxTpls", []) || [];
+const boxTplOf = (id) => getST().boxTpl(id, myBoxTpls());
+/** 模板的原参考图：内置的在 public/main/tpl/ref，用户的存成图片键 */
+async function boxRefBlob(t) {
+  if (!t) return null;
+  if (t.refKey) return getST().db.getBlob(t.refKey).catch(() => null);
+  const m = /^\/main\/tpl\/ref\/([A-Za-z0-9_-]+)\.jpg$/.exec(t.ref || "");
+  if (!m) return null;
+  const f = path.join(PUBLIC_DIR, "main", "tpl", "ref", `${m[1]}.jpg`);
+  return fs.existsSync(f) ? new Blob([fs.readFileSync(f)], { type: "image/jpeg" }) : null;
 }
 
 // ------------------------------------------------------------ 改项目（同步：读最新 → 改 → 存）
@@ -138,7 +154,14 @@ function runItem(pid, iid, what, resume) {
       const refs = [];
       for (const [n, r] of (p.posterRefs || []).slice(0, 3).entries()) refs.push(await ai.img(await ST.db.getBlob(r.key), `参考图${n + 1}.jpg`, 1536));
       let prompt, imgs = refs.filter(Boolean);
-      if (it.plan && it.plan.tpl && ST.posterTpl(it.plan.tpl)) {
+      if (it.plan && Array.isArray(it.plan.boxes)) {
+        // 框模板（Lee 2026-10-27）：草图（程序画的，字一定对）+ 模板的原参考图（帮 AI 理解风格）+ 风格说明；不发用户的参考图
+        if (!it.sketchKey) throw new Error("没有草图，点“生成”重新做");
+        imgs = [await ai.img(await ST.db.getBlob(it.sketchKey), "草图.png", 1024, true)];
+        const rb = await boxRefBlob(it.plan);
+        if (rb) imgs.push(await ai.img(rb, "模板参考图.jpg", 1024));
+        prompt = ST.P.posterFromBoxes(p, it.plan, { ref: !!rb });
+      } else if (it.plan && it.plan.tpl && ST.posterTpl(it.plan.tpl)) {
         // 给定版式：参考图（默认不发——版式不同会打架，还会带出参考图上的字；勾了“出图时也参考参考图的风格”才发）+ 店铺图标（可选）+ 灰色线框图
         if (!p.tplRefs) imgs = [];
         const nRef = imgs.length;
@@ -148,6 +171,7 @@ function runItem(pid, iid, what, resume) {
         imgs.push(await ai.img(new Blob([fs.readFileSync(wf)], { type: "image/png" }), "版式线框图.png", 1024, true));
         prompt = ST.P.posterFromTpl(p, it.plan, { refs: nRef, icon: !!icon });
       } else if (it.free) {
+        if (p.freeRefs === false) imgs = []; // 自由发挥：“发送参考图”默认勾上
         prompt = ST.P.posterFree(p, it, { refs: imgs.length });
       } else if (it.plan) {
         // 文字版主图：按改好的方案画；参考图、草图都是可选的
@@ -218,12 +242,38 @@ function runItem(pid, iid, what, resume) {
 const PLAN_OK = ["deepseek", "doubao", "kimi", "glm", "gemini", "copilot"];
 const JUDGE_OK = ["doubao", "deepseek", "kimi", "glm"];
 /** 文字版主图第一步：AI 写方案（JSON），写好放进 p.plans（替换原来的） */
-function writePlans(pid, site, n, tpls) {
+function writePlans(pid, site, n, tpls, boxIds) {
   let ai = null;
   (async () => {
     const ST = getST();
     const p = store.getProject(pid);
     ai = aiOf(pid, `plan-${Date.now()}`);
+    if (boxIds && boxIds.length) {
+      // 框模板：每套一个模板，AI 往框里写字；附上模板的原参考图（同一个模板只附一次），让它学参考图的说法
+      const tl = boxIds.map(boxTplOf).filter(Boolean);
+      const seen = [], refImgs = [];
+      for (const t of tl) { if (seen.includes(t.id)) continue; seen.push(t.id); const rb = await boxRefBlob(t); if (rb) refImgs.push(await ai.img(rb, `模板${t.id}参考图.jpg`, 1024)); }
+      const imgs = refImgs.filter(Boolean);
+      const r = await ai.json("plan", ST.P.boxPlan(p, tl, imgs.length), imgs, `主图文字方案（${tl.length} 套，框模板）`, { role: imgs.length ? "read" : "text", site, noWait: true });
+      const list = Array.isArray(r.plans) ? r.plans : Array.isArray(r) ? r : [];
+      const used = new Set();
+      const plans = tl.map((t, i) => {
+        let k = list.findIndex((y, j) => y && y.tpl === t.id && !used.has(j));
+        if (k < 0 && list[i] && !used.has(i)) k = i;
+        const x = k >= 0 ? list[k] : {};
+        used.add(k);
+        const fill = (x && x.boxes) || {};
+        const boxes = JSON.parse(JSON.stringify(t.boxes)).map((b) => {
+          if (b.type === "text") b.text = String(fill[b.id] || "").trim().slice(0, 60);
+          if (b.type === "icon") b.desc = String(fill[b.id] || b.desc || "").trim().slice(0, 120);
+          return b;
+        });
+        return { id: ST.uid("pl"), on: true, by: site, tpl: t.id, tplName: t.name || "", ref: t.ref || "", refKey: t.refKey || "", style: t.style || "", bg1: t.bg1 || "#ffffff", bg2: t.bg2 || t.bg1 || "#ffffff", theme: String(x.theme || t.name || "方案").slice(0, 20), boxes, note: "" };
+      });
+      if (!plans.some((x) => x.boxes.some((b) => b.type === "text" && b.text))) throw new Error("AI 没写出方案（格式不对），再点一次");
+      edit(pid, (q) => { q.plans = plans; q.planJob = ""; });
+      return;
+    }
     const refs = [];
     for (const [i, r] of (p.posterRefs || []).slice(0, 3).entries()) refs.push(await ai.img(await ST.db.getBlob(r.key), `参考图${i + 1}.jpg`, 1280));
     const imgs = refs.filter(Boolean);
@@ -256,6 +306,26 @@ function writePlans(pid, site, n, tpls) {
     if (!plans.length) throw new Error("AI 没写出方案（格式不对），再点一次");
     edit(pid, (q) => { q.plans = plans; q.planJob = ""; });
   })().catch((e) => edit(pid, (q) => { q.planJob = "失败：" + String(e.message || e).slice(0, 200); }))
+    .finally(() => { if (ai) ai.cleanup(); });
+}
+
+const LEARN_OK = ["gemini", "copilot", "doubao", "kimi", "glm"];
+function learnBoxTpl(pid, site, key) {
+  let ai = null;
+  (async () => {
+    const ST = getST();
+    ai = aiOf(pid, `learn-${Date.now()}`);
+    const im = await ai.img(await ST.db.getBlob(key), "参考图.jpg", 1280);
+    const r = await ai.json("learn", ST.P.boxTplLearn(), [im], "从参考图生成主图模板", { role: "read", site, noWait: true });
+    const boxes = ST.cleanBoxes(r.boxes);
+    if (boxes.filter((b) => b.type === "text").length < 2) throw new Error("AI 没拆出版式（框太少或格式不对），再试一次或换个 AI");
+    const hex = (v, d) => (/^#[0-9a-f]{6}$/i.test(String(v || "").trim()) ? String(v).trim() : d);
+    const mine = myBoxTpls();
+    const id = ST.nextBaseName([...ST.BOX_TPLS.map((t) => t.id), ...mine.map((t) => t.id)]);
+    const t = { id, name: String(r.name || "我的模板").slice(0, 16), use: String(r.use || "").slice(0, 30), style: String(r.style || "").slice(0, 800), bg1: hex(r.bg1, "#ffffff"), bg2: hex(r.bg2, hex(r.bg1, "#ffffff")), refKey: key, ref: "", base: true, by: site, t: Date.now(), boxes };
+    store.setMeta("posterBoxTpls", [...mine, t]);
+    edit(pid, (q) => { q.learnJob = ""; q.learnDone = id; q.boxPick = [...(q.boxPick || []), id].slice(0, 6); });
+  })().catch((e) => edit(pid, (q) => { q.learnJob = "失败：" + String(e.message || e).slice(0, 200); }))
     .finally(() => { if (ai) ai.cleanup(); });
 }
 
@@ -325,7 +395,13 @@ export async function op(pid, b) {
   if (!p0 || p0.kind !== "main") throw new Error("没有这个主图项目");
   const iid = b.iid, prid = b.prid;
   switch (b.op) {
-    case "set": return edit(pid, (p) => { if ("mode" in (b.fields || {})) p.modeSet = true; for (const k of SET_KEYS) if (k in (b.fields || {}) && !(k === "name" && p.fixedName)) p[k] = b.fields[k]; });
+    case "set": return edit(pid, (p) => {
+      const f = { ...(b.fields || {}) };
+      // 实物 / 文字 建项目时定好，不能互相切换（旧项目用过“文字版主图”的算文字）
+      if ("mode" in f && (p.mode === "poster") !== (f.mode === "poster")) delete f.mode;
+      if ("mode" in f) p.modeSet = true;
+      for (const k of SET_KEYS) if (k in f && !(k === "name" && p.fixedName)) p[k] = f[k];
+    });
     case "addProduct": {
       const img = await ST.imgOf(b.key);
       if (!img) throw new Error("图片打不开");
@@ -370,12 +446,12 @@ export async function op(pid, b) {
       }
       if (p0.mode === "poster" && (p0.plans || []).length) {
         // 文字版主图第二步：勾上的方案，每套出 perPlan 张
-        const plans = p0.plans.filter((x) => x.on !== false && ((x.blocks || []).some((b) => String(b.text || "").trim()) || Object.values(x.slots || {}).some((v) => String(v || "").trim())));
+        const plans = p0.plans.filter((x) => x.on !== false && ((x.boxes || []).some((b) => b.type === "text" && String(b.text || "").trim()) || (x.blocks || []).some((b) => String(b.text || "").trim()) || Object.values(x.slots || {}).some((v) => String(v || "").trim())));
         if (!plans.length) throw new Error("没有勾上的方案（或者方案里没有字）");
         const per = Math.min(3, Math.max(1, +p0.perPlan || 1));
         const list = [];
         let k = 0;
-        for (const pl of plans) for (let j = 0; j < per; j++) list.push({ id: ST.uid("it"), mode: "poster", plan: JSON.parse(JSON.stringify(pl)), sketchKey: p0.sketch && pl.sketchKey ? pl.sketchKey : "", theme: 0, style: "poster", styleName: pl.theme || "方案", prompt: "", ref: "", product: "", bg: "", pos: { x: 0.5, y: 0.53, s: 0.85 }, harm: null, state: "pending", t: Date.now(), rot: k++, job: "排队中", site: SITE_OK.includes(b.site) ? b.site : "" });
+        for (const pl of plans) for (let j = 0; j < per; j++) list.push({ id: ST.uid("it"), mode: "poster", plan: JSON.parse(JSON.stringify(pl)), sketchKey: pl.boxes ? pl.sketchKey || "" : p0.sketch && pl.sketchKey ? pl.sketchKey : "", theme: 0, style: "poster", styleName: pl.theme || "方案", prompt: "", ref: "", product: "", bg: "", pos: { x: 0.5, y: 0.53, s: 0.85 }, harm: null, state: "pending", t: Date.now(), rot: k++, job: "排队中", site: SITE_OK.includes(b.site) ? b.site : "" });
         const p = edit(pid, (q) => { q.items.unshift(...list); });
         for (const it of list) runItem(pid, it.id, "full");
         return p;
@@ -411,9 +487,20 @@ export async function op(pid, b) {
       // 文字版主图第一步：AI 写方案（网页上选哪个 AI 写：DeepSeek / 豆包 / Kimi / 智谱 / Gemini / Copilot）
       if (!PLAN_OK.includes(b.site)) throw new Error("选一个写方案的 AI");
       if (p0.planJob && !/失败/.test(p0.planJob)) throw new Error("正在写方案，等一下");
-      const tpls = (Array.isArray(b.tpls) ? b.tpls : []).filter((id) => getST().posterTpl(id)).slice(0, 6);
-      writePlans(pid, b.site, Math.min(6, Math.max(1, +b.n || 1)), tpls);
+      const boxIds = (Array.isArray(b.boxTpls) ? b.boxTpls : []).filter((id) => boxTplOf(id)).slice(0, 6);
+      const tpls = boxIds.length ? [] : (Array.isArray(b.tpls) ? b.tpls : []).filter((id) => getST().posterTpl(id)).slice(0, 6);
+      if (Array.isArray(b.boxTpls) && !boxIds.length) throw new Error("先选模板");
+      writePlans(pid, b.site, Math.min(6, Math.max(1, +b.n || 1)), tpls, boxIds);
       return edit(pid, (p) => { p.planJob = `${SITE_NAMES[b.site] || b.site} 写方案中`; });
+    }
+    case "learnBoxTpl": {
+      // 从一张新参考图生成框模板（看图的 AI 拆版式），存进“我的模板”，名字接着排：J、K…Z、A1…
+      if (!LEARN_OK.includes(b.site)) throw new Error("选一个看图的 AI");
+      if (p0.learnJob && !/失败/.test(p0.learnJob)) throw new Error("正在生成模板，等一下");
+      const img = await ST.imgOf(b.key).catch(() => null);
+      if (!img) throw new Error("参考图打不开");
+      learnBoxTpl(pid, b.site, b.key);
+      return edit(pid, (p) => { p.learnJob = `${SITE_NAMES[b.site] || b.site} 正在看参考图生成模板`; });
     }
     case "addPosterRef": {
       // 参考图（最多 3 张）

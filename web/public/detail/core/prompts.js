@@ -354,7 +354,7 @@ ST.P = (() => {
     },
     /** 审核“照参考图设计”的主图：读出图上的字，查违禁词、过度承诺、错字、手机上看不看得清；有方案就对照方案里的字 */
     posterCheck(p, plan) {
-      const want = plan ? (plan.slots ? Object.values(plan.slots) : (plan.blocks || []).map((b) => b.text)).map((t) => String(t || "").trim()).filter(Boolean) : [];
+      const want = plan ? (plan.boxes ? ST.boxTexts(plan.boxes).filter((b) => b.type === "text").map((b) => b.text) : plan.slots ? Object.values(plan.slots) : (plan.blocks || []).map((b) => b.text)).map((t) => String(t || "").trim()).filter(Boolean) : [];
       return [
         `这是一张电商主图，图上的字是 AI 画的。请：`,
         "1. 把图上所有文字按顺序读出来；",

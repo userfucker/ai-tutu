@@ -43,6 +43,18 @@ const doubao = [];
 const plugin2 = await connect(`ws://127.0.0.1:${PORT}/ext`, { token, name: '测试电脑', version: '1.5.0', app: 'aiweb', sites: [{ site: 'doubao', name: '豆包', open: true, ready: true }, { site: 'deepseek', name: 'DeepSeek', open: true, ready: true }] }, async (m) => {
   if (m.cmd !== 'ask') return { error: '不支持' };
   doubao.push({ t: Date.now(), text: m.args.text, files: (m.args.files || []).length, site: m.site });
+  if (/拆成“框模板”/.test(m.args.text)) {
+    return { answer: '```json\n' + JSON.stringify({ name: '蓝白 · 大标题', use: '单一服务', style: 'Clean blue and white poster', bg1: '#eef4ff', bg2: '#ffffff', boxes: [{ type: 'block', role: '底部横条', x: 0, y: 85, w: 100, h: 15, bg: '#1d4ed8' }, { type: 'text', role: '大标题', x: 5, y: 20, w: 90, h: 18, color: '#1d4ed8', bold: true, lines: 1 }, { type: 'text', role: '副标题', x: 10, y: 45, w: 80, h: 8, color: '#333333' }, { type: 'icon', role: '产品 logo', x: 35, y: 58, w: 30, h: 22, desc: '电脑' }, { type: 'text', role: '底部口号', x: 5, y: 87, w: 90, h: 10, color: '#ffffff' }, { type: 'bad', role: 'x', x: 'a' }] }) + '\n```' };
+  }
+  if (/往每个框里写字/.test(m.args.text)) {
+    const plans = m.args.text.split(/方案 \d+：/).slice(1).map((sec) => {
+      const tpl = /^模板 (\S+?)「/.exec(sec)[1];
+      const boxes = {};
+      for (const [, id, role] of sec.matchAll(/- (b\d+)（([^，）]+)/g)) boxes[id] = /图标/.test(role) ? 'MySQL 海豚 logo' : role === '大标题' ? '远程装库' : role === '店铺名' ? '专业远程服务' : /标签/.test(role) ? '秒装' + role.slice(-1) : role.replace(/\s/g, '') + '字';
+      return { tpl, theme: '核心卖点', boxes };
+    });
+    return { answer: '```json\n' + JSON.stringify({ plans }) + '\n```' };
+  }
   if (/固定版式模板/.test(m.args.text)) {
     const ids = [...m.args.text.matchAll(/方案 \d+：模板 (\w+)/g)].map((x) => x[1]);
     const SL = {
@@ -157,7 +169,7 @@ try {
   await page.uncheck('#customOn');
   await api('POST', `/api/main/${mid}/op`, { op: 'set', fields: { count: 1 } });
   await sleep(800);
-  check('默认做法：AI 直接画场景、AI 自由摆放', await page.isVisible('[data-mode="scene"].on') && await page.isVisible('[data-place="free"].on'));
+  check('默认做法：AI 直接画场景、AI 自由摆放；实物项目没有“文字版主图”', await page.isVisible('[data-mode="scene"].on') && await page.isVisible('[data-place="free"].on') && (await page.locator('[data-mode="poster"]').count()) === 0);
   await page.click('[data-sty="marble"]');
   check('每种风格最多 6 张', (await page.locator('#count option').count()) === 6 && (await page.locator('#count option').last().textContent()) === '6');
   await page.selectOption('#count', '1');
@@ -360,107 +372,180 @@ try {
   check('素材中心：去白边“保存”换掉原图（名字不变、张数不变）', after && after.name === '白底.png' && after.v !== lb0.v && (await page.locator('.lit').count()) === nLit + 1, JSON.stringify([lb0.v, after && after.v]));
   await api('DELETE', `/api/projects/${dl3[0].id}`);
 
-  // 文字版主图：给定版式（9 个固定版式，AI 只填格子，人改，出图带线框图）/ 自由发挥；写方案、审核的 AI 在主图页选
+  // 文字主图（Lee 2026-10-27）：新建时选“文字主图”；框模板（线框、悬停看参考图）→ AI 往框里写字 → 改字、拖框、加删框 → 草图 + 模板参考图出图；
+  // 存为我的模板（A-1）、从参考图生成模板（J）；AI 根据参考图（自由发挥，默认发送参考图）
   {
-    const np = await api('POST', '/api/main', { name: '装系统' });
-    await page.goto(BASE + `/main/#p=${np.id}`);
-    await page.waitForSelector('[data-mode="poster"]');
-    await page.click('[data-mode="poster"]');
-    await page.waitForSelector('.tplgrid');
-    check('文字版主图：默认“给定版式”，有 9 个版式可选；没有产品图、风格那两块', (await page.locator('.tplc').count()) === 9 && (await page.locator('[data-pkind="tpl"].on').count()) === 1 && (await page.locator('[data-act="addProducts"]').count()) === 0 && await page.isDisabled('[data-act="writePlans"]'));
-    const fcp = page.waitForEvent('filechooser');
-    await page.click('[data-act="posterUpload"]');
-    await (await fcp).setFiles({ name: '参考.png', mimeType: 'image/png', buffer: product('#eeeeee') });
-    await page.waitForSelector('.mcard.pref');
+    await page.goto(BASE + '/main/');
+    await page.click('[data-act="newProj"]');
+    await page.fill('#npName', '装系统');
+    check('新建主图项目：选“实物主图”还是“文字主图”，默认实物', (await page.locator('input[name="npKind"]').count()) === 2 && await page.isChecked('input[name="npKind"][value="real"]'));
+    await page.check('input[name="npKind"][value="text"]');
+    await page.click('#modal [data-ret="ok"]');
+    await page.waitForSelector('.boxgrid');
+    const np = { id: decodeURIComponent(/p=([^&]+)/.exec(page.url())[1]) };
+    let sp = (await api('GET', `/api/projects/${np.id}`)).project;
+    check('文字主图：项目是文字的（mode poster），默认“模板”做法，9 个内置模板 A～I（线框图），没有产品图、风格、画法选择', sp.mode === 'poster' && sp.textMode && (await page.locator('.boxc').count()) === 9 && (await page.locator('.boxc canvas.wire').count()) === 9 && (await page.locator('[data-pkind="box"].on').count()) === 1 && (await page.locator('[data-mode]').count()) === 0 && (await page.locator('[data-act="addProducts"]').count()) === 0 && await page.isDisabled('[data-act="writeBoxPlans"]'));
+    await api('POST', `/api/main/${np.id}/op`, { op: 'set', fields: { mode: 'scene' } });
+    check('文字主图不能改成实物', (await api('GET', `/api/projects/${np.id}`)).project.mode === 'poster');
+    // 线框缩略图真的画了东西（白底 + 灰线）
+    const wirePx = await page.evaluate(() => { const c = document.querySelector('canvas[data-wire="A"]'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let gray = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 200 && Math.abs(d[i] - d[i + 2]) < 20) gray++; return gray; });
+    check('模板缩略图是线框（白底、灰线、写着框名）', wirePx > 500, String(wirePx));
+    await page.hover('.boxc[data-btpl="A"] canvas');
+    await page.waitForSelector('.refhover:not([hidden]) img');
+    check('鼠标移到模板上：显示它的参考图', (await page.getAttribute('.refhover img', 'src')) === '/main/tpl/ref/A.jpg');
+    await page.mouse.move(5, 5);
     await page.fill('#posterContent', '远程安装 MySQL，5.x～8.x 任意版本，一对一远程，安装不成功全额退款');
     await page.fill('#posterBan', '秒装, 包售后, 退款');
     await page.waitForSelector('#banConflict:not([hidden])');
     check('禁止词和要表达的内容冲突（都有“退款”）：提醒', /退款/.test(await page.textContent('#banConflict')));
     await page.fill('#posterBan', '秒装, 包售后');
     await page.waitForSelector('#banConflict', { state: 'hidden' });
-    await page.click('.tplc[data-tpl="E"] img');
-    await page.waitForSelector('.tplc[data-tpl="E"].on');
-    await page.click('.tplc[data-tpl="F2"] img');
-    await page.waitForSelector('.tplc[data-tpl="F2"].on');
-    check('选版式：点一下选上，按顺序标号', (await page.textContent('.tplc[data-tpl="E"] .tcount')) === '1' && (await page.textContent('.tplc[data-tpl="F2"] .tcount')) === '2' && /AI 写方案（2 套）/.test(await page.textContent('[data-act="writePlans"]')));
-    check('写方案的 AI 在主图页选：DeepSeek / 豆包 / Kimi / 智谱 / Gemini / Copilot', (await page.locator('#planSite option').count()) === 6 && (await page.inputValue('#planSite')) === 'doubao');
+    await page.click('.boxc[data-btpl="A"] canvas');
+    await page.waitForSelector('.boxc[data-btpl="A"].on');
+    await page.click('.boxc[data-btpl="C"] canvas');
+    await page.waitForSelector('.boxc[data-btpl="C"].on');
+    check('选模板：点一下选上，按顺序标号', (await page.textContent('.boxc[data-btpl="A"] .tcount')) === '1' && (await page.textContent('.boxc[data-btpl="C"] .tcount')) === '2' && /（2 套）/.test(await page.textContent('[data-act="writeBoxPlans"]')));
     await sleep(700);
     const nd = doubao.length;
-    await page.click('[data-act="writePlans"]');
-    await page.waitForSelector('.plan[data-plan="1"]', { timeout: 30000 });
+    await page.click('[data-act="writeBoxPlans"]');
+    await page.waitForSelector('.boxplan[data-plan="1"]', { timeout: 30000 });
     const ask = doubao[nd];
-    check('AI 写方案：发给豆包，带参考图；按选的版式给出格子和字数上限，借鉴参考图文案，可以写真实退款承诺', ask && ask.site === 'doubao' && ask.files === 1 && /模板 E「黑底大字报/.test(ask.text) && /模板 F2/.test(ask.text) && /title（超大白字）：≤4 字/.test(ask.text) && /参考它们的说法/.test(ask.text) && /安装不成功全额退款/.test(ask.text) && /秒装/.test(ask.text), ask && ask.text.slice(0, 80));
-    check('方案：左边版式缩略图，右边“格子 → 文字 → 字数”', (await page.locator('.plan[data-plan="0"] .ptable tbody tr').count()) === 14 && (await page.inputValue('#pl0_s_title')) === '远程安装' && (await page.textContent('#pl0_c_title')) === '4/4' && (await page.locator('.plan[data-plan="0"] .tplthumb img').count()) === 1);
-    check('禁止词（自己填的）标红', await page.evaluate(() => document.getElementById('pl0_s_box1').classList.contains('banhit')) && !(await page.isHidden('#pl0_ban')));
-    await page.fill('#pl0_s_box1', '快速装好');
-    await page.waitForFunction(() => !document.getElementById('pl0_s_box1').classList.contains('banhit'));
-    await page.fill('#pl0_s_title', '远程装库啊啊');
-    await page.waitForFunction(() => document.getElementById('pl0_s_title').classList.contains('banhit'));
-    check('超出字数也标红，字数实时更新', (await page.textContent('#pl0_c_title')) === '6/4');
-    await page.fill('#pl0_s_title', '远程装库');
-    await page.selectOption('#pl1_palette', '1');
-    check('F2 有图标描述格子', (await page.inputValue('#pl1_i_hero')) === '笔记本电脑和客服耳机');
-    const fci = page.waitForEvent('filechooser');
-    await page.click('.plan[data-plan="1"] [data-act="planIcon"]');
-    await (await fci).setFiles({ name: 'logo.png', mimeType: 'image/png', buffer: product('#ffffff') });
-    await page.waitForSelector('.plan[data-plan="1"] .plicon');
+    check('AI 往框里写字：发给豆包，带两个模板的参考图，每个框给出名字和字数上限', ask && ask.site === 'doubao' && ask.files === 2 && /模板 A「红白/.test(ask.text) && /模板 C「描边大字/.test(ask.text) && /b3（大标题）：≤\d+ 字/.test(ask.text) && /图标：产品 logo/.test(ask.text) && /安装不成功全额退款/.test(ask.text) && /秒装/.test(ask.text), ask && ask.text.slice(0, 120));
+    check('方案：左边草图编辑器，右边每个文字框、图标框一行', (await page.locator('.boxplan[data-plan="0"] canvas[data-bed]').count()) === 1 && (await page.locator('.boxplan[data-plan="0"] .brow').count()) === 15 && (await page.inputValue('#pb0_b3')) === '远程装库' && (await page.inputValue('#pb0_b4')) === 'MySQL 海豚 logo');
+    check('禁止词（自己填的“秒装”）标红', await page.evaluate(() => document.getElementById('pb0_b5').classList.contains('banhit')) && !(await page.isHidden('#pl0_ban')));
+    await page.fill('#pb0_b5', 'mysql5.6');
+    await page.waitForFunction(() => !document.getElementById('pb0_b5').classList.contains('banhit'));
+    // 点表格里的一行：选中框，上面出样式
+    await page.click('.boxplan[data-plan="0"] .brow[data-bid="b3"] td:first-child');
+    await page.waitForSelector('#bp0_x');
+    check('点一行选中框：显示位置、大小、颜色这些样式', (await page.inputValue('#bp0_x')) === '3' && (await page.inputValue('#bp0_w')) === '37');
+    // 在草图上拖框：大标题往右拖 10%
+    const cb = await (await page.$('canvas[data-bed="0"]')).boundingBox();
+    const cx = cb.x + cb.width * 0.2, cy = cb.y + cb.height * 0.255;
+    await page.mouse.move(cx, cy); await page.mouse.down(); await page.mouse.move(cx + cb.width * 0.05, cy, { steps: 4 }); await page.mouse.move(cx + cb.width * 0.1, cy, { steps: 4 }); await page.mouse.up();
     await sleep(1200);
-    const sp = (await api('GET', `/api/projects/${np.id}`)).project;
-    check('改方案：改完自动存（文字、配色、店铺图标）', sp.plans[0].slots.box1 === '快速装好' && sp.plans[0].slots.title === '远程装库' && sp.plans[1].palette === 1 && !!sp.plans[1].iconKey);
-    await page.click('.plan[data-plan="0"] .tplthumb img');
+    // 拖右下角改大小：宽 +5%
+    const rx = cb.x + cb.width * (0.13 + 0.37), ry = cb.y + cb.height * (0.19 + 0.13);
+    await page.mouse.move(rx, ry); await page.mouse.down(); await page.mouse.move(rx + cb.width * 0.05, ry, { steps: 5 }); await page.mouse.up();
+    await sleep(1200);
+    sp = (await api('GET', `/api/projects/${np.id}`)).project;
+    let b3 = sp.plans[0].boxes.find((b) => b.id === 'b3');
+    check('拖框换位置、拖右下角改大小：存到服务器', Math.abs(b3.x - 13) <= 0.5 && Math.abs(b3.w - 42) <= 0.5 && b3.y === 19 && sp.plans[0].boxes.find((b) => b.id === 'b5').text === 'mysql5.6', JSON.stringify(b3));
+    await page.fill('#bp0_y', '20');
+    await page.click('canvas[data-bed="0"]', { position: { x: cb.width * 0.3, y: cb.height * 0.27 } });
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('Shift+ArrowLeft');
+    await page.selectOption('.bprops select', 'left');
+    await sleep(1200);
+    b3 = (await api('GET', `/api/projects/${np.id}`)).project.plans[0].boxes.find((b) => b.id === 'b3');
+    check('改样式（上 20%、左对齐）、方向键挪框（←0.5、Shift+←2）', b3.y === 20 && Math.abs(b3.x - 10.5) <= 0.6 && b3.align === 'left', JSON.stringify([b3.x, b3.y, b3.align]));
+    // 加框、删框
+    const nb = (await api('GET', `/api/projects/${np.id}`)).project.plans[0].boxes.length;
+    await page.click('.boxplan[data-plan="0"] [data-act="boxAdd"][data-type="text"]');
+    await page.waitForFunction(() => document.querySelectorAll('.boxplan[data-plan="0"] .brow').length === 16);
+    await page.fill('#bp0_role', '新卖点');
+    await page.click('.boxplan[data-plan="0"] [data-act="boxAdd"][data-type="block"]');
+    await page.click('.boxplan[data-plan="0"] [data-act="boxDel"]');
+    await sleep(1200);
+    sp = (await api('GET', `/api/projects/${np.id}`)).project;
+    check('加文字框（改名“新卖点”）、加色块再删掉', sp.plans[0].boxes.length === nb + 1 && sp.plans[0].boxes.some((b) => b.role === '新卖点' && b.type === 'text') && !sp.plans[0].boxes.some((b) => b.type === 'block' && b.role.startsWith('色块')));
+    await page.fill('#pb0_b' + sp.plans[0].boxes.find((b) => b.role === '新卖点').id.slice(1), '赠送可视化工具');
+    // 看草图
+    await page.click('.boxplan[data-plan="0"] [data-act="boxSketch"]');
     await page.waitForSelector('#vwLayer .vwimg');
-    check('点版式缩略图：看示例和线框图', /版式 E/.test(await page.textContent('#vwLayer')));
+    check('看草图：草图 + 模板的参考图', /草图/.test(await page.textContent('#vwLayer')));
     await page.keyboard.press('Escape');
-    await page.screenshot({ path: path.join(out, '6-plan.png'), fullPage: true });
+    // 存为我的模板 → A-1
+    await page.click('.boxplan[data-plan="0"] [data-act="boxSaveTpl"]');
+    await page.waitForSelector('#stUse');
+    check('存为我的模板：名字按 A-1 往下排', /存为 A-1/.test(await page.textContent('#modal')));
+    await page.click('#modal [data-ret="ok"]');
+    await page.waitForSelector('.boxc[data-btpl="A-1"]');
+    const mine = (await api('GET', '/api/meta/posterBoxTpls')).value;
+    check('我的模板 A-1：存了框（不含字）、参考图跟着 A，方案换成 A-1', mine.length === 1 && mine[0].id === 'A-1' && mine[0].parent === 'A' && mine[0].ref === '/main/tpl/ref/A.jpg' && mine[0].boxes.every((b) => !b.text) && mine[0].boxes.some((b) => b.role === '新卖点') && /模板 A-1/.test(await page.textContent('.boxplan[data-plan="0"] .ph')));
+    await page.click('.boxplan[data-plan="0"] [data-act="boxSaveTpl"]');
+    await page.waitForSelector('#stUse');
+    check('再存一次：A-2', /存为 A-2/.test(await page.textContent('#modal')));
+    await page.click('#modal [data-ret=""]');
+    // 从参考图生成模板 → J
+    await page.selectOption('#learnSite', 'doubao');
+    const nl = doubao.length;
+    const fcl = page.waitForEvent('filechooser');
+    await page.click('[data-act="learnUpload"]');
+    await (await fcl).setFiles({ name: '新参考.png', mimeType: 'image/png', buffer: product('#ddeeff') });
+    await page.waitForSelector('.boxc[data-btpl="J"]', { timeout: 30000 });
+    const la = doubao.slice(nl).find((x) => /拆成“框模板”/.test(x.text));
+    const mine2 = (await api('GET', '/api/meta/posterBoxTpls')).value;
+    const J = mine2.find((t) => t.id === 'J');
+    check('上传参考图生成模板：看图的 AI 拆框，存成 J（内置 A～I 后面），自动选上，不认识的框扔掉', la && la.files === 1 && J && J.boxes.length === 5 && J.refKey && J.name === '蓝白 · 大标题' && (await api('GET', `/api/projects/${np.id}`)).project.boxPick.includes('J'));
+    await page.hover('.boxc[data-btpl="J"] canvas');
+    await page.waitForSelector('.refhover:not([hidden]) img');
+    check('J 也能悬停看参考图', /\/api\/blobs\//.test(await page.getAttribute('.refhover img', 'src')));
+    await page.mouse.move(5, 5);
+    // 出图：草图 + 模板参考图
+    await page.uncheck('.boxplan[data-plan="1"] [data-pf="1|on"]');
+    await sleep(800);
+    await page.screenshot({ path: path.join(out, '6-boxplan.png'), fullPage: true });
     const na = ai.asked.length;
     await page.click('[data-act="generate"]');
-    await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 2);
+    await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 1);
     await page.waitForFunction(() => !document.querySelector('.pendbox .tag.blue'), null, { timeout: 60000 });
-    const gens = ai.asked.slice(na).filter((a) => /LAYOUT WIREFRAME/.test(a.prompt));
-    const gE = gens.find((a) => /黑底大字报/.test(a.prompt)), gF = gens.find((a) => /深蓝科技/.test(a.prompt));
-    check('按方案出图（版式 E）：默认只发灰色线框图（参考图不发，免得打架），说明卡、配色、格子里的字一字不差，要做成精致成品、字不准改', gE && gE.files.join(',') === '版式线框图.png' && /GREY LAYOUT WIREFRAME/.test(gE.prompt) && /FINISHED premium commercial design/.test(gE.prompt) && /do not fix, rephrase/.test(gE.prompt) && /超大白字：「远程装库」/.test(gE.prompt) && /方块 1：「快速装好」/.test(gE.prompt) && /yellow #FFE14D/.test(gE.prompt) && /2x2 grid of red boxes/.test(gE.prompt), JSON.stringify(gE && gE.files));
-    check('按方案出图（版式 F2）：换了配色、带店铺图标和图标描述', gF && gF.files.join(',') === '店铺图标.png,版式线框图.png' && /deep purple/.test(gF.prompt) && /笔记本电脑和客服耳机/.test(gF.prompt) && /shop's own logo/.test(gF.prompt), JSON.stringify(gF && gF.files));
-    check('文字版主图的卡片：标“文字版”、有 AI 标签和时间', /文字版/.test(await page.textContent('.pendbox .mcard[data-iid] b')) && (await page.locator('.pendbox .tag.aisite').count()) === 2);
-    // 勾“出图时也参考参考图的风格”：参考图一起发，只学配色质感
-    await page.check('#tplRefs');
-    await page.waitForFunction(() => document.getElementById('tplRefs').checked);
-    await sleep(300);
-    const nr = ai.asked.length;
-    await page.click('.pendbox .mcard[data-iid]:has-text("核心卖点") [data-act="redraw"]');
-    await page.waitForFunction((n) => true, nr);
-    for (let k = 0; k < 100 && !ai.asked.slice(nr).some((a) => /LAYOUT WIREFRAME/.test(a.prompt)); k++) await sleep(200);
-    const gr = ai.asked.slice(nr).find((a) => /LAYOUT WIREFRAME/.test(a.prompt));
-    check('勾了“出图时也参考参考图的风格”：参考图一起发，只学配色质感、忽略版式和字', gr && gr.files.join(',') === '参考图1.jpg,版式线框图.png' && /borrow ONLY colors/.test(gr.prompt), JSON.stringify(gr && gr.files));
-    await page.waitForFunction(() => !document.querySelector('.pendbox .tag.blue'), null, { timeout: 60000 });
-    await page.uncheck('#tplRefs');
-    check('审核用哪个 AI 在主图页选：豆包 / DeepSeek / Kimi / 智谱', (await page.locator('#judgeSite option').count()) === 4);
+    const g = ai.asked.slice(na).find((a) => /LAYOUT SKETCH/.test(a.prompt));
+    check('出图（模板）：发草图 + 模板的参考图 + 风格，字一字不差，不准改', g && g.files.join(',') === '草图.png,模板参考图.jpg' && /大标题：「远程装库」/.test(g.prompt) && /新卖点：「赠送可视化工具」/.test(g.prompt) && /MySQL 海豚 logo/.test(g.prompt) && /copy its VISUAL STYLE/.test(g.prompt) && /do not fix, rephrase/.test(g.prompt) && /red-and-white/.test(g.prompt), JSON.stringify(g && g.files));
+    check('文字主图的卡片：标“文字版”、有 AI 标签和时间', /文字版/.test(await page.textContent('.pendbox .mcard[data-iid] b')) && (await page.locator('.pendbox .tag.aisite').count()) === 1);
     await page.selectOption('#judgeSite', 'deepseek');
     const nj = doubao.length;
-    await page.click('.pendbox .mcard[data-iid]:has-text("核心卖点") [data-act="judge"]');
+    await page.click('.pendbox .mcard[data-iid] [data-act="judge"]');
     await page.waitForSelector('.pendbox .mcard:has-text("文字有问题")', { timeout: 30000 });
     const ja = doubao.slice(nj).find((x) => /图上的字是 AI 画的/.test(x.text));
-    check('AI 审核选 DeepSeek：发给 DeepSeek，对照方案格子里的字', ja && ja.site === 'deepseek' && /远程装库/.test(ja.text), JSON.stringify(ja && ja.site));
+    check('AI 审核选 DeepSeek：对照框里的字', ja && ja.site === 'deepseek' && /远程装库/.test(ja.text) && /赠送可视化工具/.test(ja.text), JSON.stringify(ja && ja.site));
     await page.selectOption('#judgeSite', 'doubao');
-    // 自由发挥
+    // AI 根据参考图（自由发挥）
     await page.click('[data-pkind="free"]');
     await page.waitForSelector('#freeStyle');
+    check('自由发挥：放参考图，“发送参考图”默认勾上', await page.isChecked('#freeRefs') && (await page.locator('.boxgrid').count()) === 0);
+    const fcp = page.waitForEvent('filechooser');
+    await page.click('[data-act="posterUpload"]');
+    await (await fcp).setFiles({ name: '参考.png', mimeType: 'image/png', buffer: product('#eeeeee') });
+    await page.waitForSelector('.mcard.pref');
     await page.selectOption('#freeStyle', 'E');
     await page.waitForFunction(() => document.getElementById('freeStyle').value === 'E');
     await page.selectOption('#freeCount', '2');
     await page.waitForFunction(() => document.querySelector('[data-act="generate"]').textContent.includes('2 张'));
     const nf = ai.asked.length;
     await page.click('[data-act="generate"]');
-    await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 4);
+    await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 3);
     await page.waitForFunction(() => !document.querySelector('.pendbox .tag.blue'), null, { timeout: 60000 });
     const fr = ai.asked.slice(nf).filter((a) => /Wanted style/.test(a.prompt));
-    check('自由发挥：不定版式，告诉 AI 风格（选了 E）、要表达的内容、禁止词，参考图一起发', fr.length === 2 && fr.every((a) => /street-promotion/.test(a.prompt) && /远程安装 MySQL/.test(a.prompt) && /秒装/.test(a.prompt) && a.files.join(',') === '参考图1.jpg' && !/WIREFRAME/.test(a.prompt)));
+    check('自由发挥：告诉 AI 风格（选了 E）、要表达的内容、禁止词，参考图一起发', fr.length === 2 && fr.every((a) => /street-promotion/.test(a.prompt) && /远程安装 MySQL/.test(a.prompt) && /秒装/.test(a.prompt) && a.files.join(',') === '参考图1.jpg'));
+    await page.uncheck('#freeRefs');
+    await sleep(500);
+    const nr = ai.asked.length;
+    await page.click('.pendbox .mcard[data-iid] [data-act="redraw"] >> nth=0');
+    for (let k = 0; k < 100 && !ai.asked.slice(nr).some((a) => /Wanted style/.test(a.prompt)); k++) await sleep(200);
+    const fr2 = ai.asked.slice(nr).find((a) => /Wanted style/.test(a.prompt));
+    check('不勾“发送参考图”：参考图不发', fr2 && fr2.files.length === 0, JSON.stringify(fr2 && fr2.files));
+    await page.waitForFunction(() => !document.querySelector('.pendbox .tag.blue'), null, { timeout: 60000 });
     await page.click('.pendbox [data-act="accept"] >> nth=0');
     await page.waitForSelector('[data-act="dlAll"]');
     const dlp = page.waitForEvent('download');
     await page.click('[data-act="dlAll"]');
     const zp = path.join(out, 'poster.zip');
     await (await dlp).saveAs(zp);
-    check('文字版主图：采用后可以下载（没有产品图也能打包）', fs.statSync(zp).size > 1000);
+    check('文字主图：采用后可以下载（没有产品图也能打包）', fs.statSync(zp).size > 1000);
+    // 删除我的模板
+    await page.click('[data-pkind="box"]');
+    await page.waitForSelector('.boxc[data-btpl="A-1"] [data-act="btplDel"]');
+    check('内置模板不能删，我的模板能删', (await page.locator('.boxc[data-btpl="A"] [data-act="btplDel"]').count()) === 0);
+    await page.click('.boxc[data-btpl="A-1"] [data-act="btplDel"]');
+    await page.click('#modal [data-ret="yes"]');
+    await page.waitForSelector('.boxc[data-btpl="A-1"]', { state: 'detached' });
+    check('删除我的模板 A-1', (await api('GET', '/api/meta/posterBoxTpls')).value.map((t) => t.id).join(',') === 'J');
+    // 旧项目：用过“文字版主图”的算文字主图
+    const old = await api('POST', '/api/main', { name: '旧项目' });
+    await api('POST', `/api/main/${old.id}/op`, { op: 'set', fields: { mode: 'poster' } });
+    check('实物项目不能改成文字', (await api('GET', `/api/projects/${old.id}`)).project.mode === 'scene');
+    await api('DELETE', `/api/projects/${old.id}`);
     await api('DELETE', `/api/projects/${np.id}`);
   }
 

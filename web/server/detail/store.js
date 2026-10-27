@@ -37,7 +37,7 @@ export function putProject(p, baseRev) {
 export function summary(p) {
   if (p.kind === "main") { // 主图项目（Lee 2026-10-23）
     const pr = (p.products || []).find((x) => x.id === p.cur) || (p.products || [])[0];
-    return { id: p.id, kind: "main", name: p.name, updated: p.updated, created: p.created, rev: p.rev || 0, size: p.size, firstAsset: pr ? pr.cut || pr.key : "", items: (p.items || []).length, done: (p.items || []).filter((x) => x.state === "ok").length };
+    return { id: p.id, kind: "main", name: p.name, updated: p.updated, created: p.created, rev: p.rev || 0, size: p.size, text: p.mode === "poster", firstAsset: pr ? pr.cut || pr.key : ((p.items || []).find((x) => x.scene) || {}).scene || "", items: (p.items || []).length, done: (p.items || []).filter((x) => x.state === "ok").length };
   }
   if (p.kind === "cutout") { // 抠白底图项目
     const f = (p.files || [])[0];

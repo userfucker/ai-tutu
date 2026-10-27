@@ -59,3 +59,24 @@
 .tplthumb { width: 150px; flex: none; }
 .tplthumb img { width: 150px; border-radius: 8px; cursor: zoom-in; display: block; }
 .plicon { width: 40px; height: 40px; object-fit: contain; border: 1px solid #e4e4e7; border-radius: 6px; }
+/* 文字主图：框模板（Lee 2026-10-27） */
+.boxc canvas.wire { width: 100%; aspect-ratio: 1; display: block; border-radius: 6px; border: 1px solid #e5e7eb; background: #fff; }
+.tplc .tdel { position: absolute; right: 10px; top: 38px; padding: 0 7px; color: #dc2626; }
+.refhover { position: fixed; z-index: 1000; width: 320px; background: #fff; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25); padding: 6px; pointer-events: none; }
+.refhover img { width: 100%; aspect-ratio: 1; object-fit: contain; display: block; border-radius: 6px; background: #f4f4f5; }
+.refhover div { font-size: 12px; color: #52525b; text-align: center; margin-top: 4px; }
+.boxed { display: flex; gap: 14px; align-items: flex-start; margin-top: 8px; flex-wrap: wrap; }
+.bedit { width: 440px; max-width: 100%; }
+.bedit canvas { width: 100%; aspect-ratio: 1; display: block; border: 1px solid #d4d4d8; border-radius: 6px; cursor: move; touch-action: none; outline: none; }
+.bedit canvas:focus { border-color: #2563eb; }
+.btools { margin-top: 6px; gap: 6px; flex-wrap: wrap; }
+.bside { min-width: 320px; }
+.bprops { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; font-size: 13px; }
+.bprops input[type="text"], .bprops input[type="number"] { padding: 2px 6px; width: 64px; }
+.bprops input[type="text"] { width: 110px; }
+.bprops select { width: auto; }
+.bprops input[type="color"] { width: 30px; height: 24px; padding: 0; border: 1px solid #d4d4d8; }
+.brow { cursor: pointer; }
+.brow.on td { background: #eef4ff; }
+.brow.on td:first-child { box-shadow: inset 3px 0 0 #2563eb; }
+.plan input.overlen { border-color: #f59e0b; background: #fffbeb; }
