@@ -491,6 +491,11 @@ try {
     await page.fill('#pl0_note', '不要立体效果');
     await page.click('[data-look="flat"]');
     await page.waitForSelector('[data-look="flat"].on');
+    // 背景（Lee 2026-10-28）：跟参考图 / 纯色 / 上下渐变 / 简洁 / 自己写
+    check('方案里有背景设置，默认跟参考图', (await page.inputValue('#pl0_bgMode')) === '' && (await page.locator('#pl0_bgMode option').count()) === 5);
+    await page.selectOption('#pl0_bgMode', 'custom');
+    await page.waitForSelector('#pl0_bgText');
+    await page.fill('#pl0_bgText', '浅灰色，不要条纹');
     await sleep(800);
     await page.screenshot({ path: path.join(out, '6-boxplan.png'), fullPage: true });
     const na = ai.asked.length;
@@ -500,6 +505,7 @@ try {
     const g = ai.asked.slice(na).find((a) => /LAYOUT SKETCH/.test(a.prompt));
     check('出图（模板）：发草图 + 模板的参考图 + 风格，字一字不差，不准改', g && g.files.join(',') === '草图.png,模板参考图.jpg' && /大标题：「远程装库」/.test(g.prompt) && /新卖点：「赠送可视化工具」/.test(g.prompt) && /MySQL 海豚 logo/.test(g.prompt) && /copy ONLY its color scheme/.test(g.prompt) && /do not fix, rephrase/.test(g.prompt) && /red-and-white/.test(g.prompt), JSON.stringify(g && g.files));
     check('文字主图的卡片：标“文字版”、有 AI 标签和时间', /文字版/.test(await page.textContent('.pendbox .mcard[data-iid] b')) && (await page.locator('.pendbox .tag.aisite').count()) === 1);
+    check('出图：背景自己写的放在前面，参考图不学背景', g && /BACKGROUND \(overrides the reference image and the style text; the shop's words, may be Chinese\): 浅灰色，不要条纹/.test(g.prompt) && /NOT its background/.test(g.prompt));
     check('出图：补充说明放最前面（优先级最高），选了“平面”就去掉风格说明里的立体句子、加上平面要求', g && /TOP PRIORITY — the shop's own requirements.*不要立体效果/.test(g.prompt) && g.prompt.indexOf('不要立体效果') < g.prompt.indexOf('LAYOUT SKETCH') && /FLAT DESIGN/.test(g.prompt) && /Style: Flat red-and-white poster, red pills\./.test(g.prompt) && !/copy its VISUAL STYLE/.test(g.prompt), g && g.prompt.split('\n').find((l) => l.startsWith('- Style')));
     await page.selectOption('#judgeSite', 'deepseek');
     const nj = doubao.length;
@@ -558,13 +564,15 @@ try {
     await page.waitForSelector('[data-te="x"]');
     check('点框选中：显示名称和位置', (await page.inputValue('[data-te="role"]')) === '大标题' && (await page.inputValue('[data-te="x"]')) === '3');
     await page.keyboard.press('Delete');
+    await page.selectOption('#te_bgMode', 'solid');
+    await page.waitForSelector('#teBg input[type="color"]');
     await page.mouse.click(tb.x + tb.width * 0.7, tb.y + tb.height * 0.2); // 产品 logo b4
     const lx = tb.x + tb.width * 0.7, ly = tb.y + tb.height * 0.2;
     await page.mouse.move(lx, ly); await page.mouse.down(); await page.mouse.move(lx - tb.width * 0.1, ly, { steps: 5 }); await page.mouse.up();
     await page.click('#modal [data-ret="save"]');
     await page.waitForSelector('.boxc[data-btpl="A"] .tag:text("改过")');
     let mA = (await api('GET', '/api/meta/posterBoxTpls')).value.find((t) => t.id === 'A');
-    check('保存：内置模板 A 存成改过的（少了大标题、logo 往左挪了），标“改过”', mA && mA.edited && mA.builtin && mA.boxes.length === 16 && !mA.boxes.some((b) => b.id === 'b3') && Math.abs(mA.boxes.find((b) => b.id === 'b4').x - 37) <= 0.5 && (await page.locator('.boxc[data-btpl="A"] [data-act="btplDel"]').count()) === 0, JSON.stringify(mA && mA.boxes.find((b) => b.id === 'b4')));
+    check('保存：内置模板 A 存成改过的（少了大标题、logo 往左挪了、背景改纯色），标“改过”', mA && mA.edited && mA.bgMode === 'solid' && mA.builtin && mA.boxes.length === 16 && !mA.boxes.some((b) => b.id === 'b3') && Math.abs(mA.boxes.find((b) => b.id === 'b4').x - 37) <= 0.5 && (await page.locator('.boxc[data-btpl="A"] [data-act="btplDel"]').count()) === 0, JSON.stringify(mA && mA.boxes.find((b) => b.id === 'b4')));
     await page.click('.boxc[data-btpl="A"] canvas', { button: 'right' });
     await page.waitForSelector('#teCv');
     await page.click('#modal [data-te-add="text"]');

@@ -268,7 +268,7 @@ function writePlans(pid, site, n, tpls, boxIds) {
           if (b.type === "icon") b.desc = String(fill[b.id] || b.desc || "").trim().slice(0, 120);
           return b;
         });
-        return { id: ST.uid("pl"), on: true, by: site, tpl: t.id, tplName: t.name || "", ref: t.ref || "", refKey: t.refKey || "", style: t.style || "", bg1: t.bg1 || "#ffffff", bg2: t.bg2 || t.bg1 || "#ffffff", theme: String(x.theme || t.name || "方案").slice(0, 20), boxes, note: "" };
+        return { id: ST.uid("pl"), on: true, by: site, tpl: t.id, tplName: t.name || "", ref: t.ref || "", refKey: t.refKey || "", style: t.style || "", bg1: t.bg1 || "#ffffff", bg2: t.bg2 || t.bg1 || "#ffffff", bgMode: t.bgMode || "", bgText: t.bgText || "", theme: String(x.theme || t.name || "方案").slice(0, 20), boxes, note: "" };
       });
       if (!plans.some((x) => x.boxes.some((b) => b.type === "text" && b.text))) throw new Error("AI 没写出方案（格式不对），再点一次");
       edit(pid, (q) => { q.plans = plans; q.planJob = ""; });

@@ -100,7 +100,7 @@
     const d = await r.json().catch(() => ({}));
     if (r.status === 401) { location.href = "/"; return; }
     if (!r.ok) { APP.toast(d.error || `出错了（${r.status}）`, true); return; }
-    if (d.project && P() && d.project.id === P().id) { APP.project = d.project; render(); }
+    if (d.project && P() && d.project.id === P().id) { Object.assign(d.project, setPend); APP.project = d.project; render(); } // 还没发出去的输入（半秒后才存）别被服务器返回的旧数据盖掉
     return d.project;
   }
   const setFields = (fields) => { Object.assign(P(), fields); return op({ op: "set", fields }); };
@@ -335,7 +335,7 @@
     if (b && (a === "slots" || a === "icons")) { pl[a] = pl[a] || {}; pl[a][b] = v; }
     else if (b) pl.blocks[+a][b] = v; else pl[a] = v;
     setSoon({ plans: P().plans });
-    if (t.type === "checkbox") render();
+    if (t.type === "checkbox" || a === "bgMode") render();
     if (b === "text" || a === "slots") banRefresh();
   }
   /** 自己填的禁止词，在“要表达的内容”里也出现了（会让 AI 写出意思不对的话） */
@@ -445,7 +445,7 @@
         <span class="tag" data-refhover="${esc(refUrl(pl))}" data-refname="模板 ${esc(pl.tpl)} 的参考图">模板 ${esc(pl.tpl)}${pl.tplName ? " " + esc(pl.tplName) : ""}</span>
         ${pl.by ? `<span class="tag">${esc((PLAN_SITES.find((x) => x[0] === pl.by) || [0, pl.by])[1])} 写的</span>` : ""}
         <span class="tag bad" id="pl${i}_ban" ${hitsAll.length ? "" : "hidden"}>有禁用词：${esc([...new Set(hitsAll)].join("、"))}</span>
-        <span class="sp row"><label class="row lb" title="背景从上到下两个颜色（只是草图的底色，AI 出图按参考图的风格画）">底色 <input type="color" data-bp="${i}|bg1" value="${esc(pl.bg1 || "#ffffff")}"><input type="color" data-bp="${i}|bg2" value="${esc(pl.bg2 || pl.bg1 || "#ffffff")}"></label>
+        <span class="sp row">
         <button class="sm" data-act="boxSketch" title="看大图：程序画的草图（出图时发给 AI 的就是这张）">看草图</button>
         <button class="sm" data-act="boxSaveTpl" title="把现在的框（位置、大小、样式，不含字）存成“我的模板”，名字 ${esc(String(pl.tpl).split("-")[0])}-1、${esc(String(pl.tpl).split("-")[0])}-2…">存为我的模板</button>
         <button class="sm danger" data-act="planDel">删除方案</button></span></div>
@@ -456,7 +456,18 @@
           <table class="ptable"><thead><tr><th style="width:110px">框</th><th>文字 / 图标画什么</th><th style="width:56px">字数</th></tr></thead><tbody>
           ${rows.map((b) => boxRow(pl, i, b, p)).join("")}
           <tr><td class="muted">补充说明</td><td colspan="2"><input id="pl${i}_note" data-pf="${i}|note" value="${esc(pl.note || "")}" placeholder="可以不填，如：所有文字和胶囊都用平面效果（出图时放在最前面，优先级最高）"></td></tr>
+          <tr><td class="muted">背景</td><td colspan="2">${bgControls(pl, `data-pf="${i}|`, `pl${i}_`, `data-bp="${i}|`)}</td></tr>
           <tr><td class="muted" title="模板带的风格描述（英文），出图时发给画图 AI。想改效果（比如不要立体）就改这里">风格说明<br>（给画图 AI）</td><td colspan="2"><textarea id="pl${i}_style" data-pf="${i}|style" rows="3" placeholder="英文，描述配色、背景、字的效果、装饰、质感">${esc(pl.style || "")}</textarea>${p.posterLook === "flat" && pl.style && ST.flatStyle(pl.style) !== String(pl.style).trim() ? `<div class="muted">选了“平面”：出图时会去掉里面讲立体、阴影的句子</div>` : ""}</td></tr></tbody></table></div></div></div>`;
+  }
+  /** 背景设置（方案和模板编辑共用）：方式 + 颜色 + 自己写；attr = 改方式 / 文字用的属性前缀，cattr = 改颜色用的 */
+  function bgControls(x, attr, idp, cattr) {
+    const m = x.bgMode || "";
+    const c = (k) => `<input type="color" ${cattr}${k}" value="${esc(ST.bgColors(x)[k])}">`;
+    const tip = { "": "照参考图（和风格说明）的背景画", solid: "整张一个颜色，没有花纹", gradient: "从上到下两个颜色慢慢过渡，没有花纹", clean: "用参考图的颜色，但去掉条纹、光线、网格这些花纹", custom: "写你想要的背景，如：浅灰色，右下角一点淡淡的光" }[m] || "";
+    return `<div class="row" style="gap:8px;flex-wrap:wrap"><select id="${idp}bgMode" ${attr}bgMode">${ST.BG_MODES.map(([v, t]) => `<option value="${v}" ${m === v ? "selected" : ""}>${t}</option>`).join("")}</select>
+      ${m === "solid" ? `颜色 ${c("bg1")}` : m === "gradient" ? `上 ${c("bg1")} 下 ${c("bg2")}` : ""}
+      ${m === "custom" ? `<input id="${idp}bgText" ${attr}bgText" value="${esc(x.bgText || "")}" placeholder="如：浅灰色渐变，右下角一点淡淡的光，不要条纹" style="flex:1;min-width:240px">` : ""}</div>
+      <div class="muted">${esc(tip)}${m ? "；出图时去掉风格说明里讲背景的句子，参考图也不学它的背景" : ""}</div>`;
   }
   function boxRow(pl, i, b, p) {
     const on = bsel[pl.id] === b.id ? "on" : "";
@@ -483,7 +494,7 @@
     if (!cv || !pl) return;
     const g = cv.getContext("2d"), S = cv.width;
     g.clearRect(0, 0, S, S);
-    ST.drawBoxes(g, pl.boxes, S, { mode: "sketch", bg1: pl.bg1, bg2: pl.bg2, sel: bsel[pl.id], hint: true });
+    ST.drawBoxes(g, pl.boxes, S, { mode: "sketch", ...ST.bgColors(pl), sel: bsel[pl.id], hint: true });
     const b = boxOf(pl);
     if (b) { const k = S / 100, hs = 16; g.fillStyle = "#2563eb"; g.fillRect((b.x + b.w) * k - hs / 2, (b.y + b.h) * k - hs / 2, hs, hs); }
   }
@@ -492,7 +503,7 @@
     try { await document.fonts.ready; } catch {}
     const c = document.createElement("canvas");
     c.width = c.height = px;
-    ST.drawBoxes(c.getContext("2d"), pl.boxes, px, { mode: "sketch", bg1: pl.bg1, bg2: pl.bg2 });
+    ST.drawBoxes(c.getContext("2d"), pl.boxes, px, { mode: "sketch", ...ST.bgColors(pl) });
     return c;
   }
   /** 画完页面：模板缩略图（线框）和每个方案的编辑器 */
@@ -608,7 +619,7 @@
     const t0 = boxTpl(id);
     if (!t0) return;
     const builtin = ST.BOX_TPLS.find((t) => t.id === id);
-    const work = { boxes: JSON.parse(JSON.stringify(t0.boxes)) };
+    const work = { boxes: JSON.parse(JSON.stringify(t0.boxes)), bgMode: t0.bgMode || "", bgText: t0.bgText || "", bg1: t0.bg1 || "#ffffff", bg2: t0.bg2 || t0.bg1 || "#ffffff" };
     let sel = "", overlay = true, drg = null;
     const ref = refUrl(t0);
     const refImg = new Image();
@@ -638,6 +649,7 @@
         <div class="row btools"><button class="sm" data-te-add="text">＋文字</button><button class="sm" data-te-add="icon">＋图标</button><button class="sm" data-te-add="block">＋色块</button><button class="sm" data-te-add="line">＋线</button>
           <span class="sp row"><button class="sm" id="teDup">复制</button><button class="sm danger" id="teDel">删除框</button></span></div></div>
         <div class="teside">${ref ? `<label class="row lb"><input type="checkbox" id="teOver" checked> 叠在参考图上看（对着原图挪位置）</label><img class="teref" src="${esc(ref)}" alt="">` : ""}<div class="bprops" id="teProps" style="margin-top:8px"></div>
+          <div class="lb" style="margin-top:8px">背景（以后用这个模板写的方案默认用它，方案里还能改）</div><div id="teBg">${bgControls(work, 'data-tebg="', "te_", 'data-tebg="')}</div>
           <div class="muted">${builtin ? "这是内置模板：保存后用改过的（标“改过”），以后可以“恢复原样”。" : "保存会直接改这个模板。"}已经写好的方案不受影响，重新写方案才用新的。</div></div></div>
       <div class="mf"><button data-ret="">取消</button>${builtin && t0.edited ? '<button data-ret="restore">恢复原样</button>' : ""}<button data-ret="saveas">另存为 ${esc(asName)}</button><button class="primary" data-ret="save">保存</button></div>`, {
       title: `编辑模板 ${id}${t0.name ? " · " + t0.name : ""}`, big: true,
@@ -674,7 +686,10 @@
           const k = e.target.dataset.te, b = cur();
           if (k && b) { if (k === "role") b.role = e.target.value.slice(0, 16); else { const v = +e.target.value; if (Number.isFinite(v)) b[k] = k === "lines" ? Math.min(4, Math.max(1, Math.round(v))) : ST.clamp(v, 0, 100); } draw(); }
           if (e.target.id === "teOver") { overlay = e.target.checked; draw(); }
+          const bk = e.target.dataset.tebg;
+          if (bk && bk !== "bgMode") work[bk] = e.target.value;
         });
+        m.addEventListener("change", (e) => { if (e.target.dataset.tebg === "bgMode") { work.bgMode = e.target.value; m.querySelector("#teBg").innerHTML = bgControls(work, 'data-tebg="', "te_", 'data-tebg="'); } });
         m.addEventListener("click", (e) => {
           const add = e.target.closest("[data-te-add]");
           if (add) {
@@ -697,10 +712,10 @@
     if (r === "restore") { myBoxTpls = mine.filter((x) => x.id !== id); msg = `模板 ${id} 恢复原样了`; }
     else if (r === "saveas") {
       const nid = ST.nextDerivedName(id, [...ST.BOX_TPLS.map((t) => t.id), ...mine.map((t) => t.id)]);
-      myBoxTpls = [...mine, { ...JSON.parse(JSON.stringify(t0)), id: nid, builtin: false, edited: false, base: false, parent: id, t: Date.now(), boxes }];
+      myBoxTpls = [...mine, { ...JSON.parse(JSON.stringify(t0)), id: nid, builtin: false, edited: false, base: false, parent: id, t: Date.now(), boxes, bgMode: work.bgMode, bgText: work.bgText, bg1: work.bg1, bg2: work.bg2 }];
       msg = `另存好了：模板 ${nid}`;
     } else {
-      const nt = { ...JSON.parse(JSON.stringify(t0)), boxes, t: Date.now() };
+      const nt = { ...JSON.parse(JSON.stringify(t0)), boxes, t: Date.now(), bgMode: work.bgMode, bgText: work.bgText, bg1: work.bg1, bg2: work.bg2 };
       if (builtin) Object.assign(nt, { builtin: true, edited: true });
       myBoxTpls = mine.some((x) => x.id === id) ? mine.map((x) => (x.id === id ? nt : x)) : [...mine, nt];
       msg = `模板 ${id} 保存好了`;
@@ -1046,7 +1061,7 @@
         <div class="mf"><button data-ret="">取消</button><button class="primary" data-ret="ok">存为 ${esc(id)}</button></div>`, { title: "存为我的模板", check: (v, m) => { use = m.querySelector("#stUse").value.trim().slice(0, 30); } });
       if (ok !== "ok") return;
       const boxes = JSON.parse(JSON.stringify(pl.boxes)).map((b) => { delete b.text; return b; });
-      const t = { id, name: pl.tplName || base.name || "", use, style: pl.style || "", bg1: pl.bg1, bg2: pl.bg2, ref: pl.ref || "", refKey: pl.refKey || "", parent: pl.tpl, t: Date.now(), boxes };
+      const t = { id, name: pl.tplName || base.name || "", use, style: pl.style || "", bg1: pl.bg1, bg2: pl.bg2, bgMode: pl.bgMode || "", bgText: pl.bgText || "", ref: pl.ref || "", refKey: pl.refKey || "", parent: pl.tpl, t: Date.now(), boxes };
       myBoxTpls = [...mine.filter((x) => x.id !== id), t];
       await ST.db.setMeta("posterBoxTpls", myBoxTpls);
       pl.tpl = id;

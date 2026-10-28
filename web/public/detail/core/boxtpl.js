@@ -304,7 +304,28 @@ if (ST.P) {
   /** 平面效果：把风格说明里讲立体（3D、厚度、凸起、浮雕、阴影、景深）的那几句去掉 */
   ST.flatStyle = (style) => String(style || "")
     .replace(/[^,.;:]*\b(3D|3-D|three[- ]dimensional|extru\w*|bevel\w*|emboss\w*|isometric|shadows?|depth|glossy|volumetric)\b[^,.;:]*/gi, "")
-    .replace(/\s*,\s*(,\s*)+/g, ", ").replace(/(^|[.;:])\s*,\s*/g, "$1 ").replace(/,\s*([.;])/g, "$1").replace(/\s{2,}/g, " ").trim();
+    .replace(/\s*,\s*(,\s*)+/g, ", ").replace(/(^|[.;:])\s*,\s*/g, "$1 ").replace(/,\s*([.;])/g, "$1").replace(/\s{2,}/g, " ").trim().replace(/^[\s,.;:]+/, "").replace(/([.;:]\s+)([a-z])/g, (m, a, c) => a + c.toUpperCase()).replace(/^[a-z]/, (c) => c.toUpperCase());
+
+  /**
+   * 背景（Lee 2026-10-28：参考图有的背景是复杂的条纹，要能改）。bgMode：
+   *  "" 跟参考图 / "solid" 纯色 bg1 / "gradient" 上下渐变 bg1 → bg2 / "clean" 简洁（参考图的颜色，去掉条纹、光线这些花纹）/ "custom" 自己写 bgText
+   */
+  ST.BG_MODES = [["", "跟参考图"], ["solid", "纯色"], ["gradient", "上下渐变"], ["clean", "简洁（去掉条纹、光线这些花纹）"], ["custom", "自己写"]];
+  /** 草图用的两个底色 */
+  ST.bgColors = (x) => ({ bg1: (x && x.bg1) || "#ffffff", bg2: x && x.bgMode === "solid" ? (x.bg1 || "#ffffff") : (x && (x.bg2 || x.bg1)) || "#ffffff" });
+  /** 背景改了：风格说明里讲背景的句子去掉（不然 AI 又照着画条纹） */
+  ST.noBgStyle = (style) => String(style || "")
+    .replace(/[^,.;:]*\b(background|backdrop|stripes?|striped|streaks?|line art|rays?|grid|patterns?|bokeh|textures?|particles?|light beams?|sunburst|halftone)\b[^,.;:]*/gi, "")
+    .replace(/\s*,\s*(,\s*)+/g, ", ").replace(/(^|[.;:])\s*,\s*/g, "$1 ").replace(/,\s*([.;])/g, "$1").replace(/\s{2,}/g, " ").trim().replace(/^[\s,.;:]+/, "").replace(/([.;:]\s+)([a-z])/g, (m, a, c) => a + c.toUpperCase()).replace(/^[a-z]/, (c) => c.toUpperCase());
+  /** 背景那一句提示词（跟参考图 = 空） */
+  ST.bgPrompt = (x) => {
+    const m = x && x.bgMode, NO = "no stripes, no rays, no grid, no geometric line art, no light streaks, no busy patterns or textures";
+    if (m === "solid") return `- BACKGROUND (overrides the reference image and the style text): one plain solid color ${x.bg1 || "#ffffff"} — ${NO}.`;
+    if (m === "gradient") return `- BACKGROUND (overrides the reference image and the style text): a smooth vertical gradient from ${x.bg1 || "#ffffff"} (top) to ${x.bg2 || x.bg1 || "#ffffff"} (bottom) — ${NO}.`;
+    if (m === "clean") return `- BACKGROUND (overrides the reference image and the style text): keep the reference's main background colors but make it clean and simple — a smooth color or soft gradient with at most one subtle soft decoration; ${NO}.`;
+    if (m === "custom" && String(x.bgText || "").trim()) return `- BACKGROUND (overrides the reference image and the style text; the shop's words, may be Chinese): ${String(x.bgText).trim()}`;
+    return "";
+  };
 
   /**
    * 出图（框模板）：草图（字、位置、大小、颜色都对）+ 模板的原参考图（学风格）+ 风格说明
@@ -316,25 +337,28 @@ if (ST.P) {
     const texts = list.filter((b) => b.type === "text" && String(b.text || "").trim());
     const icons = list.filter((b) => b.type === "icon");
     const look = p.posterLook === "flat" || p.posterLook === "3d" ? p.posterLook : "";
-    const style = look === "flat" ? ST.flatStyle(plan.style) : String(plan.style || "").trim();
+    const bgLine = ST.bgPrompt(plan);
+    let style = look === "flat" ? ST.flatStyle(plan.style) : String(plan.style || "").trim();
+    if (bgLine) style = ST.noBgStyle(style);
     const note = String(plan.note || "").trim();
     return [
       "Generate one image: a square 1:1 Chinese e-commerce main image (Taobao / Tmall listing image), designed by a top professional e-commerce designer.",
       note ? `- TOP PRIORITY — the shop's own requirements (Chinese). They override everything below, including the reference image and the style text; if anything conflicts, follow these: ${note}` : "",
       look === "flat" ? "- TOP PRIORITY — FLAT DESIGN: every text, headline, pill, tag, badge, card and icon is completely flat 2D. No 3D, no extrusion or thickness, no bevel, no emboss, no drop shadows, no glossy highlights, no perspective. Use solid colors (simple gradients are OK)." : "",
+      bgLine,
       look === "3d" ? "- 3D LOOK: the headline uses strong 3D extruded lettering with depth and light; pills and badges have a soft raised 3D look." : "",
       "- The FIRST uploaded image is the LAYOUT SKETCH drawn by a program: every text is already in its final position, size, color and line break. Follow its layout exactly — the same zones, positions, proportions, text sizes and colors. Its plain look is only a draft: turn it into a finished design.",
       "- In the sketch, dashed boxes with a cross are ICON placeholders: draw the described icon / illustration there (no dashed lines, no placeholder words).",
       o.ref ? (look === "flat"
-        ? "- The SECOND uploaded image is the original reference design this layout came from: copy ONLY its color scheme, background, decorations and the arrangement of cards and pills — NOT its 3D, shadow or bevel effects (this image must be flat) — and NEVER its words, shop name, brand, product or prices."
-        : "- The SECOND uploaded image is the original reference design this layout came from: copy its VISUAL STYLE — color scheme, background, typography effects (outline, 3D, shadow, gradient), decorations, cards and pills, texture and polish — but NEVER its words, shop name, brand, product or prices.") : "",
+        ? `- The SECOND uploaded image is the original reference design this layout came from: copy ONLY its color scheme, ${bgLine ? "" : "background, "}decorations and the arrangement of cards and pills — NOT ${bgLine ? "its background, " : ""}its 3D, shadow or bevel effects (this image must be flat) — and NEVER its words, shop name, brand, product or prices.`
+        : `- The SECOND uploaded image is the original reference design this layout came from: copy its VISUAL STYLE — color scheme, ${bgLine ? "" : "background, "}typography effects (outline, 3D, shadow, gradient), decorations, cards and pills, texture and polish${bgLine ? " (but NOT its background — see BACKGROUND)" : ""} — but NEVER its words, shop name, brand, product or prices.`) : "",
       style ? `- Style: ${style}` : "",
       "- Texts — render EXACTLY these Simplified Chinese texts, character for character, where the sketch puts them, and no other words anywhere. Even if a text looks unusual, render it exactly as given: do not fix, rephrase, translate or 'correct' it:",
       ...texts.map((b) => `  · ${b.role}：「${String(b.text).trim()}」`),
       ...icons.map((b) => `- Icon / illustration at "${b.role}": ${b.desc || b.role} (no text inside icons${look === "flat" ? ", flat 2D icon" : ""}).`),
       look === "flat"
         ? "- The result must look like a FINISHED premium commercial design, not a rough draft: clean flat graphic design, crisp shapes, strong bold headline typography."
-        : "- The result must look like a FINISHED premium commercial design, not a flat mock-up: rich background, depth, soft shadows and light, strong headline typography.",
+        : `- The result must look like a FINISHED premium commercial design, not a flat mock-up: ${bgLine ? "" : "rich background, "}depth, soft shadows and light, strong headline typography.`,
       "- Every character must be correct and complete: no typos, no missing strokes, no garbled or made-up characters, no extra English, no watermark.",
       `- Never add any of these words: ${ban.join(", ")}.`,
       "- Mobile one-glance: the main headline is the biggest, boldest element; all text is high-contrast and readable on a phone.",
