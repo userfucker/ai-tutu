@@ -430,7 +430,7 @@
   // ------------------------------------------------------------ 文字主图：框模板（Lee 2026-10-27）
   const boxTpl = (id) => ST.boxTpl(id, myBoxTpls);
   const natural = (a, b) => String(a.id).localeCompare(String(b.id), "en", { numeric: true });
-  const allBoxTpls = () => [...ST.BOX_TPLS, ...[...myBoxTpls].sort(natural)];
+  const allBoxTpls = () => [...ST.BOX_TPLS.map((t) => myBoxTpls.find((x) => x.id === t.id) || t), ...myBoxTpls.filter((x) => !ST.BOX_TPLS.some((t) => t.id === x.id)).sort(natural)];
   const refUrl = (t) => (t && t.refKey ? ST.urlFor(t.refKey) : (t && t.ref) || "");
   const BOX_ROLE = { text: "文字", icon: "图标", block: "色块", line: "线" };
   const planOf = (el) => P().plans[+el.closest("[data-plan]").dataset.plan];
@@ -598,6 +598,123 @@
     hov.style.top = Math.max(8, Math.min(r.top, innerHeight - W - 50)) + "px";
     hov.hidden = false;
   });
+  /**
+   * 编辑模板（Lee 2026-10-28：在模板上右键）：删框、挪位置、改大小、加框，可以叠在参考图上对着改。
+   * 保存：我的模板直接改；内置模板改过的存进“我的模板”（同名，标“改过”），能恢复原样。另存为 = 新模板 X-1、X-2…
+   * 已经写好的方案用的是当时的一份，不受影响。
+   */
+  async function editTpl(id) {
+    const t0 = boxTpl(id);
+    if (!t0) return;
+    const builtin = ST.BOX_TPLS.find((t) => t.id === id);
+    const work = { boxes: JSON.parse(JSON.stringify(t0.boxes)) };
+    let sel = "", overlay = true, drg = null;
+    const ref = refUrl(t0);
+    const refImg = new Image();
+    if (ref) refImg.src = ref;
+    const mine0 = (await ST.db.getMeta("posterBoxTpls", [])) || [];
+    const asName = ST.nextDerivedName(id, [...ST.BOX_TPLS.map((t) => t.id), ...mine0.map((t) => t.id)]);
+    let cv, m0;
+    const cur = () => work.boxes.find((b) => b.id === sel) || null;
+    const draw = () => {
+      const g = cv.getContext("2d"), S = cv.width;
+      g.fillStyle = "#fff"; g.fillRect(0, 0, S, S);
+      if (overlay && refImg.complete && refImg.naturalWidth) { g.drawImage(refImg, 0, 0, S, S); g.fillStyle = "rgba(255,255,255,.55)"; g.fillRect(0, 0, S, S); }
+      ST.drawBoxes(g, work.boxes, S, { mode: "wire", clear: true, sel });
+      const b = cur();
+      if (b) { const k = S / 100, hs = 16; g.fillStyle = "#2563eb"; g.fillRect((b.x + b.w) * k - hs / 2, (b.y + b.h) * k - hs / 2, hs, hs); }
+    };
+    const props = () => {
+      const b = cur(), el = m0.querySelector("#teProps");
+      if (!b) { el.innerHTML = '<div class="muted">点一个框选中它：拖动换位置，拖右下角蓝色小方块改大小，Delete 删掉，方向键微调（Shift 挪得多）。</div>'; return; }
+      const f = (k, label, type = "number") => `<label class="row lb">${label} <input type="${type}" data-te="${k}" value="${esc(b[k] != null ? b[k] : "")}" ${type === "number" ? 'step="0.5"' : ""}></label>`;
+      el.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap"><b>${BOX_ROLE[b.type] || ""}框</b>${f("role", "名称", "text")}${b.type === "text" ? f("lines", "行数") : ""}</div>
+        <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px">${f("x", "左")}${f("y", "上")}${f("w", "宽")}${f("h", "高")}<span class="muted">（%）</span></div>`;
+    };
+    const syncNums = () => { const b = cur(); if (!b) return; for (const k of ["x", "y", "w", "h"]) { const el = m0.querySelector(`[data-te="${k}"]`); if (el && document.activeElement !== el) el.value = b[k]; } };
+    const nextId = () => "b" + (Math.max(0, ...work.boxes.map((b) => +String(b.id).slice(1) || 0)) + 1);
+    const r = await APP.modal(`<div class="tedit"><div class="tecv"><canvas id="teCv" width="900" height="900" tabindex="0"></canvas>
+        <div class="row btools"><button class="sm" data-te-add="text">＋文字</button><button class="sm" data-te-add="icon">＋图标</button><button class="sm" data-te-add="block">＋色块</button><button class="sm" data-te-add="line">＋线</button>
+          <span class="sp row"><button class="sm" id="teDup">复制</button><button class="sm danger" id="teDel">删除框</button></span></div></div>
+        <div class="teside">${ref ? `<label class="row lb"><input type="checkbox" id="teOver" checked> 叠在参考图上看（对着原图挪位置）</label><img class="teref" src="${esc(ref)}" alt="">` : ""}<div class="bprops" id="teProps" style="margin-top:8px"></div>
+          <div class="muted">${builtin ? "这是内置模板：保存后用改过的（标“改过”），以后可以“恢复原样”。" : "保存会直接改这个模板。"}已经写好的方案不受影响，重新写方案才用新的。</div></div></div>
+      <div class="mf"><button data-ret="">取消</button>${builtin && t0.edited ? '<button data-ret="restore">恢复原样</button>' : ""}<button data-ret="saveas">另存为 ${esc(asName)}</button><button class="primary" data-ret="save">保存</button></div>`, {
+      title: `编辑模板 ${id}${t0.name ? " · " + t0.name : ""}`, big: true,
+      onOpen: (m) => {
+        m0 = m; cv = m.querySelector("#teCv");
+        refImg.onload = draw;
+        draw(); props();
+        const pt = (e) => { const rc = cv.getBoundingClientRect(); return { x: ((e.clientX - rc.left) / rc.width) * 100, y: ((e.clientY - rc.top) / rc.height) * 100 }; };
+        cv.onpointerdown = (e) => {
+          const p = pt(e), c = cur();
+          let b = null, how = "move";
+          if (c && Math.abs(p.x - (c.x + c.w)) < 2.2 && Math.abs(p.y - (c.y + c.h)) < 2.2) { b = c; how = "size"; } else b = hitBox(work, p);
+          sel = b ? b.id : ""; draw(); props();
+          if (!b) return;
+          e.preventDefault(); cv.focus({ preventScroll: true }); cv.setPointerCapture(e.pointerId);
+          drg = { b, how, p, o: { x: b.x, y: b.y, w: b.w, h: b.h } };
+        };
+        cv.onpointermove = (e) => {
+          if (!drg) return;
+          const p = pt(e), dx = p.x - drg.p.x, dy = p.y - drg.p.y, b = drg.b, o = drg.o, rd = (v) => Math.round(v * 2) / 2;
+          if (drg.how === "size") { b.w = rd(ST.clamp(o.w + dx, 1, 100 - b.x)); b.h = rd(ST.clamp(o.h + dy, 0.5, 100 - b.y)); }
+          else { b.x = rd(ST.clamp(o.x + dx, 0, 100 - b.w)); b.y = rd(ST.clamp(o.y + dy, 0, 100 - b.h)); }
+          draw(); syncNums();
+        };
+        cv.onpointerup = cv.onpointercancel = () => { drg = null; };
+        cv.onkeydown = (e) => {
+          const b = cur();
+          if (!b) return;
+          const st = e.shiftKey ? 2 : 0.5, mv = { ArrowLeft: [-st, 0], ArrowRight: [st, 0], ArrowUp: [0, -st], ArrowDown: [0, st] }[e.key];
+          if (mv) { e.preventDefault(); b.x = ST.clamp(b.x + mv[0], 0, 100 - b.w); b.y = ST.clamp(b.y + mv[1], 0, 100 - b.h); draw(); syncNums(); }
+          else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); work.boxes = work.boxes.filter((x) => x !== b); sel = ""; draw(); props(); }
+        };
+        m.addEventListener("input", (e) => {
+          const k = e.target.dataset.te, b = cur();
+          if (k && b) { if (k === "role") b.role = e.target.value.slice(0, 16); else { const v = +e.target.value; if (Number.isFinite(v)) b[k] = k === "lines" ? Math.min(4, Math.max(1, Math.round(v))) : ST.clamp(v, 0, 100); } draw(); }
+          if (e.target.id === "teOver") { overlay = e.target.checked; draw(); }
+        });
+        m.addEventListener("click", (e) => {
+          const add = e.target.closest("[data-te-add]");
+          if (add) {
+            const type = add.dataset.teAdd, role = `${BOX_ROLE[type]} ${work.boxes.filter((b) => b.type === type).length + 1}`;
+            const b = { text: { type, role, x: 30, y: 45, w: 40, h: 8, color: "#111111", bg: "", bold: true, lines: 1, align: "center" }, icon: { type, role, x: 40, y: 40, w: 20, h: 20, desc: "" }, block: { type, role, x: 0, y: 84, w: 100, h: 16, bg: "#1d4ed8", radius: 0 }, line: { type, role, x: 10, y: 50, w: 80, h: 0.6, color: "#333333" } }[type];
+            b.id = nextId();
+            type === "block" ? work.boxes.unshift(b) : work.boxes.push(b);
+            sel = b.id; draw(); props(); return;
+          }
+          const b = cur();
+          if (e.target.id === "teDel") { if (!b) return APP.toast("先点一个框选中它", true); work.boxes = work.boxes.filter((x) => x !== b); sel = ""; draw(); props(); }
+          if (e.target.id === "teDup") { if (!b) return APP.toast("先点一个框选中它", true); const c = { ...JSON.parse(JSON.stringify(b)), id: nextId(), x: Math.min(100 - b.w, b.x + 3), y: Math.min(100 - b.h, b.y + 3) }; work.boxes.splice(work.boxes.indexOf(b) + 1, 0, c); sel = c.id; draw(); props(); }
+        });
+      },
+    });
+    if (!r) return;
+    const mine = ((await ST.db.getMeta("posterBoxTpls", [])) || []);
+    const boxes = work.boxes.map((b) => { const x = { ...b }; delete x.text; return x; });
+    let msg;
+    if (r === "restore") { myBoxTpls = mine.filter((x) => x.id !== id); msg = `模板 ${id} 恢复原样了`; }
+    else if (r === "saveas") {
+      const nid = ST.nextDerivedName(id, [...ST.BOX_TPLS.map((t) => t.id), ...mine.map((t) => t.id)]);
+      myBoxTpls = [...mine, { ...JSON.parse(JSON.stringify(t0)), id: nid, builtin: false, edited: false, base: false, parent: id, t: Date.now(), boxes }];
+      msg = `另存好了：模板 ${nid}`;
+    } else {
+      const nt = { ...JSON.parse(JSON.stringify(t0)), boxes, t: Date.now() };
+      if (builtin) Object.assign(nt, { builtin: true, edited: true });
+      myBoxTpls = mine.some((x) => x.id === id) ? mine.map((x) => (x.id === id ? nt : x)) : [...mine, nt];
+      msg = `模板 ${id} 保存好了`;
+    }
+    await ST.db.setMeta("posterBoxTpls", myBoxTpls);
+    APP.toast(msg);
+    render();
+  }
+  document.addEventListener("contextmenu", (e) => {
+    const c = e.target.closest && e.target.closest("[data-btpl]");
+    if (!c || !P()) return;
+    e.preventDefault();
+    hov.hidden = true;
+    editTpl(c.dataset.btpl);
+  });
   /** 从一张参考图生成模板：图存起来，交给服务器（看图的 AI 拆成框，存进“我的模板”） */
   async function learnTpl(f) {
     if (!f) return;
@@ -728,11 +845,11 @@
           <label class="row lb">想要的风格 <select id="freeStyle"><option value="">按参考图的风格</option>${ST.POSTER_TPLS.map((t) => `<option value="${t.id}" ${p.freeStyle === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}<option value="custom" ${p.freeStyle === "custom" ? "selected" : ""}>自己写</option></select></label>
           ${p.freeStyle === "custom" ? `<input id="freeStyleText" value="${esc(p.freeStyleText || "")}" placeholder="如：红白色块、信息密集、粗黑体、底部通栏承诺" style="flex:1;min-width:280px">` : ""}
           <label class="row lb">一共 <select id="freeCount">${[1, 2, 3, 4, 5, 6].map((k) => `<option ${(p.freeCount || 3) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张（每张一个重点：${ST.POSTER_THEMES.map((t) => t.name).join(" / ")}）</label></div></div>` : `
-      <div class="card"><div class="head"><div><h3>② 选模板</h3><div class="muted">每个模板是照一张参考图画的线框（方框是字，打叉的是图标，虚线是色块）。鼠标移到模板上看它的参考图。点一下选上，可以选几个，按选的顺序一张一套方案；同一个模板点“＋”可以多选几次。</div></div>
+      <div class="card"><div class="head"><div><h3>② 选模板</h3><div class="muted">每个模板是照一张参考图画的线框（方框是字，打叉的是图标，虚线是色块）。鼠标移到模板上看它的参考图，右键可以编辑模板（删框、挪位置）。点一下选上，可以选几个，按选的顺序一张一套方案；同一个模板点“＋”可以多选几次。</div></div>
         <div class="sp row"><label class="row lb">看图用 <select id="learnSite">${LEARN_SITES.map(([v, t]) => `<option value="${v}" ${v === learnSite ? "selected" : ""}>${t}</option>`).join("")}</select></label><button data-act="learnFromLib">从素材中心选图生成模板</button><button data-act="learnUpload" title="上传一张你喜欢的主图，AI 把它的版式拆成框，存成“我的模板”（名字接着 ${esc(ST.nextBaseName(allBoxTpls().map((t) => t.id)))} 往下排）">上传参考图生成模板</button></div></div>
         ${p.learnJob ? `<div class="row" style="margin-bottom:8px"><span class="tag ${/失败/.test(p.learnJob) ? "bad" : "blue"}">${esc(p.learnJob)}</span></div>` : ""}
-        <div class="tplgrid boxgrid">${allBoxTpls().map((t) => { const n = pick.filter((x) => x === t.id).length; return `<div class="tplc boxc ${n ? "on" : ""}" data-btpl="${esc(t.id)}" data-refhover="${esc(refUrl(t))}" data-refname="模板 ${esc(t.id)} 的参考图">
-          <canvas class="wire" data-wire="${esc(t.id)}" width="300" height="300"></canvas><div class="tn"><b>${esc(t.id)}</b> ${esc(t.name || "")}${t.builtin ? "" : ` <span class="tag">${t.parent ? "另存" : "我的"}</span>`}</div><div class="muted tu">${esc(t.use || "")}</div>
+        <div class="tplgrid boxgrid">${allBoxTpls().map((t) => { const n = pick.filter((x) => x === t.id).length; return `<div class="tplc boxc ${n ? "on" : ""}" data-btpl="${esc(t.id)}" title="右键编辑这个模板" data-refhover="${esc(refUrl(t))}" data-refname="模板 ${esc(t.id)} 的参考图">
+          <canvas class="wire" data-wire="${esc(t.id)}" width="300" height="300"></canvas><div class="tn"><b>${esc(t.id)}</b> ${esc(t.name || "")}${t.edited ? ' <span class="tag">改过</span>' : t.builtin ? "" : ` <span class="tag">${t.parent ? "另存" : "我的"}</span>`}</div><div class="muted tu">${esc(t.use || "")}</div>
           ${n ? `<span class="tcount">${pick.map((x, k) => (x === t.id ? k + 1 : 0)).filter(Boolean).join("、")}</span>` : ""}<button class="sm tplus" data-act="btplMore" title="这个模板再多选一套">＋</button>${t.builtin ? "" : '<button class="sm tdel" data-act="btplDel" title="删除这个模板">✕</button>'}</div>`; }).join("")}</div>
         <div class="row" style="margin-top:10px;gap:10px;flex-wrap:wrap">
           <span class="muted">已选 ${pick.length} 套${pick.length ? "：" + pick.join(" → ") : ""}</span>${pick.length ? '<button class="sm" data-act="btplClear">清空</button>' : ""}

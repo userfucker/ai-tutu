@@ -541,6 +541,35 @@ try {
     await page.click('#modal [data-ret="yes"]');
     await page.waitForSelector('.boxc[data-btpl="A-1"]', { state: 'detached' });
     check('删除我的模板 A-1', (await api('GET', '/api/meta/posterBoxTpls')).value.map((t) => t.id).join(',') === 'J');
+    // 右键编辑模板（Lee 2026-10-28）：删框、挪位置，保存；内置的保存后标“改过”，能恢复原样；也能另存为
+    await page.click('.boxc[data-btpl="A"] canvas', { button: 'right' });
+    await page.waitForSelector('#teCv');
+    check('右键模板：打开编辑，叠着参考图', /编辑模板 A/.test(await page.textContent('#modal')) && await page.isChecked('#teOver') && (await page.getAttribute('.teref', 'src')) === '/main/tpl/ref/A.jpg');
+    const tb = await (await page.$('#teCv')).boundingBox();
+    await page.mouse.click(tb.x + tb.width * 0.2, tb.y + tb.height * 0.255); // 大标题 b3
+    await page.waitForSelector('[data-te="x"]');
+    check('点框选中：显示名称和位置', (await page.inputValue('[data-te="role"]')) === '大标题' && (await page.inputValue('[data-te="x"]')) === '3');
+    await page.keyboard.press('Delete');
+    await page.mouse.click(tb.x + tb.width * 0.7, tb.y + tb.height * 0.2); // 产品 logo b4
+    const lx = tb.x + tb.width * 0.7, ly = tb.y + tb.height * 0.2;
+    await page.mouse.move(lx, ly); await page.mouse.down(); await page.mouse.move(lx - tb.width * 0.1, ly, { steps: 5 }); await page.mouse.up();
+    await page.click('#modal [data-ret="save"]');
+    await page.waitForSelector('.boxc[data-btpl="A"] .tag:text("改过")');
+    let mA = (await api('GET', '/api/meta/posterBoxTpls')).value.find((t) => t.id === 'A');
+    check('保存：内置模板 A 存成改过的（少了大标题、logo 往左挪了），标“改过”', mA && mA.edited && mA.builtin && mA.boxes.length === 16 && !mA.boxes.some((b) => b.id === 'b3') && Math.abs(mA.boxes.find((b) => b.id === 'b4').x - 37) <= 0.5 && (await page.locator('.boxc[data-btpl="A"] [data-act="btplDel"]').count()) === 0, JSON.stringify(mA && mA.boxes.find((b) => b.id === 'b4')));
+    await page.click('.boxc[data-btpl="A"] canvas', { button: 'right' });
+    await page.waitForSelector('#teCv');
+    await page.click('#modal [data-te-add="text"]');
+    await page.fill('[data-te="role"]', '新标题');
+    await page.click('#modal [data-ret="saveas"]');
+    await page.waitForSelector('.boxc[data-btpl="A-1"]');
+    const mA1 = (await api('GET', '/api/meta/posterBoxTpls')).value.find((t) => t.id === 'A-1');
+    check('另存为：新模板 A-1（多了“新标题”框），A 不变', mA1 && mA1.parent === 'A' && mA1.boxes.length === 17 && mA1.boxes.some((b) => b.role === '新标题') && (await api('GET', '/api/meta/posterBoxTpls')).value.find((t) => t.id === 'A').boxes.length === 16);
+    await page.click('.boxc[data-btpl="A"] canvas', { button: 'right' });
+    await page.waitForSelector('#modal [data-ret="restore"]');
+    await page.click('#modal [data-ret="restore"]');
+    await page.waitForSelector('.boxc[data-btpl="A"] .tag:text("改过")', { state: 'detached' });
+    check('恢复原样：内置模板 A 回到 17 个框', !(await api('GET', '/api/meta/posterBoxTpls')).value.some((t) => t.id === 'A'));
     // 旧项目：用过“文字版主图”的算文字主图
     const old = await api('POST', '/api/main', { name: '旧项目' });
     await api('POST', `/api/main/${old.id}/op`, { op: 'set', fields: { mode: 'poster' } });

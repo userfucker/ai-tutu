@@ -144,7 +144,8 @@
       T("底部口号", 8, 87, 84, 11, { color: "#ffffff" }),
     ]),
   ];
-  ST.boxTpl = (id, mine) => ST.BOX_TPLS.find((t) => t.id === id) || (mine || []).find((t) => t.id === id) || null;
+  // “我的模板”里同名的优先：内置模板右键编辑保存后，改过的版本存在“我的模板”里（edited: true），可以恢复原样
+  ST.boxTpl = (id, mine) => (mine || []).find((t) => t.id === id) || ST.BOX_TPLS.find((t) => t.id === id) || null;
   /** 一个文字框按大小大概能放几个字（写方案时告诉 AI） */
   ST.boxMax = (b) => {
     const W = b.w * 8, H = b.h * 8, lines = Math.max(1, +b.lines || 1);
@@ -189,7 +190,7 @@
   ST.drawBoxes = (g, boxes, size, opts = {}) => {
     const mode = opts.mode || "sketch", S = size / 100, wire = mode === "wire";
     g.save();
-    if (wire) { g.fillStyle = "#ffffff"; g.fillRect(0, 0, size, size); }
+    if (wire) { if (!opts.clear) { g.fillStyle = "#ffffff"; g.fillRect(0, 0, size, size); } }
     else { const gr = g.createLinearGradient(0, 0, 0, size); gr.addColorStop(0, opts.bg1 || "#ffffff"); gr.addColorStop(1, opts.bg2 || opts.bg1 || "#ffffff"); g.fillStyle = gr; g.fillRect(0, 0, size, size); }
     const lw = Math.max(1, size / 400);
     for (const b of boxes || []) {
