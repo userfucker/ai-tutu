@@ -334,10 +334,10 @@ if (ST.P) {
     .replace(/\s*,\s*(,\s*)+/g, ", ").replace(/(^|[.;:])\s*,\s*/g, "$1 ").replace(/,\s*([.;])/g, "$1").replace(/\s{2,}/g, " ").trim().replace(/^[\s,.;:]+/, "").replace(/([.;:]\s+)([a-z])/g, (m, a, c) => a + c.toUpperCase()).replace(/^[a-z]/, (c) => c.toUpperCase());
   /** 背景那一句提示词（跟参考图 = 空） */
   ST.bgPrompt = (x) => {
-    const m = x && x.bgMode, NO = "no stripes, no rays, no grid, no geometric line art, no light streaks, no busy patterns or textures";
+    const m = x && x.bgMode, NO = "NO LINES OF ANY KIND in the background — no straight, diagonal or crossing lines, no tech / circuit lines, no diamond or rhombus outlines, no glowing lines or light streaks, no stripes, no rays, no grid, no geometric line art, no busy patterns or textures";
     if (m === "solid") return `- BACKGROUND (overrides the reference image and the style text): one plain solid color ${x.bg1 || "#ffffff"} — ${NO}.`;
     if (m === "gradient") return `- BACKGROUND (overrides the reference image and the style text): a smooth vertical gradient from ${x.bg1 || "#ffffff"} (top) to ${x.bg2 || x.bg1 || "#ffffff"} (bottom) — ${NO}.`;
-    if (m === "clean") return `- BACKGROUND (overrides the reference image and the style text): keep the reference's main background colors but make it clean and simple — a smooth color or soft gradient with at most one subtle soft decoration; ${NO}.`;
+    if (m === "clean") return `- BACKGROUND (overrides the reference image and the style text): use only the reference's main background colors as a completely plain, smooth color or soft gradient (a gentle vignette or soft glow is fine) — ${NO}.`;
     if (m === "custom" && String(x.bgText || "").trim()) return `- BACKGROUND (overrides the reference image and the style text; the shop's words, may be Chinese): ${String(x.bgText).trim()}`;
     return "";
   };
@@ -366,8 +366,8 @@ if (ST.P) {
       "- In the sketch, dashed boxes with a cross are ICON placeholders: draw the described icon / illustration there (no dashed lines, no placeholder words).",
       o.product ? `- The product in the sketch is the REAL product photo, already at its final position and size. The SECOND uploaded image is the same product on a plain white background (that white is not part of the product). Keep the product IDENTICAL — shape, proportions, colors, materials, printed text, logos, number of parts; do not redraw or redesign it. Only blend it into the design with natural lighting, contact shadow and reflections; remove any white fringes. White or light areas inside the product (glass, clear lenses, chrome) are part of it — never turn them into dark spots or holes.` : "",
       o.ref ? (look === "flat"
-        ? `- The ${o.product ? "THIRD" : "SECOND"} uploaded image is the original reference design this layout came from: copy ONLY its color scheme, ${bgLine ? "" : "background, "}decorations and the arrangement of cards and pills — NOT ${bgLine ? "its background, " : ""}its 3D, shadow or bevel effects (this image must be flat) — and NEVER its words, shop name, brand, product or prices.`
-        : `- The ${o.product ? "THIRD" : "SECOND"} uploaded image is the original reference design this layout came from: copy its VISUAL STYLE — color scheme, ${bgLine ? "" : "background, "}typography effects (outline, 3D, shadow, gradient), decorations, cards and pills, texture and polish${bgLine ? " (but NOT its background — see BACKGROUND)" : ""} — but NEVER its words, shop name, brand, product or prices.${o.product ? " Its product is a different item: ignore it completely." : ""}`) : "",
+        ? `- The ${o.product ? "THIRD" : "SECOND"} uploaded image is the original reference design this layout came from: copy ONLY its color scheme, ${bgLine ? "" : "background, decorations and "}the arrangement of cards and pills — NOT ${bgLine ? "its background, " : ""}its 3D, shadow or bevel effects (this image must be flat) — and NEVER its words, shop name, brand, product or prices.`
+        : `- The ${o.product ? "THIRD" : "SECOND"} uploaded image is the original reference design this layout came from: copy its VISUAL STYLE — color scheme, ${bgLine ? "" : "background, "}typography effects (outline, 3D, shadow, gradient), ${bgLine ? "" : "decorations, "}cards and pills, texture and polish${bgLine ? " (but NOT its background or any background lines / decorations — see BACKGROUND)" : ""} — but NEVER its words, shop name, brand, product or prices.${o.product ? " Its product is a different item: ignore it completely." : ""}`) : "",
       style ? `- Style: ${style}` : "",
       texts.length ? "- Texts — render EXACTLY these Simplified Chinese texts, character for character, where the sketch puts them, and no other words anywhere (text printed on the product itself stays as it is). Even if a text looks unusual, render it exactly as given: do not fix, rephrase, translate or 'correct' it:" : o.product ? "- No added text, letters or watermarks anywhere (text printed on the product itself stays as it is)." : "",
       ...texts.map((b) => `  · ${b.role}：「${String(b.text).trim()}」`),
@@ -379,6 +379,7 @@ if (ST.P) {
       `- Never add any of these words: ${ban.join(", ")}.`,
       texts.length ? "- Mobile one-glance: the main headline is the biggest, boldest element; all text is high-contrast and readable on a phone." : "- Mobile one-glance: the product is the clear focus and reads well as a small thumbnail.",
       note ? `- Remember the shop's requirements above: ${note}` : "",
+      bgLine ? "- Remember the BACKGROUND rule above: no lines of any kind in the background." : "",
       "Reply with the image only.",
     ].filter(Boolean).join("\n");
   };
