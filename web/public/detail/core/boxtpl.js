@@ -301,25 +301,44 @@ if (ST.P) {
   };
 
   /** 出图（框模板）：草图（字、位置、大小、颜色都对）+ 模板的原参考图（学风格）+ 风格说明 */
+  /** 平面效果：把风格说明里讲立体（3D、厚度、凸起、浮雕、阴影、景深）的那几句去掉 */
+  ST.flatStyle = (style) => String(style || "")
+    .replace(/[^,.;:]*\b(3D|3-D|three[- ]dimensional|extru\w*|bevel\w*|emboss\w*|isometric|shadows?|depth|glossy|volumetric)\b[^,.;:]*/gi, "")
+    .replace(/\s*,\s*(,\s*)+/g, ", ").replace(/(^|[.;:])\s*,\s*/g, "$1 ").replace(/,\s*([.;])/g, "$1").replace(/\s{2,}/g, " ").trim();
+
+  /**
+   * 出图（框模板）：草图（字、位置、大小、颜色都对）+ 模板的原参考图（学风格）+ 风格说明
+   * Lee 2026-10-28：补充说明放最前面、优先级最高；p.posterLook = "flat" 平面 / "3d" 立体 / "" 跟参考图
+   */
   ST.P.posterFromBoxes = (p, plan, o = {}) => {
     const ban = ST.banList(p.posterBan);
     const list = ST.boxTexts(plan.boxes);
     const texts = list.filter((b) => b.type === "text" && String(b.text || "").trim());
     const icons = list.filter((b) => b.type === "icon");
+    const look = p.posterLook === "flat" || p.posterLook === "3d" ? p.posterLook : "";
+    const style = look === "flat" ? ST.flatStyle(plan.style) : String(plan.style || "").trim();
+    const note = String(plan.note || "").trim();
     return [
       "Generate one image: a square 1:1 Chinese e-commerce main image (Taobao / Tmall listing image), designed by a top professional e-commerce designer.",
-      "- The FIRST uploaded image is the LAYOUT SKETCH drawn by a program: every text is already in its final position, size, color and line break. Follow its layout exactly — the same zones, positions, proportions, text sizes and colors. Its flat look is only a draft: turn it into a finished design.",
+      note ? `- TOP PRIORITY — the shop's own requirements (Chinese). They override everything below, including the reference image and the style text; if anything conflicts, follow these: ${note}` : "",
+      look === "flat" ? "- TOP PRIORITY — FLAT DESIGN: every text, headline, pill, tag, badge, card and icon is completely flat 2D. No 3D, no extrusion or thickness, no bevel, no emboss, no drop shadows, no glossy highlights, no perspective. Use solid colors (simple gradients are OK)." : "",
+      look === "3d" ? "- 3D LOOK: the headline uses strong 3D extruded lettering with depth and light; pills and badges have a soft raised 3D look." : "",
+      "- The FIRST uploaded image is the LAYOUT SKETCH drawn by a program: every text is already in its final position, size, color and line break. Follow its layout exactly — the same zones, positions, proportions, text sizes and colors. Its plain look is only a draft: turn it into a finished design.",
       "- In the sketch, dashed boxes with a cross are ICON placeholders: draw the described icon / illustration there (no dashed lines, no placeholder words).",
-      o.ref ? "- The SECOND uploaded image is the original reference design this layout came from: copy its VISUAL STYLE — color scheme, background, typography effects (outline, 3D, shadow, gradient), decorations, cards and pills, texture and polish — but NEVER its words, shop name, brand, product or prices." : "",
-      plan.style ? `- Style: ${plan.style}` : "",
+      o.ref ? (look === "flat"
+        ? "- The SECOND uploaded image is the original reference design this layout came from: copy ONLY its color scheme, background, decorations and the arrangement of cards and pills — NOT its 3D, shadow or bevel effects (this image must be flat) — and NEVER its words, shop name, brand, product or prices."
+        : "- The SECOND uploaded image is the original reference design this layout came from: copy its VISUAL STYLE — color scheme, background, typography effects (outline, 3D, shadow, gradient), decorations, cards and pills, texture and polish — but NEVER its words, shop name, brand, product or prices.") : "",
+      style ? `- Style: ${style}` : "",
       "- Texts — render EXACTLY these Simplified Chinese texts, character for character, where the sketch puts them, and no other words anywhere. Even if a text looks unusual, render it exactly as given: do not fix, rephrase, translate or 'correct' it:",
       ...texts.map((b) => `  · ${b.role}：「${String(b.text).trim()}」`),
-      ...icons.map((b) => `- Icon / illustration at "${b.role}": ${b.desc || b.role} (no text inside icons).`),
-      plan.note ? `- Extra notes from the shop (Chinese): ${plan.note}` : "",
-      "- The result must look like a FINISHED premium commercial design, not a flat mock-up: rich background, depth, soft shadows and light, strong headline typography.",
+      ...icons.map((b) => `- Icon / illustration at "${b.role}": ${b.desc || b.role} (no text inside icons${look === "flat" ? ", flat 2D icon" : ""}).`),
+      look === "flat"
+        ? "- The result must look like a FINISHED premium commercial design, not a rough draft: clean flat graphic design, crisp shapes, strong bold headline typography."
+        : "- The result must look like a FINISHED premium commercial design, not a flat mock-up: rich background, depth, soft shadows and light, strong headline typography.",
       "- Every character must be correct and complete: no typos, no missing strokes, no garbled or made-up characters, no extra English, no watermark.",
       `- Never add any of these words: ${ban.join(", ")}.`,
       "- Mobile one-glance: the main headline is the biggest, boldest element; all text is high-contrast and readable on a phone.",
+      note ? `- Remember the shop's requirements above: ${note}` : "",
       "Reply with the image only.",
     ].filter(Boolean).join("\n");
   };

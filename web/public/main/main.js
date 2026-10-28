@@ -455,7 +455,8 @@
         <div class="grow bside"><div class="bprops" id="bprops${i}">${boxProps(pl, i)}</div>
           <table class="ptable"><thead><tr><th style="width:110px">框</th><th>文字 / 图标画什么</th><th style="width:56px">字数</th></tr></thead><tbody>
           ${rows.map((b) => boxRow(pl, i, b, p)).join("")}
-          <tr><td class="muted">补充说明</td><td colspan="2"><input id="pl${i}_note" data-pf="${i}|note" value="${esc(pl.note || "")}" placeholder="可以不填，如：大标题用 3D 立体字"></td></tr></tbody></table></div></div></div>`;
+          <tr><td class="muted">补充说明</td><td colspan="2"><input id="pl${i}_note" data-pf="${i}|note" value="${esc(pl.note || "")}" placeholder="可以不填，如：所有文字和胶囊都用平面效果（出图时放在最前面，优先级最高）"></td></tr>
+          <tr><td class="muted" title="模板带的风格描述（英文），出图时发给画图 AI。想改效果（比如不要立体）就改这里">风格说明<br>（给画图 AI）</td><td colspan="2"><textarea id="pl${i}_style" data-pf="${i}|style" rows="3" placeholder="英文，描述配色、背景、字的效果、装饰、质感">${esc(pl.style || "")}</textarea>${p.posterLook === "flat" && pl.style && ST.flatStyle(pl.style) !== String(pl.style).trim() ? `<div class="muted">选了“平面”：出图时会去掉里面讲立体、阴影的句子</div>` : ""}</td></tr></tbody></table></div></div></div>`;
   }
   function boxRow(pl, i, b, p) {
     const on = bsel[pl.id] === b.id ? "on" : "";
@@ -876,6 +877,7 @@
         <span class="lb">尺寸</span><span class="pills">${SIZES.map((s) => `<span class="pill ${p.size === s ? "on" : ""}" data-size="${s}">${s}×${s}</span>`).join("")}</span>
         ${modeOf(p) === "scene" ? `<span class="lb">摆放</span><span class="pills">${PLACES.map(([v, t, tip]) => `<span class="pill ${(p.placement || "free") === v ? "on" : ""}" data-place="${v}" title="${esc(tip)}">${t}</span>`).join("")}${p.placeRef ? `<span class="pill ${p.placement === "ref" ? "on" : ""}" data-place="ref" title="照这张图里的摆法"><img src="${esc(placeUrl)}" class="placeimg" alt="">照“${esc(p.placeRefName || "")}”那张摆<span class="x" data-act="clearPlace" title="不用这张了">✕</span></span>` : ""}</span>` : ""}
         ${poster && !freeMode && (p.posterRefs || []).length && (p.plans || []).some((x) => x.tpl && !x.boxes) ? `<label class="row lb" title="默认不发：参考图的版式和版式模板不一样，会打架，还会带出参考图上的字。勾上也只让 AI 学配色和质感"><input type="checkbox" id="tplRefs" ${p.tplRefs ? "checked" : ""}> 出图时也参考参考图的风格</label>` : ""}
+        ${poster && !freeMode ? `<span class="lb" title="平面：去掉所有立体、厚度、凸起、阴影；立体：大标题 3D 字；跟参考图：参考图什么样就什么样">效果</span><span class="pills">${[["", "跟参考图"], ["flat", "平面"], ["3d", "立体"]].map(([v, t]) => `<span class="pill ${(p.posterLook || "") === v ? "on" : ""}" data-look="${v}">${t}</span>`).join("")}</span>` : ""}
         ${freeMode ? "" : poster ? `<label class="row lb">每套方案出 <select id="perPlan">${[1, 2, 3].map((k) => `<option ${(p.perPlan || 1) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张</label>
         ${(p.plans || []).some((x) => !x.tpl) ? `<label class="row lb" title="程序按方案画一张平面草图（字、位置、大小、颜色都准，但没有质感和图标），一起发给 AI，让它照草图排版"><input type="checkbox" id="sketch" ${p.sketch ? "checked" : ""}> 附上草图（让 AI 照草图排版）</label>` : ""}` : `<label class="row lb">每种风格 <select id="count">${[1, 2, 3, 4, 5, 6].map((k) => `<option ${(p.count || 1) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张</label>`}
         ${p.mode !== "paste" ? "" : `<label class="row lb">产品大小 <input type="range" id="scale" min="40" max="95" value="${Math.round((p.scale || 0.85) * 100)}"><span id="scaleV">${Math.round((p.scale || 0.85) * 100)}%</span></label>
@@ -1160,6 +1162,8 @@
     if (sz && P()) { setFields({ size: +sz.dataset.size }); return; }
     const pl = e.target.closest("[data-place]");
     if (pl && P()) { setFields({ placement: pl.dataset.place }); return; }
+    const lk = e.target.closest("[data-look]");
+    if (lk && P()) { setFields({ posterLook: lk.dataset.look }); render(); return; }
     const pk = e.target.closest("[data-pkind]");
     if (pk && P()) { setFields({ posterKind: pk.dataset.pkind }); render(); return; }
     const btc = e.target.closest("[data-btpl]");

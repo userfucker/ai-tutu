@@ -485,14 +485,22 @@ try {
     // 出图：草图 + 模板参考图
     await page.uncheck('.boxplan[data-plan="1"] [data-pf="1|on"]');
     await sleep(800);
+    // 风格说明在方案里能改；补充说明放最前面；效果选“平面”（Lee 2026-10-28）
+    check('方案里显示模板的风格说明（能改）', /red-and-white/.test(await page.inputValue('#pl0_style')));
+    await page.fill('#pl0_style', 'Flat red-and-white poster, big red headline with 3D extrusions and drop shadows, red pills.');
+    await page.fill('#pl0_note', '不要立体效果');
+    await page.click('[data-look="flat"]');
+    await page.waitForSelector('[data-look="flat"].on');
+    await sleep(800);
     await page.screenshot({ path: path.join(out, '6-boxplan.png'), fullPage: true });
     const na = ai.asked.length;
     await page.click('[data-act="generate"]');
     await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 1);
     await page.waitForFunction(() => !document.querySelector('.pendbox .tag.blue'), null, { timeout: 60000 });
     const g = ai.asked.slice(na).find((a) => /LAYOUT SKETCH/.test(a.prompt));
-    check('出图（模板）：发草图 + 模板的参考图 + 风格，字一字不差，不准改', g && g.files.join(',') === '草图.png,模板参考图.jpg' && /大标题：「远程装库」/.test(g.prompt) && /新卖点：「赠送可视化工具」/.test(g.prompt) && /MySQL 海豚 logo/.test(g.prompt) && /copy its VISUAL STYLE/.test(g.prompt) && /do not fix, rephrase/.test(g.prompt) && /red-and-white/.test(g.prompt), JSON.stringify(g && g.files));
+    check('出图（模板）：发草图 + 模板的参考图 + 风格，字一字不差，不准改', g && g.files.join(',') === '草图.png,模板参考图.jpg' && /大标题：「远程装库」/.test(g.prompt) && /新卖点：「赠送可视化工具」/.test(g.prompt) && /MySQL 海豚 logo/.test(g.prompt) && /copy ONLY its color scheme/.test(g.prompt) && /do not fix, rephrase/.test(g.prompt) && /red-and-white/.test(g.prompt), JSON.stringify(g && g.files));
     check('文字主图的卡片：标“文字版”、有 AI 标签和时间', /文字版/.test(await page.textContent('.pendbox .mcard[data-iid] b')) && (await page.locator('.pendbox .tag.aisite').count()) === 1);
+    check('出图：补充说明放最前面（优先级最高），选了“平面”就去掉风格说明里的立体句子、加上平面要求', g && /TOP PRIORITY — the shop's own requirements.*不要立体效果/.test(g.prompt) && g.prompt.indexOf('不要立体效果') < g.prompt.indexOf('LAYOUT SKETCH') && /FLAT DESIGN/.test(g.prompt) && /Style: Flat red-and-white poster, red pills\./.test(g.prompt) && !/copy its VISUAL STYLE/.test(g.prompt), g && g.prompt.split('\n').find((l) => l.startsWith('- Style')));
     await page.selectOption('#judgeSite', 'deepseek');
     const nj = doubao.length;
     await page.click('.pendbox .mcard[data-iid] [data-act="judge"]');

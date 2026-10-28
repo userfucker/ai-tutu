@@ -20,7 +20,7 @@ import * as lib from "../library.js";
 
 const running = new Set(); // 正在做的“项目:主图/产品”
 const SITE_OK = ["gemini", "copilot"]; // 画图可以临时指定的网站（空 = 按 AI 分工轮流）
-const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode", "placement", "industry", "posterNote", "posterTheme", "posterContent", "posterBan", "plans", "perPlan", "sketch", "posterKind", "freeStyle", "freeStyleText", "freeCount", "tplPick", "tplRefs", "boxPick", "freeRefs"];
+const SET_KEYS = ["name", "info", "size", "count", "scale", "blend", "styles", "custom", "customOn", "cur", "mode", "placement", "industry", "posterNote", "posterTheme", "posterContent", "posterBan", "plans", "perPlan", "sketch", "posterKind", "freeStyle", "freeStyleText", "freeCount", "tplPick", "tplRefs", "boxPick", "freeRefs", "posterLook"];
 
 export function newProject(o = {}) {
   const ST = getST();
