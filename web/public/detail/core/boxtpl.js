@@ -211,6 +211,20 @@
           g.fill();
           if (b.border) { g.strokeStyle = b.border; g.lineWidth = lw * 2; g.stroke(); }
         }
+      } else if (b.type === "product") {
+        // 产品框（实物主图）：草图里贴真实产品图（等比缩放放进框里，居中）；线框 / 没有产品图时画一个粗框写“产品”
+        const im = !wire && opts.productImg;
+        if (im && (im.naturalWidth || im.width)) {
+          const iw = im.naturalWidth || im.width, ih = im.naturalHeight || im.height, k = Math.min(w / iw, h / ih);
+          g.drawImage(im, x + (w - iw * k) / 2, y + (h - ih * k) / 2, iw * k, ih * k);
+          if (opts.hint) { g.setLineDash([4 * lw, 3 * lw]); g.strokeStyle = "rgba(22,163,74,.6)"; g.lineWidth = lw; g.strokeRect(x, y, w, h); g.setLineDash([]); }
+        } else {
+          g.fillStyle = wire ? "rgba(22,163,74,.08)" : "rgba(22,163,74,.12)"; g.fillRect(x, y, w, h);
+          g.strokeStyle = "#16a34a"; g.lineWidth = lw * 2; g.strokeRect(x, y, w, h);
+          const t = fit(g, b.role || "产品", w * 0.8, Math.min(h * 0.3, w * 0.25), 1, true);
+          g.font = `700 ${t.fs}px ${FONT}`; g.fillStyle = "#15803d"; g.textAlign = "center"; g.textBaseline = "middle";
+          t.lines.forEach((l) => g.fillText(l, x + w / 2, y + h / 2));
+        }
       } else if (b.type === "icon") {
         g.setLineDash([3 * lw, 3 * lw]); g.strokeStyle = wire ? "#6b7280" : "rgba(0,0,0,.45)"; g.lineWidth = lw; rr(g, x, y, w, h, Math.min(w, h) * 0.12); g.stroke();
         if (!wire) { g.fillStyle = "rgba(255,255,255,.35)"; g.fill(); }
@@ -253,13 +267,14 @@
 })();
 
 /** 整理 AI 给的框（从参考图生成模板时用）：类型、数字范围、字段长度，编号 b1、b2… */
-ST.cleanBoxes = (list) => {
+ST.cleanBoxes = (list, product) => {
+  const TYPES = product ? ["text", "icon", "block", "line", "product"] : ["text", "icon", "block", "line"];
   const hex = (v, d) => (/^#[0-9a-f]{6}$/i.test(String(v || "").trim()) ? String(v).trim() : d);
   const num = (v, lo, hi, d) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, Math.round(+v * 10) / 10)) : d);
-  return (Array.isArray(list) ? list : []).filter((b) => b && ["text", "icon", "block", "line"].includes(b.type)).slice(0, 60).map((b) => {
+  return (Array.isArray(list) ? list : []).filter((b) => b && TYPES.includes(b.type)).slice(0, 60).map((b) => {
     const type = b.type;
     const x = num(b.x, 0, 99, 0), y = num(b.y, 0, 99, 0);
-    const o = { type, role: String(b.role || (type === "text" ? "文字" : type === "icon" ? "图标" : type === "block" ? "色块" : "线")).slice(0, 16), x, y, w: num(b.w, 0.5, 100 - x, 20), h: num(b.h, 0.3, 100 - y, 8) };
+    const o = { type, role: String(b.role || ({ text: "文字", icon: "图标", block: "色块", line: "线", product: "产品" })[type]).slice(0, 16), x, y, w: num(b.w, 0.5, 100 - x, 20), h: num(b.h, 0.3, 100 - y, 8) };
     if (type === "text") Object.assign(o, { color: hex(b.color, "#111111"), bg: hex(b.bg, ""), bold: b.bold !== false, lines: Math.min(4, Math.max(1, Math.round(+b.lines || 1))), align: ["left", "right"].includes(b.align) ? b.align : "center", radius: num(b.radius, 0, 99, 0), border: hex(b.border, "") });
     if (type === "icon") o.desc = String(b.desc || "").slice(0, 60);
     if (type === "block") Object.assign(o, { bg: hex(b.bg, "#1d4ed8"), radius: num(b.radius, 0, 99, 0) });
@@ -275,7 +290,7 @@ if (ST.P) {
   /** AI 写方案（框模板）：每套一个模板，AI 往每个文字框里写字、给每个图标框写画什么 */
   ST.P.boxPlan = (p, tpls, nRefs) => {
     const ban = ST.banList(p.posterBan);
-    const content = String(p.posterContent != null ? p.posterContent : [p.industry, p.posterNote].filter(Boolean).join("；")).trim();
+    const content = String(p.posterContent != null ? p.posterContent : [p.industry, p.posterNote].filter(Boolean).join("；")).trim() || (p.mode !== "poster" && p.info && p.info.name ? `商品：${p.info.name}` : "");
     const blocks = tpls.map((t, i) => [
       `方案 ${i + 1}：模板 ${t.id}「${t.name || ""}」${t.use ? `（适合：${t.use}）` : ""}`,
       ...ST.boxTexts(t.boxes).filter((b) => b.type === "text" || b.type === "icon").map((b) => (b.type === "icon"
@@ -349,11 +364,12 @@ if (ST.P) {
       look === "3d" ? "- 3D LOOK: the headline uses strong 3D extruded lettering with depth and light; pills and badges have a soft raised 3D look." : "",
       "- The FIRST uploaded image is the LAYOUT SKETCH drawn by a program: every text is already in its final position, size, color and line break. Follow its layout exactly — the same zones, positions, proportions, text sizes and colors. Its plain look is only a draft: turn it into a finished design.",
       "- In the sketch, dashed boxes with a cross are ICON placeholders: draw the described icon / illustration there (no dashed lines, no placeholder words).",
+      o.product ? `- The product in the sketch is the REAL product photo, already at its final position and size. The SECOND uploaded image is the same product on a plain white background (that white is not part of the product). Keep the product IDENTICAL — shape, proportions, colors, materials, printed text, logos, number of parts; do not redraw or redesign it. Only blend it into the design with natural lighting, contact shadow and reflections; remove any white fringes. White or light areas inside the product (glass, clear lenses, chrome) are part of it — never turn them into dark spots or holes.` : "",
       o.ref ? (look === "flat"
-        ? `- The SECOND uploaded image is the original reference design this layout came from: copy ONLY its color scheme, ${bgLine ? "" : "background, "}decorations and the arrangement of cards and pills — NOT ${bgLine ? "its background, " : ""}its 3D, shadow or bevel effects (this image must be flat) — and NEVER its words, shop name, brand, product or prices.`
-        : `- The SECOND uploaded image is the original reference design this layout came from: copy its VISUAL STYLE — color scheme, ${bgLine ? "" : "background, "}typography effects (outline, 3D, shadow, gradient), decorations, cards and pills, texture and polish${bgLine ? " (but NOT its background — see BACKGROUND)" : ""} — but NEVER its words, shop name, brand, product or prices.`) : "",
+        ? `- The ${o.product ? "THIRD" : "SECOND"} uploaded image is the original reference design this layout came from: copy ONLY its color scheme, ${bgLine ? "" : "background, "}decorations and the arrangement of cards and pills — NOT ${bgLine ? "its background, " : ""}its 3D, shadow or bevel effects (this image must be flat) — and NEVER its words, shop name, brand, product or prices.`
+        : `- The ${o.product ? "THIRD" : "SECOND"} uploaded image is the original reference design this layout came from: copy its VISUAL STYLE — color scheme, ${bgLine ? "" : "background, "}typography effects (outline, 3D, shadow, gradient), decorations, cards and pills, texture and polish${bgLine ? " (but NOT its background — see BACKGROUND)" : ""} — but NEVER its words, shop name, brand, product or prices.${o.product ? " Its product is a different item: ignore it completely." : ""}`) : "",
       style ? `- Style: ${style}` : "",
-      "- Texts — render EXACTLY these Simplified Chinese texts, character for character, where the sketch puts them, and no other words anywhere. Even if a text looks unusual, render it exactly as given: do not fix, rephrase, translate or 'correct' it:",
+      texts.length ? "- Texts — render EXACTLY these Simplified Chinese texts, character for character, where the sketch puts them, and no other words anywhere (text printed on the product itself stays as it is). Even if a text looks unusual, render it exactly as given: do not fix, rephrase, translate or 'correct' it:" : o.product ? "- No added text, letters or watermarks anywhere (text printed on the product itself stays as it is)." : "",
       ...texts.map((b) => `  · ${b.role}：「${String(b.text).trim()}」`),
       ...icons.map((b) => `- Icon / illustration at "${b.role}": ${b.desc || b.role} (no text inside icons${look === "flat" ? ", flat 2D icon" : ""}).`),
       look === "flat"
@@ -361,25 +377,29 @@ if (ST.P) {
         : `- The result must look like a FINISHED premium commercial design, not a flat mock-up: ${bgLine ? "" : "rich background, "}depth, soft shadows and light, strong headline typography.`,
       "- Every character must be correct and complete: no typos, no missing strokes, no garbled or made-up characters, no extra English, no watermark.",
       `- Never add any of these words: ${ban.join(", ")}.`,
-      "- Mobile one-glance: the main headline is the biggest, boldest element; all text is high-contrast and readable on a phone.",
+      texts.length ? "- Mobile one-glance: the main headline is the biggest, boldest element; all text is high-contrast and readable on a phone." : "- Mobile one-glance: the product is the clear focus and reads well as a small thumbnail.",
       note ? `- Remember the shop's requirements above: ${note}` : "",
       "Reply with the image only.",
     ].filter(Boolean).join("\n");
   };
 
   /** 从参考图生成框模板（看图的 AI） */
-  ST.P.boxTplLearn = () => [
-    "这是一张电商主图（参考图）。请把它的版式拆成“框模板”：每一块文字、图标 / 插画、色块 / 横条 / 卡片底、分隔线都画成一个框。",
+  ST.P.boxTplLearn = (product) => [
+    product ? "这是一张实物商品的电商主图（参考图）。请把它的版式拆成“框模板”：先认出画面里的实物产品（卖的那件商品）放在哪，再把每一块文字、图标 / 插画、色块 / 横条 / 卡片底、分隔线都画成一个框。"
+      : "这是一张电商主图（参考图）。请把它的版式拆成“框模板”：每一块文字、图标 / 插画、色块 / 横条 / 卡片底、分隔线都画成一个框。",
     "坐标按画面的百分比（0～100）：x、y 是框的左上角，w、h 是宽和高，尽量量准。",
     "type 类型：",
     "- text 文字框：同一个样式的一行或几行字算一个框；并排的几个标签、几条卖点分开算；",
-    "- icon 图标框：图标、插画、产品图、logo、吉祥物（不是字）；",
+    product ? "- product 产品框：画面里的实物产品（主体商品）占的区域，框要正好包住整件产品（包括它的阴影以外的全部部分）；同一件产品的几个角度 / 几个颜色各算一个框；产品身上印的字、logo 属于产品，不要拆成文字框；" : "",
+    product ? "- icon 图标框：小图标、插画、品牌 logo、吉祥物、模特 / 人物、赠品小图这些（不是字，也不是主体产品）；" : "- icon 图标框：图标、插画、产品图、logo、吉祥物（不是字）；",
     "- block 色块：横条、卡片底、按钮底这类纯色块（写在压在它上面的文字框前面）；",
     "- line 线：分隔线；整张图一圈的边框写 frame:true。",
     "每个框写 role（中文角色名，如 大标题、副标题、卖点 1、标签 2、底部横条、产品 logo）。",
     "文字框还要写：color（字的颜色 #hex）、bg（字自带的底色，如胶囊、标签；没有就空）、bold（粗不粗）、lines（几行）、align（left / center / right）、radius（圆角，胶囊写 99）；色块写 bg、radius；线写 color；图标写 desc（画的是什么）。",
+    product ? "背景里的场景（桌面、地面、墙、植物、光线）不用画框，写进 style 里。分不清是产品还是装饰时：最大、最清楚、像在卖的那个是产品。" : "",
     "不要写原图上的文字内容。框按从上到下、从左到右排。",
     "另外写：name（这个版式的中文名，12 个字以内，如“红白 · 左标签右卖点”）、use（适合什么商品，15 个字以内）、style（英文一段话，描述视觉风格：配色、背景、字的效果、装饰、质感，给画图 AI 看）、bg1 / bg2（背景从上到下两个颜色 #hex）。",
-    '只回复一个 JSON 代码块：{"name":"","use":"","style":"","bg1":"#ffffff","bg2":"#ffffff","boxes":[{"type":"text","role":"大标题","x":5,"y":10,"w":90,"h":15,"color":"#111111","bg":"","bold":true,"lines":1,"align":"center","radius":0}]}',
-  ].join("\n");
+    product ? '只回复一个 JSON 代码块：{"name":"","use":"","style":"","bg1":"#ffffff","bg2":"#ffffff","boxes":[{"type":"product","role":"产品","x":20,"y":25,"w":60,"h":55},{"type":"text","role":"大标题","x":5,"y":5,"w":90,"h":12,"color":"#111111","bg":"","bold":true,"lines":1,"align":"center","radius":0}]}'
+      : '只回复一个 JSON 代码块：{"name":"","use":"","style":"","bg1":"#ffffff","bg2":"#ffffff","boxes":[{"type":"text","role":"大标题","x":5,"y":10,"w":90,"h":15,"color":"#111111","bg":"","bold":true,"lines":1,"align":"center","radius":0}]}',
+  ].filter(Boolean).join("\n");
 }

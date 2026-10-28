@@ -270,7 +270,7 @@ ST.P = (() => {
     },
     /** AI 直接画场景（把抠好的透明 PNG 发给 AI，一步画出带产品的场景图） */
     /** placement：free = AI 自由摆放；same = 和产品图一样的角度朝向；ref = 照第 2 张图里的摆法（Lee 2026-10-24） */
-    mainScene(p, style, placement = "free", hasStyleRef) {
+    mainScene(p, style, placement = "free", hasStyleRef, nRefs = 0) {
       const name = (p.info && p.info.name) || "";
       const place = {
         free: "- Placement: you may choose a natural, attractive way to place the product (standing, lying flat, slightly angled, etc.) and a pleasing camera angle; the product itself must stay identical.",
@@ -284,6 +284,7 @@ ST.P = (() => {
         place,
         "- Composition: the product large (about 85% of the frame) and the clear focus, realistic contact shadows, reflections and lighting matching the scene.",
         hasStyleRef ? `- Match the background style, colors and lighting of the ${placement === "ref" ? "THIRD" : "SECOND"} uploaded image (style reference only; do not copy anything from it).` : "",
+        nRefs ? `- The LAST ${nRefs > 1 ? nRefs + " uploaded images are main images" : "uploaded image is a main image"} the shop likes: follow ${nRefs > 1 ? "their" : "its"} overall look — composition, camera angle, background, lighting, colors and mood — for THIS product; never copy ${nRefs > 1 ? "their" : "its"} products, people, words or logos.` : "",
         "- Absolutely NO text, letters, logos or watermarks other than what is printed on the product itself. No people, no other products.",
         "Reply with the image only.",
       ].filter(Boolean).join("\n");

@@ -43,6 +43,9 @@ const doubao = [];
 const plugin2 = await connect(`ws://127.0.0.1:${PORT}/ext`, { token, name: '测试电脑', version: '1.5.0', app: 'aiweb', sites: [{ site: 'doubao', name: '豆包', open: true, ready: true }, { site: 'deepseek', name: 'DeepSeek', open: true, ready: true }] }, async (m) => {
   if (m.cmd !== 'ask') return { error: '不支持' };
   doubao.push({ t: Date.now(), text: m.args.text, files: (m.args.files || []).length, site: m.site });
+  if (/拆成“框模板”/.test(m.args.text) && /实物商品/.test(m.args.text)) {
+    return { answer: '```json\n' + JSON.stringify({ name: '白底 · 产品居中', use: '日用品', style: 'Clean white studio product poster with soft shadow', bg1: '#ffffff', bg2: '#eef2f7', boxes: [{ type: 'product', role: '产品', x: 25, y: 22, w: 50, h: 55 }, { type: 'text', role: '大标题', x: 5, y: 4, w: 90, h: 12, color: '#111111', bold: true }, { type: 'block', role: '底部横条', x: 0, y: 86, w: 100, h: 14, bg: '#1d4ed8' }, { type: 'text', role: '底部卖点', x: 5, y: 88, w: 90, h: 10, color: '#ffffff' }] }) + '\n```' };
+  }
   if (/拆成“框模板”/.test(m.args.text)) {
     return { answer: '```json\n' + JSON.stringify({ name: '蓝白 · 大标题', use: '单一服务', style: 'Clean blue and white poster', bg1: '#eef4ff', bg2: '#ffffff', boxes: [{ type: 'block', role: '底部横条', x: 0, y: 85, w: 100, h: 15, bg: '#1d4ed8' }, { type: 'text', role: '大标题', x: 5, y: 20, w: 90, h: 18, color: '#1d4ed8', bold: true, lines: 1 }, { type: 'text', role: '副标题', x: 10, y: 45, w: 80, h: 8, color: '#333333' }, { type: 'icon', role: '产品 logo', x: 35, y: 58, w: 30, h: 22, desc: '电脑' }, { type: 'text', role: '底部口号', x: 5, y: 87, w: 90, h: 10, color: '#ffffff' }, { type: 'bad', role: 'x', x: 'a' }] }) + '\n```' };
   }
@@ -91,6 +94,9 @@ try {
   await page.waitForSelector('text=① 产品图');
   const md = (() => { const d = new Date(Date.now() + 8 * 3600e3); return `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`; })();
   check('新建项目：名字是“主图-钱包月-日-1”，不能改', (await page.inputValue('#projName')) === `主图-钱包${md}-1` && (await page.getAttribute('#projName', 'readonly')) !== null, await page.inputValue('#projName'));
+  check('实物主图：做法三种（模板 / AI 根据参考图 / 先画背景再融入），新项目默认“模板”，模板库是空的（不带文字主图的 A～I）', (await page.locator('[data-mode]').count()) === 3 && await page.isVisible('[data-mode="tpl"].on') && (await page.locator('.boxc').count()) === 0 && (await page.locator('#customOn').count()) === 0);
+  await page.click('[data-mode="scene"]');
+  await page.waitForSelector('#customOn');
   const fc = page.waitForEvent('filechooser');
   await page.click('[data-act="addProducts"]');
   await (await fc).setFiles({ name: '白底.png', mimeType: 'image/png', buffer: product('#ffffff') });
@@ -372,6 +378,73 @@ try {
   check('素材中心：去白边“保存”换掉原图（名字不变、张数不变）', after && after.name === '白底.png' && after.v !== lb0.v && (await page.locator('.lit').count()) === nLit + 1, JSON.stringify([lb0.v, after && after.v]));
   await api('DELETE', `/api/projects/${dl3[0].id}`);
 
+  // 实物主图 · 模板（Lee 2026-10-28）：上传参考图生成实物模板（AI 分清产品和字）→ 做成方案 → 草图里贴真实产品图 → 草图 + 产品图 + 模板参考图出图；AI 根据参考图（发参考主图）
+  {
+    const rp = await api('POST', '/api/main', { name: '保温杯' });
+    await page.goto(BASE + `/main/#p=${rp.id}`);
+    await page.waitForSelector('[data-mode="tpl"].on');
+    const fcr = page.waitForEvent('filechooser');
+    await page.click('[data-act="addProducts"]');
+    await (await fcr).setFiles({ name: '杯子.png', mimeType: 'image/png', buffer: product('#ffffff') });
+    await page.waitForSelector('.mcard[data-prid] [data-act="cutDirect"]');
+    await page.click('.mcard[data-prid] [data-act="cutDirect"]');
+    await page.waitForSelector('.mcard[data-prid] .tag.ok');
+    await page.fill('#pName', '保温杯');
+    await page.selectOption('#learnSite', 'doubao');
+    const nl = doubao.length;
+    const fcl = page.waitForEvent('filechooser');
+    await page.click('[data-act="learnUpload"]');
+    await (await fcl).setFiles({ name: '实物参考.png', mimeType: 'image/png', buffer: product('#ffeedd') });
+    await page.waitForSelector('.boxc[data-btpl="A"]', { timeout: 30000 });
+    const la = doubao.slice(nl).find((x) => /拆成“框模板”/.test(x.text));
+    const lib = (await api('GET', '/api/meta/productBoxTpls')).value;
+    check('实物：上传参考图生成模板，提示词要 AI 分清产品和字（product 产品框），存进实物模板库，名字从 A 开始，自动选上', la && /实物产品/.test(la.text) && /product 产品框/.test(la.text) && /产品身上印的字、logo 属于产品/.test(la.text) && lib.length === 1 && lib[0].id === 'A' && lib[0].boxes.some((b) => b.type === 'product') && (await api('GET', `/api/projects/${rp.id}`)).project.boxPick.join() === 'A');
+    check('实物模板库和文字主图的分开', !((await api('GET', '/api/meta/posterBoxTpls')).value || []).some((t) => t.name === '白底 · 产品居中'));
+    const wpx = await page.evaluate(() => { const c = document.querySelector('canvas[data-wire="A"]'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let gr = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 1] > d[i] + 40 && d[i + 1] > d[i + 2] + 40) gr++; return gr; });
+    check('线框里产品框是绿色的', wpx > 100, String(wpx));
+    await page.fill('#posterContent', '304 不锈钢，24 小时保温');
+    await sleep(700);
+    await page.click('[data-act="writeBoxPlans"]');
+    await page.waitForSelector('.boxplan[data-plan="0"]', { timeout: 30000 });
+    // 草图里贴了产品图：产品框中间的像素和底色不一样
+    await sleep(800);
+    const prodPx = await page.evaluate(() => { const c = document.querySelector('canvas[data-bed="0"]'); const d = c.getContext('2d').getImageData(c.width * 0.5, c.height * 0.5, 1, 1).data; return [...d.slice(0, 3)]; });
+    check('方案：产品框里贴着真实产品图，有“＋产品”按钮；文字框 AI 写了', (await page.locator('.boxplan [data-act="boxAdd"][data-type="product"]').count()) === 1 && !(prodPx[0] > 240 && prodPx[1] > 240 && prodPx[2] > 240) && (await page.inputValue('#pb0_b2')) === '远程装库', JSON.stringify(prodPx));
+    // 拖产品框（挪产品）
+    const rb2 = await (await page.$('canvas[data-bed="0"]')).boundingBox();
+    const px0 = rb2.x + rb2.width * 0.5, py0 = rb2.y + rb2.height * 0.5;
+    await page.mouse.move(px0, py0); await page.mouse.down(); await page.mouse.move(px0 + rb2.width * 0.1, py0, { steps: 5 }); await page.mouse.up();
+    await sleep(1200);
+    const pb = (await api('GET', `/api/projects/${rp.id}`)).project.plans[0].boxes.find((b) => b.type === 'product');
+    check('拖产品框：挪产品', Math.abs(pb.x - 35) <= 0.5, JSON.stringify(pb));
+    const na = ai.asked.length;
+    await page.click('[data-act="generate"]');
+    await page.waitForFunction(() => document.querySelectorAll('.pendbox .mcard[data-iid]').length === 1);
+    await page.waitForFunction(() => !document.querySelector('.pendbox .tag.blue'), null, { timeout: 60000 });
+    const g = ai.asked.slice(na).find((a) => /LAYOUT SKETCH/.test(a.prompt));
+    check('实物模板出图：草图（贴着产品）+ 产品图 + 模板参考图，要求产品一模一样、字照草图', g && g.files.join(',') === '草图.png,产品.jpg,模板参考图.jpg' && /REAL product photo/.test(g.prompt) && /Keep the product IDENTICAL/.test(g.prompt) && /THIRD uploaded image is the original reference/.test(g.prompt) && /大标题：「远程装库」/.test(g.prompt), JSON.stringify(g && g.files));
+    check('实物模板的卡片：标“模板”，没有“用这个摆放”', /模板/.test(await page.textContent('.pendbox .mcard[data-iid] b')) && (await page.locator('.pendbox [data-act="placeRef"]').count()) === 0);
+    const nj = doubao.length;
+    await page.click('.pendbox .mcard[data-iid] [data-act="judge"]');
+    await page.waitForSelector('.pendbox .mcard:has-text("文字有问题")', { timeout: 30000 });
+    const js = doubao.slice(nj);
+    check('实物模板的 AI 审核：先看产品有没有被改，再对照框里的字', js.some((x) => /是不是同一个产品/.test(x.text)) && js.some((x) => /图上的字是 AI 画的/.test(x.text)) && /产品没被改/.test(await page.textContent('.pendbox .mcard[data-iid]')));
+    // AI 根据参考图：参考主图默认发
+    await page.click('[data-mode="scene"]');
+    await page.waitForSelector('#freeRefs');
+    const fcq = page.waitForEvent('filechooser');
+    await page.click('[data-act="posterUpload"]');
+    await (await fcq).setFiles({ name: '喜欢的主图.png', mimeType: 'image/png', buffer: product('#ddeeff') });
+    await page.waitForSelector('.mcard.pref');
+    const ns = ai.asked.length;
+    await page.click('[data-act="generate"]');
+    for (let k = 0; k < 100 && !ai.asked.slice(ns).some((a) => /main image the shop likes/.test(a.prompt)); k++) await sleep(200);
+    const sc = ai.asked.slice(ns).find((a) => /main image the shop likes/.test(a.prompt));
+    check('实物 · AI 根据参考图：产品图 + 参考主图一起发（“发送参考图”默认勾上）', sc && sc.files[0] === '产品.jpg' && sc.files[sc.files.length - 1] === '参考主图1.jpg', JSON.stringify(sc && sc.files));
+    await idle().catch(() => {});
+    await api('DELETE', `/api/projects/${rp.id}`);
+  }
+
   // 文字主图（Lee 2026-10-27）：新建时选“文字主图”；框模板（线框、悬停看参考图）→ AI 往框里写字 → 改字、拖框、加删框 → 草图 + 模板参考图出图；
   // 存为我的模板（A-1）、从参考图生成模板（J）；AI 根据参考图（自由发挥，默认发送参考图）
   {
@@ -589,7 +662,7 @@ try {
     // 旧项目：用过“文字版主图”的算文字主图
     const old = await api('POST', '/api/main', { name: '旧项目' });
     await api('POST', `/api/main/${old.id}/op`, { op: 'set', fields: { mode: 'poster' } });
-    check('实物项目不能改成文字', (await api('GET', `/api/projects/${old.id}`)).project.mode === 'scene');
+    check('实物项目不能改成文字', (await api('GET', `/api/projects/${old.id}`)).project.mode === 'tpl');
     await api('DELETE', `/api/projects/${old.id}`);
     await api('DELETE', `/api/projects/${np.id}`);
   }

@@ -14,10 +14,10 @@
   const APP = (globalThis.APP = { project: null });
   const P = () => APP.project;
   const SIZES = [800, 1000];
-  const MODES = [["scene", "AI 直接画场景", "把产品图（铺白底）发给 AI，一步画出带产品的场景（最自然）"], ["paste", "先画背景再融入", "产品最稳：AI 画空背景，程序贴产品，AI 只调光影"], ["poster", "文字版主图", "虚拟产品、纯文字主图：先让 AI 写文字版方案（字体、字号、文字、配色、风格），你改好了再按方案出图；参考图可选"]];
-  const modeOf = (p) => (p.mode === "paste" || p.mode === "poster" ? p.mode : "scene");
-  // 实物 / 文字建项目时就定了（旧项目用过“文字版主图”的算文字），实物项目只在两种画法里选
-  const REAL_MODES = MODES.filter(([v]) => v !== "poster");
+  const MODES = [["scene", "AI 直接画场景", "把产品图（铺白底）发给 AI，一步画出带产品的场景（最自然）"], ["paste", "先画背景再融入", "产品最稳：AI 画空背景，程序贴产品，AI 只调光影"], ["poster", "文字版主图", ""]];
+  const modeOf = (p) => (["paste", "poster", "tpl"].includes(p.mode) ? p.mode : "scene");
+  // 实物主图的做法（Lee 2026-10-28）：模板 / AI 根据参考图（以前的“AI 直接画场景”）/ 先画背景再融入；实物 / 文字建项目时就定了
+  const REAL_MODES = [["tpl", "模板", "模板：选照实物主图拆出来的模板（绿框是产品，方框是字），产品图直接贴进草图，你挪产品、改字，再让 AI 照草图做成成品，最好控制。"], ["scene", "AI 根据参考图", "AI 根据参考图：放几张你喜欢的主图（可以不放），选背景风格，AI 自由发挥画出带产品的场景（以前的“AI 直接画场景”）。"], ["paste", "先画背景再融入", "先画背景再融入：产品最稳，AI 画空背景，程序贴产品，AI 只调光影。"]];
   const PLACES = [["free", "AI 自由发挥", "让 AI 自己决定怎么摆（立着、平放、斜着……）"], ["same", "和产品图一样", "保持产品图里的角度和朝向"]];
   const SITES = [["", "自动（按 AI 分工轮流）"], ["gemini", "Gemini"], ["copilot", "Copilot"]];
   const ls = { get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
@@ -75,7 +75,12 @@
   const aiJson = async (prompt, images, label, opt) => { const r = await ST.AI.run("text", prompt, images, { label, ...opt }); return ST.extractJson(r.text, r.codes); };
 
   // ------------------------------------------------------------ 我的风格（所有主图项目共用）
-  const loadMyStyles = async () => { myStyles = (await ST.db.getMeta("mainStyles", [])) || []; myBoxTpls = (await ST.db.getMeta("posterBoxTpls", [])) || []; };
+  const loadMyStyles = async () => { myStyles = (await ST.db.getMeta("mainStyles", [])) || []; };
+  // 模板库分开（Lee 2026-10-28）：文字主图 = 内置 A～I + meta posterBoxTpls；实物主图 = meta productBoxTpls（没有内置的，自己上传参考图生成）
+  const isRealP = (p = P()) => !!p && p.mode !== "poster";
+  const libKey = (p = P()) => (isRealP(p) ? "productBoxTpls" : "posterBoxTpls");
+  const builtins = (p = P()) => (isRealP(p) ? [] : ST.BOX_TPLS);
+  const loadLib = async (p = P()) => { myBoxTpls = (await ST.db.getMeta(libKey(p), [])) || []; };
   const saveMyStyles = () => ST.db.setMeta("mainStyles", myStyles);
   /** 选中的风格 → [{ id, name, prompt, ref }] */
   function chosenStyles(p) {
@@ -147,10 +152,13 @@
     // 文字版主图勾了“附上草图”：每套方案先画一张草图存起来，出图时一起发给 AI
     const p0 = P();
     // 框模板的方案：每套都画一张草图（程序画，字一定对），出图时发给 AI
-    if (p0.mode === "poster" && p0.posterKind !== "free" && (p0.plans || []).some((x) => x.boxes && x.on !== false)) {
+    if (((p0.mode === "poster" && p0.posterKind !== "free") || p0.mode === "tpl") && (p0.plans || []).some((x) => x.boxes && x.on !== false)) {
+      if (p0.mode === "tpl" && !curProduct()) return APP.toast("先上传产品图", true);
       for (const pl of p0.plans.filter((x) => x.boxes && x.on !== false)) {
         const key = `${p0.id}:sketch-${pl.id}-${Date.now()}`;
-        await ST.saveImage(key, await ST.toBlob(await renderBoxSketch(pl, 1024), "image/png"));
+        let c;
+        try { c = await renderBoxSketch(pl, 1024); } catch (e) { return APP.toast(e.message, true); }
+        await ST.saveImage(key, await ST.toBlob(c, "image/png"));
         pl.sketchKey = key;
       }
       await op({ op: "set", fields: { plans: p0.plans } });
@@ -244,7 +252,7 @@
     await loadMyStyles().catch(() => {});
     if (m) {
       const p = await ST.db.getProject(decodeURIComponent(m[1])).catch(() => null);
-      if (p && p.kind === "main") { APP.project = p; return render(); }
+      if (p && p.kind === "main") { APP.project = p; await loadLib(p).catch(() => {}); return render(); }
       APP.toast("项目不存在了", true);
     }
     APP.project = null;
@@ -269,7 +277,7 @@
   const siteName = (s) => SITE_NAME[s] || s || "";
   /** 这张主图是哪个 AI 画的：AI 直接画 = 画场景的；画背景 + 融入 = 两个都写（一样就写一个） */
   function whoDrew(it) {
-    if (it.mode === "scene" || it.mode === "poster") return siteName(it.sceneSite);
+    if (it.mode === "scene" || it.mode === "poster" || it.mode === "tpl") return siteName(it.sceneSite);
     const bg = siteName(it.bgSite), bl = it.harm && it.harm.key ? siteName(it.blendSite) : "";
     if (bg && bl && bg !== bl) return `背景 ${bg} · 融入 ${bl}`;
     return bg || bl;
@@ -428,11 +436,25 @@
   }
 
   // ------------------------------------------------------------ 文字主图：框模板（Lee 2026-10-27）
-  const boxTpl = (id) => ST.boxTpl(id, myBoxTpls);
+  const boxTpl = (id) => myBoxTpls.find((t) => t.id === id) || builtins().find((t) => t.id === id) || null;
   const natural = (a, b) => String(a.id).localeCompare(String(b.id), "en", { numeric: true });
-  const allBoxTpls = () => [...ST.BOX_TPLS.map((t) => myBoxTpls.find((x) => x.id === t.id) || t), ...myBoxTpls.filter((x) => !ST.BOX_TPLS.some((t) => t.id === x.id)).sort(natural)];
+  const allBoxTpls = () => [...builtins().map((t) => myBoxTpls.find((x) => x.id === t.id) || t), ...myBoxTpls.filter((x) => !builtins().some((t) => t.id === x.id)).sort(natural)];
   const refUrl = (t) => (t && t.refKey ? ST.urlFor(t.refKey) : (t && t.ref) || "");
-  const BOX_ROLE = { text: "文字", icon: "图标", block: "色块", line: "线" };
+  const BOX_ROLE = { text: "文字", icon: "图标", block: "色块", line: "线", product: "产品" };
+  const NEW_BOX = (type, role) => ({ text: { type, role, x: 30, y: 45, w: 40, h: 8, color: "#111111", bg: "", bold: true, lines: 1, align: "center" }, icon: { type, role, x: 40, y: 40, w: 20, h: 20, desc: "" }, block: { type, role, x: 0, y: 84, w: 100, h: 16, bg: "#1d4ed8", radius: 0 }, line: { type, role, x: 10, y: 50, w: 80, h: 0.6, color: "#333333" }, product: { type, role, x: 20, y: 20, w: 60, h: 60 } })[type];
+  // 草图里贴的产品图（实物主图：“正在用”的那张，抠好的优先）
+  const prodImg = { key: "", img: null };
+  function productImage(cb) {
+    const pr = isRealP() && curProduct();
+    const key = pr ? pr.cut || pr.key : "";
+    if (!key) return null;
+    if (prodImg.key === key) return prodImg.img && prodImg.img.complete ? prodImg.img : null;
+    prodImg.key = key; prodImg.img = new Image();
+    prodImg.img.onload = () => { if (prodImg.key === key) cb && cb(); };
+    ST.urlOf(key).then((u) => { if (prodImg.key === key) prodImg.img.src = u; });
+    return null;
+  }
+  const productImageReady = () => new Promise((res) => { const im = productImage(() => res(prodImg.img)); if (im || !prodImg.key) return res(im); setTimeout(() => res(prodImg.img && prodImg.img.complete ? prodImg.img : null), 5000); });
   const planOf = (el) => P().plans[+el.closest("[data-plan]").dataset.plan];
   const boxOf = (pl) => (pl.boxes || []).find((b) => b.id === bsel[pl.id]) || null;
   /** 一个方案：左边草图编辑器，右边选中框的样式 + 所有文字框 / 图标框的字 */
@@ -450,7 +472,7 @@
         <button class="sm" data-act="boxSaveTpl" title="把现在的框（位置、大小、样式，不含字）存成“我的模板”，名字 ${esc(String(pl.tpl).split("-")[0])}-1、${esc(String(pl.tpl).split("-")[0])}-2…">存为我的模板</button>
         <button class="sm danger" data-act="planDel">删除方案</button></span></div>
       <div class="boxed"><div class="bedit"><canvas data-bed="${i}" width="900" height="900" tabindex="0"></canvas>
-        <div class="row btools"><button class="sm" data-act="boxAdd" data-type="text">＋文字</button><button class="sm" data-act="boxAdd" data-type="icon">＋图标</button><button class="sm" data-act="boxAdd" data-type="block">＋色块</button><button class="sm" data-act="boxAdd" data-type="line">＋线</button>
+        <div class="row btools">${isRealP() ? '<button class="sm" data-act="boxAdd" data-type="product">＋产品</button>' : ""}<button class="sm" data-act="boxAdd" data-type="text">＋文字</button><button class="sm" data-act="boxAdd" data-type="icon">＋图标</button><button class="sm" data-act="boxAdd" data-type="block">＋色块</button><button class="sm" data-act="boxAdd" data-type="line">＋线</button>
           <span class="sp row"><button class="sm" data-act="boxDup" title="复制选中的框">复制</button><button class="sm danger" data-act="boxDel" title="删除选中的框（也可以按 Delete）">删除框</button></span></div></div>
         <div class="grow bside"><div class="bprops" id="bprops${i}">${boxProps(pl, i)}</div>
           <table class="ptable"><thead><tr><th style="width:110px">框</th><th>文字 / 图标画什么</th><th style="width:56px">字数</th></tr></thead><tbody>
@@ -486,7 +508,7 @@
       <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px">${b.type === "text" ? `${col("color", "字色")}${col("bg", "底色")}${col("border", "边框")}${f("lines", "行数", "number", 'min="1" max="4" class="w4"')}
         <label class="row lb"><input type="checkbox" data-bx="${i}|${b.id}|bold" ${b.bold !== false ? "checked" : ""}> 粗体</label>
         <label class="row lb">对齐 <select data-bx="${i}|${b.id}|align">${[["left", "左"], ["center", "中"], ["right", "右"]].map(([v, t]) => `<option value="${v}" ${(b.align || "center") === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
-        ${f("radius", "圆角", "number", 'min="0" max="99" class="w4" title="胶囊形写 99"')}${col("stroke", "描边字")}` : b.type === "block" ? `${col("bg", "颜色")}${f("radius", "圆角", "number", 'min="0" max="99" class="w4"')}` : b.type === "line" ? `${col("color", "颜色")}<label class="row lb"><input type="checkbox" data-bx="${i}|${b.id}|frame" ${b.frame ? "checked" : ""}> 整圈边框</label>` : `<span class="muted">图标框：AI 在这里画图标，画什么写在下面表格里</span>`}</div>`;
+        ${f("radius", "圆角", "number", 'min="0" max="99" class="w4" title="胶囊形写 99"')}${col("stroke", "描边字")}` : b.type === "block" ? `${col("bg", "颜色")}${f("radius", "圆角", "number", 'min="0" max="99" class="w4"')}` : b.type === "line" ? `${col("color", "颜色")}<label class="row lb"><input type="checkbox" data-bx="${i}|${b.id}|frame" ${b.frame ? "checked" : ""}> 整圈边框</label>` : b.type === "product" ? `<span class="muted">产品框：草图里贴你的产品图（等比放进框里，居中），拖框就是挪产品、改大小</span>` : `<span class="muted">图标框：AI 在这里画图标，画什么写在下面表格里</span>`}</div>`;
   }
   /** 画一个方案的编辑器（选中的框描蓝边，右下角一个改大小的小方块） */
   function drawEditor(i) {
@@ -494,7 +516,7 @@
     if (!cv || !pl) return;
     const g = cv.getContext("2d"), S = cv.width;
     g.clearRect(0, 0, S, S);
-    ST.drawBoxes(g, pl.boxes, S, { mode: "sketch", ...ST.bgColors(pl), sel: bsel[pl.id], hint: true });
+    ST.drawBoxes(g, pl.boxes, S, { mode: "sketch", ...ST.bgColors(pl), sel: bsel[pl.id], hint: true, productImg: productImage(() => drawCanvases()) });
     const b = boxOf(pl);
     if (b) { const k = S / 100, hs = 16; g.fillStyle = "#2563eb"; g.fillRect((b.x + b.w) * k - hs / 2, (b.y + b.h) * k - hs / 2, hs, hs); }
   }
@@ -503,7 +525,9 @@
     try { await document.fonts.ready; } catch {}
     const c = document.createElement("canvas");
     c.width = c.height = px;
-    ST.drawBoxes(c.getContext("2d"), pl.boxes, px, { mode: "sketch", ...ST.bgColors(pl) });
+    const productImg = isRealP() ? await productImageReady() : null;
+    if (isRealP() && pl.boxes.some((b) => b.type === "product") && !productImg) throw new Error("产品图打不开，草图画不了");
+    ST.drawBoxes(c.getContext("2d"), pl.boxes, px, { mode: "sketch", ...ST.bgColors(pl), productImg });
     return c;
   }
   /** 画完页面：模板缩略图（线框）和每个方案的编辑器 */
@@ -547,6 +571,7 @@
     const inside = (b, m = 0) => pt.x >= b.x - m && pt.x <= b.x + b.w + m && pt.y >= b.y - m && pt.y <= b.y + b.h + m;
     const bs = [...(pl.boxes || [])].reverse();
     return bs.find((b) => (b.type === "text" || b.type === "icon") && inside(b))
+      || bs.find((b) => b.type === "product" && inside(b))
       || bs.find((b) => b.type === "line" && (b.frame ? inside(b) && (pt.x - b.x < 2 || b.x + b.w - pt.x < 2 || pt.y - b.y < 2 || b.y + b.h - pt.y < 2) : inside(b, 1.5)))
       || bs.find((b) => b.type === "block" && inside(b)) || null;
   }
@@ -618,14 +643,14 @@
   async function editTpl(id) {
     const t0 = boxTpl(id);
     if (!t0) return;
-    const builtin = ST.BOX_TPLS.find((t) => t.id === id);
+    const builtin = builtins().find((t) => t.id === id);
     const work = { boxes: JSON.parse(JSON.stringify(t0.boxes)), bgMode: t0.bgMode || "", bgText: t0.bgText || "", bg1: t0.bg1 || "#ffffff", bg2: t0.bg2 || t0.bg1 || "#ffffff" };
     let sel = "", overlay = true, drg = null;
     const ref = refUrl(t0);
     const refImg = new Image();
     if (ref) refImg.src = ref;
-    const mine0 = (await ST.db.getMeta("posterBoxTpls", [])) || [];
-    const asName = ST.nextDerivedName(id, [...ST.BOX_TPLS.map((t) => t.id), ...mine0.map((t) => t.id)]);
+    const mine0 = (await ST.db.getMeta(libKey(), [])) || [];
+    const asName = ST.nextDerivedName(id, [...builtins().map((t) => t.id), ...mine0.map((t) => t.id)]);
     let cv, m0;
     const cur = () => work.boxes.find((b) => b.id === sel) || null;
     const draw = () => {
@@ -646,7 +671,7 @@
     const syncNums = () => { const b = cur(); if (!b) return; for (const k of ["x", "y", "w", "h"]) { const el = m0.querySelector(`[data-te="${k}"]`); if (el && document.activeElement !== el) el.value = b[k]; } };
     const nextId = () => "b" + (Math.max(0, ...work.boxes.map((b) => +String(b.id).slice(1) || 0)) + 1);
     const r = await APP.modal(`<div class="tedit"><div class="tecv"><canvas id="teCv" width="900" height="900" tabindex="0"></canvas>
-        <div class="row btools"><button class="sm" data-te-add="text">＋文字</button><button class="sm" data-te-add="icon">＋图标</button><button class="sm" data-te-add="block">＋色块</button><button class="sm" data-te-add="line">＋线</button>
+        <div class="row btools">${isRealP() ? '<button class="sm" data-te-add="product">＋产品</button>' : ""}<button class="sm" data-te-add="text">＋文字</button><button class="sm" data-te-add="icon">＋图标</button><button class="sm" data-te-add="block">＋色块</button><button class="sm" data-te-add="line">＋线</button>
           <span class="sp row"><button class="sm" id="teDup">复制</button><button class="sm danger" id="teDel">删除框</button></span></div></div>
         <div class="teside">${ref ? `<label class="row lb"><input type="checkbox" id="teOver" checked> 叠在参考图上看（对着原图挪位置）</label><img class="teref" src="${esc(ref)}" alt="">` : ""}<div class="bprops" id="teProps" style="margin-top:8px"></div>
           <div class="lb" style="margin-top:8px">背景（以后用这个模板写的方案默认用它，方案里还能改）</div><div id="teBg">${bgControls(work, 'data-tebg="', "te_", 'data-tebg="')}</div>
@@ -694,7 +719,7 @@
           const add = e.target.closest("[data-te-add]");
           if (add) {
             const type = add.dataset.teAdd, role = `${BOX_ROLE[type]} ${work.boxes.filter((b) => b.type === type).length + 1}`;
-            const b = { text: { type, role, x: 30, y: 45, w: 40, h: 8, color: "#111111", bg: "", bold: true, lines: 1, align: "center" }, icon: { type, role, x: 40, y: 40, w: 20, h: 20, desc: "" }, block: { type, role, x: 0, y: 84, w: 100, h: 16, bg: "#1d4ed8", radius: 0 }, line: { type, role, x: 10, y: 50, w: 80, h: 0.6, color: "#333333" } }[type];
+            const b = NEW_BOX(type, role);
             b.id = nextId();
             type === "block" ? work.boxes.unshift(b) : work.boxes.push(b);
             sel = b.id; draw(); props(); return;
@@ -706,12 +731,12 @@
       },
     });
     if (!r) return;
-    const mine = ((await ST.db.getMeta("posterBoxTpls", [])) || []);
+    const mine = ((await ST.db.getMeta(libKey(), [])) || []);
     const boxes = work.boxes.map((b) => { const x = { ...b }; delete x.text; return x; });
     let msg;
     if (r === "restore") { myBoxTpls = mine.filter((x) => x.id !== id); msg = `模板 ${id} 恢复原样了`; }
     else if (r === "saveas") {
-      const nid = ST.nextDerivedName(id, [...ST.BOX_TPLS.map((t) => t.id), ...mine.map((t) => t.id)]);
+      const nid = ST.nextDerivedName(id, [...builtins().map((t) => t.id), ...mine.map((t) => t.id)]);
       myBoxTpls = [...mine, { ...JSON.parse(JSON.stringify(t0)), id: nid, builtin: false, edited: false, base: false, parent: id, t: Date.now(), boxes, bgMode: work.bgMode, bgText: work.bgText, bg1: work.bg1, bg2: work.bg2 }];
       msg = `另存好了：模板 ${nid}`;
     } else {
@@ -720,7 +745,7 @@
       myBoxTpls = mine.some((x) => x.id === id) ? mine.map((x) => (x.id === id ? nt : x)) : [...mine, nt];
       msg = `模板 ${id} 保存好了`;
     }
-    await ST.db.setMeta("posterBoxTpls", myBoxTpls);
+    await ST.db.setMeta(libKey(), myBoxTpls);
     APP.toast(msg);
     render();
   }
@@ -747,7 +772,8 @@
   async function itemCard(it) {
     const st = it.job || "";
     const poster = it.mode === "poster";
-    const scene = it.mode === "scene" || poster; // 照参考图设计和 AI 直接画一样：一张 AI 图
+    const tplIt = it.mode === "tpl";
+    const scene = it.mode === "scene" || poster || tplIt; // 照参考图设计、模板和 AI 直接画一样：一张 AI 图
     const ready = scene ? !!it.scene : !!it.bg;
     let url = "";
     if (ready) {
@@ -770,6 +796,7 @@
       if (scene) {
         const j = it.judge;
         if (j && poster) { warn = j.ok === false; line = j.ok === null ? j.note : j.ok ? "AI 审核：文字没问题" : `AI 审核：文字有问题——${(j.bad || []).length ? "“" + j.bad.join("”“") + "”；" : ""}${j.why || ""}`; }
+        else if (j && j.both) { warn = j.ok === false; line = "AI 审核：" + j.why; }
         else if (j) { warn = j.ok === false; line = j.ok === null ? j.note : (j.ok ? "AI 审核：产品没被改" : "AI 审核：产品可能被改了——") + (j.why ? (j.ok ? "（" + j.why + "）" : j.why) : ""); }
         if (it.placement === "ref") line = ["摆放照参考图", line].filter(Boolean).join("；");
         else if (it.placement === "same") line = ["摆放和产品图一样", line].filter(Boolean).join("；");
@@ -782,13 +809,13 @@
     const aiTag = whoDrew(it);
     return `<div class="mcard" data-iid="${it.id}">
       <div class="pic" data-act="view">${url ? `<img src="${url}" alt="">` : ""}${st ? `<span class="st tag ${/失败/.test(st) ? "bad" : "blue"}">${esc(st)}</span>` : ""}</div>
-      <div class="row"><b>${esc(it.styleName)}${poster ? ' <span class="muted">文字版</span>' : scene ? ' <span class="muted">AI 直接画</span>' : ""}</b>${aiTag ? `<span class="tag aisite" title="哪个 AI 画的">${esc(aiTag)}</span>` : ""}${it.doneAt || it.t ? `<span class="tag mtime" title="${it.doneAt ? "画好的时间" : "开始画的时间"}（北京时间）">${it.doneAt ? "" : "提交 "}${ST.bj(it.doneAt || it.t, true)}</span>` : ""}${has ? `<span class="sp pills"><span class="pill ${hm.on ? "on" : ""}" data-act="harmView" data-v="1">AI 图</span><span class="pill ${hm.on ? "" : "on"}" data-act="harmView" data-v="0">原贴图</span></span>` : ""}</div>
+      <div class="row"><b>${esc(it.styleName)}${poster ? ' <span class="muted">文字版</span>' : tplIt ? ' <span class="muted">模板</span>' : scene ? ' <span class="muted">AI 直接画</span>' : ""}</b>${aiTag ? `<span class="tag aisite" title="哪个 AI 画的">${esc(aiTag)}</span>` : ""}${it.doneAt || it.t ? `<span class="tag mtime" title="${it.doneAt ? "画好的时间" : "开始画的时间"}（北京时间）">${it.doneAt ? "" : "提交 "}${ST.bj(it.doneAt || it.t, true)}</span>` : ""}${has ? `<span class="sp pills"><span class="pill ${hm.on ? "on" : ""}" data-act="harmView" data-v="1">AI 图</span><span class="pill ${hm.on ? "" : "on"}" data-act="harmView" data-v="0">原贴图</span></span>` : ""}</div>
       ${line ? `<div class="muted ${warn ? "warntext" : ""}">${esc(line)}</div>` : ""}
       <div class="acts">
         <button class="sm" data-act="dlOne" ${ready ? "" : "disabled"}>下载</button>
         <button class="sm" data-act="judge" ${ready && !busy && (scene || hm.key) ? "" : "disabled"} title="让审核 AI（默认豆包）看一眼：${poster ? "读出图上的字，查违禁词、过度承诺、错字" : scene ? "产品有没有被改" : "原贴图和 AI 图哪张好"}">AI 审核</button>
         ${it.state === "ok" ? `<button class="sm" data-act="unaccept">取消采用</button>` : `<button class="sm primary" data-act="accept" ${ready && !busy ? "" : "disabled"}>采用</button>`}
-        ${poster ? "" : `<button class="sm" data-act="placeRef" ${ready ? "" : "disabled"} title="以后用“AI 直接画场景”时，产品都照这张的摆法放">用这个摆放</button>`}
+        ${poster || tplIt ? "" : `<button class="sm" data-act="placeRef" ${ready ? "" : "disabled"} title="以后用“AI 直接画场景”时，产品都照这张的摆法放">用这个摆放</button>`}
         ${scene ? "" : `<button class="sm" data-act="adjust" ${ready && !busy ? "" : "disabled"}>调整产品</button>
         <button class="sm" data-act="reblend" ${ready && !busy ? "" : "disabled"}>${hm.key ? "重新融入" : "融入背景"}</button>`}
         <button class="sm" data-act="redraw" ${busy ? "disabled" : ""}>${/失败/.test(st) ? "重试" : scene ? "重画" : "重画背景"}</button>
@@ -834,74 +861,90 @@
     }));
     const sel = new Set(p.styles || []);
     const myPills = await Promise.all(myStyles.map(async (s) => `<span class="stypill ${sel.has("my:" + s.id) ? "on" : ""}" data-sty="my:${s.id}" title="${esc(s.desc || s.prompt)}">${s.ref ? `<img src="${await ST.urlOf(s.ref)}" alt="">` : ""}${esc(s.name)}<span class="x" data-act="delStyle" data-sid="${s.id}" title="删除这个风格">✕</span></span>`));
-    const poster = p.mode === "poster";
+    const poster = p.mode === "poster", real = !poster, mode = modeOf(p);
+    const tplMode = real && mode === "tpl";
     const plansOn = (p.plans || []).filter((x) => x.on !== false);
     const freeMode = poster && p.posterKind === "free";
-    const n = freeMode ? Math.min(6, p.freeCount || 3) : poster ? plansOn.length * Math.min(3, p.perPlan || 1) : chosenStyles(p).length * (p.count || 1);
-    const canGo = freeMode ? String(p.posterContent || "").trim() || (p.posterRefs || []).length : poster ? plansOn.length && !/中$/.test(p.planJob || "") : n && curProduct();
-    // 文字版主图（Lee 2026-10-27）：① 参考图（可选）② 写方案（AI 写、人改）③ 按方案出图
-    const refCells = poster ? await Promise.all((p.posterRefs || []).map(async (r) => `<div class="mcard pref" data-pkey="${esc(r.key)}"><div class="pic" data-act="viewPosterRef"><img src="${await ST.urlOf(r.key)}" alt=""></div><div class="row"><span class="muted pname" title="${esc(r.name)}">${esc(r.name)}</span><button class="sm danger" data-act="delPosterRef">删除</button></div></div>`)) : [];
+    const boxGen = (poster && !freeMode) || tplMode; // 照草图出图（框模板）
+    const n = freeMode ? Math.min(6, p.freeCount || 3) : boxGen || poster ? (tplMode ? plansOn.filter((x) => x.boxes) : plansOn).length * Math.min(3, p.perPlan || 1) : chosenStyles(p).length * (p.count || 1);
+    const canGo = freeMode ? String(p.posterContent || "").trim() || (p.posterRefs || []).length : poster ? plansOn.length && !/中$/.test(p.planJob || "") : tplMode ? n && curProduct() && !/中$/.test(p.planJob || "") : n && curProduct();
+    const refCells = await Promise.all((p.posterRefs || []).map(async (r) => `<div class="mcard pref" data-pkey="${esc(r.key)}"><div class="pic" data-act="viewPosterRef"><img src="${await ST.urlOf(r.key)}" alt=""></div><div class="row"><span class="muted pname" title="${esc(r.name)}">${esc(r.name)}</span><button class="sm danger" data-act="delPosterRef">删除</button></div></div>`));
     const content = p.posterContent != null ? p.posterContent : [p.industry, p.posterNote].filter(Boolean).join("；");
     const kind = p.posterKind === "free" ? "free" : "box", pick = (p.boxPick || []).filter((id) => boxTpl(id));
     const plansHtml = (p.plans || []).length ? `<div class="plans">${p.plans.map((pl, i) => (pl.boxes ? boxPlanCard(pl, i, p) : pl.tpl ? planTplCard(pl, i, p) : planCard(pl, i, p))).join("")}</div>` : "";
-    const posterHtml = poster ? `
-      <div class="card"><div class="head"><div><h3>① 内容和做法</h3><div class="muted">“模板”：选几个照参考图画的线框模板，AI 往框里写字，你改字、挪框，先看草图再出图，最好控制。“AI 根据参考图”：放几张你喜欢的主图，AI 自由发挥。</div></div></div>
-        <div class="lb">要表达的内容（卖什么、卖点、服务、售后……）</div>
-        <textarea id="posterContent" rows="2" placeholder="如：远程安装 MySQL，5.x～8.x 任意版本，Win / Linux / Mac，赠送可视化工具，一对一远程，安装不成功全额退款">${esc(content)}</textarea>
+    let num = 0;
+    const N = () => "①②③④⑤⑥⑦⑧"[num++];
+    // ---- 各块（文字主图、实物主图共用）
+    const contentFields = (label, ph) => `<div class="lb">${label}</div>
+        <textarea id="posterContent" rows="2" placeholder="${esc(ph)}">${esc(content)}</textarea>
         <label class="row lb" style="margin-top:8px">禁止出现的词（逗号隔开） <input id="posterBan" value="${esc(p.posterBan || "")}" placeholder="如：秒装, 包售后, 某某品牌" style="flex:1"></label>
         <div class="muted warntext" id="banConflict" ${banConflict(p).length ? "" : "hidden"}>注意：禁止词里的“${esc(banConflict(p).join("”“"))}”在“要表达的内容”里也有——AI 写方案时会避开它，可能写出意思不对的话（比如不让写“退款”，就写成“不成功也收费”）。</div>
-        <div class="muted" style="margin-top:4px">广告法违禁词和虚假承诺（${ST.BAN_WORDS.slice(0, 8).join("、")}……）默认就禁，不用填；“安装不成功全额退款”这种真实的售后承诺可以写。</div>
-        <div class="row" style="margin-top:12px;gap:8px"><span class="lb">做法</span><span class="pills"><span class="pill ${kind === "box" ? "on" : ""}" data-pkind="box">模板</span><span class="pill ${kind === "free" ? "on" : ""}" data-pkind="free">AI 根据参考图（自由发挥）</span></span></div></div>
-      ${kind === "free" ? `
-      <div class="card"><div class="head"><div><h3>② 参考图</h3><div class="muted">放 1～3 张你觉得好的主图，AI 照它的风格、排版和文案密度，写你的内容。别家的店名、品牌、价格不会照抄。</div></div>
+        <div class="muted" style="margin-top:4px">广告法违禁词和虚假承诺（${ST.BAN_WORDS.slice(0, 8).join("、")}……）默认就禁，不用填；“安装不成功全额退款”这种真实的售后承诺可以写。</div>`;
+    const refsCard = (desc, extra = "") => `<div class="card"><div class="head"><div><h3>${N()} 参考图${real ? "（可以不放）" : ""}</h3><div class="muted">${desc}</div></div>
         <div class="sp"><button data-act="posterFromLib">从素材中心选</button><button data-act="posterUpload">上传参考图</button></div></div>
-        ${refCells.length ? `<div class="mcards">${refCells.join("")}</div>` : '<div class="empty">还没有参考图。点右上角“上传参考图”或“从素材中心选”，也可以拖进来、Ctrl+V。</div>'}
+        ${refCells.length ? `<div class="mcards">${refCells.join("")}</div>` : `<div class="empty">还没有参考图。点右上角“上传参考图”或“从素材中心选”${real ? "" : "，也可以拖进来、Ctrl+V"}。</div>`}
         <div class="row" style="margin-top:10px;gap:10px;flex-wrap:wrap">
-          <label class="row lb"><input type="checkbox" id="freeRefs" ${p.freeRefs !== false ? "checked" : ""}> 发送参考图（出图时把上面的图发给 AI 参考）</label>
-          <label class="row lb">想要的风格 <select id="freeStyle"><option value="">按参考图的风格</option>${ST.POSTER_TPLS.map((t) => `<option value="${t.id}" ${p.freeStyle === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}<option value="custom" ${p.freeStyle === "custom" ? "selected" : ""}>自己写</option></select></label>
-          ${p.freeStyle === "custom" ? `<input id="freeStyleText" value="${esc(p.freeStyleText || "")}" placeholder="如：红白色块、信息密集、粗黑体、底部通栏承诺" style="flex:1;min-width:280px">` : ""}
-          <label class="row lb">一共 <select id="freeCount">${[1, 2, 3, 4, 5, 6].map((k) => `<option ${(p.freeCount || 3) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张（每张一个重点：${ST.POSTER_THEMES.map((t) => t.name).join(" / ")}）</label></div></div>` : `
-      <div class="card"><div class="head"><div><h3>② 选模板</h3><div class="muted">每个模板是照一张参考图画的线框（方框是字，打叉的是图标，虚线是色块）。鼠标移到模板上看它的参考图，右键可以编辑模板（删框、挪位置）。点一下选上，可以选几个，按选的顺序一张一套方案；同一个模板点“＋”可以多选几次。</div></div>
-        <div class="sp row"><label class="row lb">看图用 <select id="learnSite">${LEARN_SITES.map(([v, t]) => `<option value="${v}" ${v === learnSite ? "selected" : ""}>${t}</option>`).join("")}</select></label><button data-act="learnFromLib">从素材中心选图生成模板</button><button data-act="learnUpload" title="上传一张你喜欢的主图，AI 把它的版式拆成框，存成“我的模板”（名字接着 ${esc(ST.nextBaseName(allBoxTpls().map((t) => t.id)))} 往下排）">上传参考图生成模板</button></div></div>
+          <label class="row lb"><input type="checkbox" id="freeRefs" ${p.freeRefs !== false ? "checked" : ""}> 发送参考图（出图时把上面的图发给 AI 参考）</label>${extra}</div></div>`;
+    const galleryCard = () => `<div class="card"><div class="head"><div><h3>${N()} 选模板</h3><div class="muted">每个模板是照一张参考图拆出来的线框（${real ? "绿框是产品，" : ""}方框是字，打叉的是图标，虚线是色块）。鼠标移到模板上看它的参考图，右键可以编辑模板（删框、挪位置）。点一下选上，可以选几个，按选的顺序一张一套方案；同一个模板点“＋”可以多选几次。${real ? "实物模板和文字主图的模板分开放。" : ""}</div></div>
+        <div class="sp row"><label class="row lb">看图用 <select id="learnSite">${LEARN_SITES.map(([v, t]) => `<option value="${v}" ${v === learnSite ? "selected" : ""}>${t}</option>`).join("")}</select></label><button data-act="learnFromLib">从素材中心选图生成模板</button><button data-act="learnUpload" title="上传一张你喜欢的主图，AI ${real ? "认出哪里是产品、哪里是字，" : ""}把它的版式拆成框，存成“我的模板”（名字接着 ${esc(ST.nextBaseName(allBoxTpls().map((t) => t.id)))} 往下排）">上传参考图生成模板</button></div></div>
         ${p.learnJob ? `<div class="row" style="margin-bottom:8px"><span class="tag ${/失败/.test(p.learnJob) ? "bad" : "blue"}">${esc(p.learnJob)}</span></div>` : ""}
-        <div class="tplgrid boxgrid">${allBoxTpls().map((t) => { const n = pick.filter((x) => x === t.id).length; return `<div class="tplc boxc ${n ? "on" : ""}" data-btpl="${esc(t.id)}" title="右键编辑这个模板" data-refhover="${esc(refUrl(t))}" data-refname="模板 ${esc(t.id)} 的参考图">
+        ${real ? contentFields("图上要写的字（卖点、活动、服务……；模板里没有文字框就不用写）", "如：304 不锈钢，24 小时保温，一键开盖，送杯刷") + '<div style="height:10px"></div>' : ""}
+        ${allBoxTpls().length ? `<div class="tplgrid boxgrid">${allBoxTpls().map((t) => { const n = pick.filter((x) => x === t.id).length; return `<div class="tplc boxc ${n ? "on" : ""}" data-btpl="${esc(t.id)}" title="右键编辑这个模板" data-refhover="${esc(refUrl(t))}" data-refname="模板 ${esc(t.id)} 的参考图">
           <canvas class="wire" data-wire="${esc(t.id)}" width="300" height="300"></canvas><div class="tn"><b>${esc(t.id)}</b> ${esc(t.name || "")}${t.edited ? ' <span class="tag">改过</span>' : t.builtin ? "" : ` <span class="tag">${t.parent ? "另存" : "我的"}</span>`}</div><div class="muted tu">${esc(t.use || "")}</div>
-          ${n ? `<span class="tcount">${pick.map((x, k) => (x === t.id ? k + 1 : 0)).filter(Boolean).join("、")}</span>` : ""}<button class="sm tplus" data-act="btplMore" title="这个模板再多选一套">＋</button>${t.builtin ? "" : '<button class="sm tdel" data-act="btplDel" title="删除这个模板">✕</button>'}</div>`; }).join("")}</div>
+          ${n ? `<span class="tcount">${pick.map((x, k) => (x === t.id ? k + 1 : 0)).filter(Boolean).join("、")}</span>` : ""}<button class="sm tplus" data-act="btplMore" title="这个模板再多选一套">＋</button>${t.builtin ? "" : '<button class="sm tdel" data-act="btplDel" title="删除这个模板">✕</button>'}</div>`; }).join("")}</div>` : '<div class="empty">还没有实物模板。点右上角“上传参考图生成模板”：上传一张你喜欢的实物主图，AI 认出产品在哪、字在哪，拆成模板（名字 A、B、C…）。</div>'}
         <div class="row" style="margin-top:10px;gap:10px;flex-wrap:wrap">
           <span class="muted">已选 ${pick.length} 套${pick.length ? "：" + pick.join(" → ") : ""}</span>${pick.length ? '<button class="sm" data-act="btplClear">清空</button>' : ""}
           <label class="row lb">写方案用 <select id="planSite">${PLAN_SITES.map(([v, t]) => `<option value="${v}" ${v === planSite ? "selected" : ""}>${t}</option>`).join("")}</select></label>
-          <button class="primary" data-act="writeBoxPlans" ${/中$/.test(p.planJob || "") || !pick.length ? "disabled" : ""}>AI 往框里写字（${pick.length} 套）</button>
-          ${p.planJob ? `<span class="tag ${/失败/.test(p.planJob) ? "bad" : "blue"}">${esc(p.planJob)}</span>` : ""}</div></div>
-      <div class="card"><div class="head"><div><h3>③ 方案（改字、挪框）</h3><div class="muted">左边是草图：拖框换位置，拖右下角的蓝色小方块改大小，点框在右边改字和样式；也可以加框、删框。改好了可以“存为我的模板”（叫 A-1、A-2…）。出图时把草图和模板的参考图一起发给 AI：草图定字和位置，参考图定风格。</div></div></div>
-        ${plansHtml || '<div class="empty">还没有方案。填好“要表达的内容”，选模板，点“AI 往框里写字”。</div>'}</div>`}` : "";
-    const placeUrl = p.placeRef ? await ST.urlOf(p.placeRef) : "";
-    const pend = p.items.filter((x) => x.state !== "ok"), done = p.items.filter((x) => x.state === "ok");
-    const html = `
-      ${poster ? posterHtml : `<div class="card"><div class="head"><div><h3>① 产品图</h3><div class="muted">产品图保留原来的格式，不自动抠图。“AI 直接画场景”直接用原图（白底图最好）；“画背景 + 融入”要抠好的图：白底图点“去白底”，不是白底的点“AI 抠图”。抠好的图放在深色格子上，有没有白边一眼能看出来；手腕绳、提手围成的圈里有白色，勾“镂空的白色也抠掉”。</div></div>
-        <div class="sp"><button data-act="fromLib">从素材中心选</button><button data-act="addProducts">上传产品图</button></div></div>
-        <label class="row lb" style="margin-bottom:10px">产品名称（可以不填，告诉 AI 这是什么）<input id="pName" value="${esc((p.info && p.info.name) || "")}" placeholder="如：男士保温杯" style="width:240px"></label>
-        ${prods.length ? `<div class="mcards">${prods.join("")}</div>` : '<div class="empty" id="dropZone">把白底图拖到这里、按 Ctrl+V 粘贴，或者点“上传产品图”“从素材中心选”</div>'}</div>
-      <div class="card"><div class="head"><div><h3>② 背景风格</h3><div class="muted">可以多选，每种风格各画几张。</div></div>
+          <button class="primary" data-act="writeBoxPlans" ${/中$/.test(p.planJob || "") || !pick.length ? "disabled" : ""}>${real ? "做成方案" : "AI 往框里写字"}（${pick.length} 套）</button>
+          ${real ? '<span class="muted">有文字框的让 AI 写字，没有的直接用</span>' : ""}
+          ${p.planJob ? `<span class="tag ${/失败/.test(p.planJob) ? "bad" : "blue"}">${esc(p.planJob)}</span>` : ""}</div></div>`;
+    const plansCard = () => `<div class="card"><div class="head"><div><h3>${N()} 方案（${real ? "挪产品、改字" : "改字、挪框"}）</h3><div class="muted">左边是草图：拖框换位置，拖右下角的蓝色小方块改大小，点框在右边改字和样式；也可以加框、删框。${real ? "绿框里贴的是你的产品图（“正在用”的那张，抠好的最好），拖它就是挪产品、改大小。" : ""}改好了可以“存为我的模板”（叫 A-1、A-2…）。出图时把草图${real ? "、产品图" : ""}和模板的参考图一起发给 AI：草图定${real ? "产品和字的" : "字和"}位置，参考图定风格。</div></div></div>
+        ${plansHtml || `<div class="empty">还没有方案。${real ? "选模板，点“做成方案”。" : "填好“要表达的内容”，选模板，点“AI 往框里写字”。"}</div>`}</div>`;
+    const stylesCard = () => `<div class="card"><div class="head"><div><h3>${N()} 背景风格</h3><div class="muted">可以多选，每种风格各画几张。</div></div>
         <div class="sp"><button data-act="learnStyle" title="上传一张你喜欢的主图或场景图，AI 识别它的背景风格，存起来以后都能用">上传图片识别风格</button></div></div>
         <div class="lb">预设</div><div class="stypills">${ST.MAIN_STYLES.map((s) => `<span class="stypill noimg ${sel.has(s.id) ? "on" : ""}" data-sty="${s.id}" title="${esc(s.prompt)}">${esc(s.name)}</span>`).join("")}</div>
         <div class="lb" style="margin-top:10px">我的风格</div><div class="stypills">${myPills.join("") || '<span class="muted">还没有。点右上角“上传图片识别风格”。</span>'}</div>
         <label class="row lb" style="margin-top:10px"><input type="checkbox" id="customOn" ${p.customOn ? "checked" : ""}> 自己写</label>
-        <textarea id="custom" rows="2" placeholder="中文或英文都行，如：浅灰色水泥台面，旁边有一盆绿植，早晨的阳光" ${p.customOn ? "" : "hidden"}>${esc(p.custom || "")}</textarea></div>`}
-      <div class="card"><h3>${poster ? "④" : "③"} 生成</h3><div class="mrow">
-        ${poster ? "" : `<span class="lb">做法</span><span class="pills">${REAL_MODES.map(([v, t, tip]) => `<span class="pill ${modeOf(p) === v ? "on" : ""}" data-mode="${v}" title="${esc(tip)}">${t}</span>`).join("")}</span>`}
+        <textarea id="custom" rows="2" placeholder="中文或英文都行，如：浅灰色水泥台面，旁边有一盆绿植，早晨的阳光" ${p.customOn ? "" : "hidden"}>${esc(p.custom || "")}</textarea></div>`;
+    let posterHtml = "";
+    if (poster) {
+      posterHtml = `<div class="card"><div class="head"><div><h3>${N()} 内容和做法</h3><div class="muted">“模板”：选几个照参考图画的线框模板，AI 往框里写字，你改字、挪框，先看草图再出图，最好控制。“AI 根据参考图”：放几张你喜欢的主图，AI 自由发挥。</div></div></div>
+        ${contentFields("要表达的内容（卖什么、卖点、服务、售后……）", "如：远程安装 MySQL，5.x～8.x 任意版本，Win / Linux / Mac，赠送可视化工具，一对一远程，安装不成功全额退款")}
+        <div class="row" style="margin-top:12px;gap:8px"><span class="lb">做法</span><span class="pills"><span class="pill ${kind === "box" ? "on" : ""}" data-pkind="box">模板</span><span class="pill ${kind === "free" ? "on" : ""}" data-pkind="free">AI 根据参考图（自由发挥）</span></span></div></div>`;
+      posterHtml += kind === "free" ? refsCard("放 1～3 张你觉得好的主图，AI 照它的风格、排版和文案密度，写你的内容。别家的店名、品牌、价格不会照抄。", `
+          <label class="row lb">想要的风格 <select id="freeStyle"><option value="">按参考图的风格</option>${ST.POSTER_TPLS.map((t) => `<option value="${t.id}" ${p.freeStyle === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}<option value="custom" ${p.freeStyle === "custom" ? "selected" : ""}>自己写</option></select></label>
+          ${p.freeStyle === "custom" ? `<input id="freeStyleText" value="${esc(p.freeStyleText || "")}" placeholder="如：红白色块、信息密集、粗黑体、底部通栏承诺" style="flex:1;min-width:280px">` : ""}
+          <label class="row lb">一共 <select id="freeCount">${[1, 2, 3, 4, 5, 6].map((k) => `<option ${(p.freeCount || 3) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张（每张一个重点：${ST.POSTER_THEMES.map((t) => t.name).join(" / ")}）</label>`) : galleryCard() + plansCard();
+    }
+    const placeUrl = p.placeRef ? await ST.urlOf(p.placeRef) : "";
+    const pend = p.items.filter((x) => x.state !== "ok"), done = p.items.filter((x) => x.state === "ok");
+    // 实物主图（Lee 2026-10-28）：① 产品图 ② 做法（模板 / AI 根据参考图 / 先画背景再融入）→ 各自的设置 → 生成
+    const realHtml = real ? `<div class="card"><div class="head"><div><h3>${N()} 产品图</h3><div class="muted">产品图保留原来的格式，不自动抠图。“模板”和“先画背景再融入”要抠好的图（模板把它贴进草图）：白底图点“去白底”，不是白底的点“AI 抠图”；“AI 根据参考图”直接用原图也行（白底图最好）。抠好的图放在深色格子上，有没有白边一眼能看出来；手腕绳、提手围成的圈里有白色，勾“镂空的白色也抠掉”。</div></div>
+        <div class="sp"><button data-act="fromLib">从素材中心选</button><button data-act="addProducts">上传产品图</button></div></div>
+        <label class="row lb" style="margin-bottom:10px">产品名称（可以不填，告诉 AI 这是什么）<input id="pName" value="${esc((p.info && p.info.name) || "")}" placeholder="如：男士保温杯" style="width:240px"></label>
+        ${prods.length ? `<div class="mcards">${prods.join("")}</div>` : '<div class="empty" id="dropZone">把白底图拖到这里、按 Ctrl+V 粘贴，或者点“上传产品图”“从素材中心选”</div>'}</div>
+      <div class="card"><div class="head"><div><h3>${N()} 做法</h3><div class="muted">${esc((REAL_MODES.find((x) => x[0] === mode) || [])[2] || "")}</div></div></div>
+        <span class="pills">${REAL_MODES.map(([v, t, tip]) => `<span class="pill ${mode === v ? "on" : ""}" data-mode="${v}" title="${esc(tip)}">${t}</span>`).join("")}</span></div>
+      ${mode === "tpl" ? galleryCard() + plansCard() : mode === "scene" ? refsCard("放 1～3 张你喜欢的实物主图（可以不放），AI 照它的构图、角度、背景、光线和气氛，画你的产品；不会照抄别家的产品、字和 logo。不放参考图就是以前的“AI 直接画场景”。") + stylesCard() : stylesCard()}` : "";
+    const html = `
+      ${poster ? posterHtml : realHtml}
+      <div class="card"><h3>${N()} 生成</h3><div class="mrow">
         <span class="lb">尺寸</span><span class="pills">${SIZES.map((s) => `<span class="pill ${p.size === s ? "on" : ""}" data-size="${s}">${s}×${s}</span>`).join("")}</span>
-        ${modeOf(p) === "scene" ? `<span class="lb">摆放</span><span class="pills">${PLACES.map(([v, t, tip]) => `<span class="pill ${(p.placement || "free") === v ? "on" : ""}" data-place="${v}" title="${esc(tip)}">${t}</span>`).join("")}${p.placeRef ? `<span class="pill ${p.placement === "ref" ? "on" : ""}" data-place="ref" title="照这张图里的摆法"><img src="${esc(placeUrl)}" class="placeimg" alt="">照“${esc(p.placeRefName || "")}”那张摆<span class="x" data-act="clearPlace" title="不用这张了">✕</span></span>` : ""}</span>` : ""}
+        ${real && mode === "scene" ? `<span class="lb">摆放</span><span class="pills">${PLACES.map(([v, t, tip]) => `<span class="pill ${(p.placement || "free") === v ? "on" : ""}" data-place="${v}" title="${esc(tip)}">${t}</span>`).join("")}${p.placeRef ? `<span class="pill ${p.placement === "ref" ? "on" : ""}" data-place="ref" title="照这张图里的摆法"><img src="${esc(placeUrl)}" class="placeimg" alt="">照“${esc(p.placeRefName || "")}”那张摆<span class="x" data-act="clearPlace" title="不用这张了">✕</span></span>` : ""}</span>` : ""}
         ${poster && !freeMode && (p.posterRefs || []).length && (p.plans || []).some((x) => x.tpl && !x.boxes) ? `<label class="row lb" title="默认不发：参考图的版式和版式模板不一样，会打架，还会带出参考图上的字。勾上也只让 AI 学配色和质感"><input type="checkbox" id="tplRefs" ${p.tplRefs ? "checked" : ""}> 出图时也参考参考图的风格</label>` : ""}
-        ${poster && !freeMode ? `<span class="lb" title="平面：去掉所有立体、厚度、凸起、阴影；立体：大标题 3D 字；跟参考图：参考图什么样就什么样">效果</span><span class="pills">${[["", "跟参考图"], ["flat", "平面"], ["3d", "立体"]].map(([v, t]) => `<span class="pill ${(p.posterLook || "") === v ? "on" : ""}" data-look="${v}">${t}</span>`).join("")}</span>` : ""}
-        ${freeMode ? "" : poster ? `<label class="row lb">每套方案出 <select id="perPlan">${[1, 2, 3].map((k) => `<option ${(p.perPlan || 1) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张</label>
-        ${(p.plans || []).some((x) => !x.tpl) ? `<label class="row lb" title="程序按方案画一张平面草图（字、位置、大小、颜色都准，但没有质感和图标），一起发给 AI，让它照草图排版"><input type="checkbox" id="sketch" ${p.sketch ? "checked" : ""}> 附上草图（让 AI 照草图排版）</label>` : ""}` : `<label class="row lb">每种风格 <select id="count">${[1, 2, 3, 4, 5, 6].map((k) => `<option ${(p.count || 1) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张</label>`}
+        ${boxGen ? `<span class="lb" title="平面：去掉所有立体、厚度、凸起、阴影；立体：大标题 3D 字；跟参考图：参考图什么样就什么样">效果</span><span class="pills">${[["", "跟参考图"], ["flat", "平面"], ["3d", "立体"]].map(([v, t]) => `<span class="pill ${(p.posterLook || "") === v ? "on" : ""}" data-look="${v}">${t}</span>`).join("")}</span>` : ""}
+        ${freeMode ? "" : boxGen || poster ? `<label class="row lb">每套方案出 <select id="perPlan">${[1, 2, 3].map((k) => `<option ${(p.perPlan || 1) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张</label>
+        ${poster && (p.plans || []).some((x) => !x.tpl) ? `<label class="row lb" title="程序按方案画一张平面草图（字、位置、大小、颜色都准，但没有质感和图标），一起发给 AI，让它照草图排版"><input type="checkbox" id="sketch" ${p.sketch ? "checked" : ""}> 附上草图（让 AI 照草图排版）</label>` : ""}` : `<label class="row lb">每种风格 <select id="count">${[1, 2, 3, 4, 5, 6].map((k) => `<option ${(p.count || 1) === k ? "selected" : ""}>${k}</option>`).join("")}</select> 张</label>`}
         ${p.mode !== "paste" ? "" : `<label class="row lb">产品大小 <input type="range" id="scale" min="40" max="95" value="${Math.round((p.scale || 0.85) * 100)}"><span id="scaleV">${Math.round((p.scale || 0.85) * 100)}%</span></label>
         <label class="row lb"><input type="checkbox" id="blend" ${p.blend !== false ? "checked" : ""}> 融入背景（AI 只调光影）</label>`}
         <label class="row lb">审核用 <select id="judgeSite">${JUDGE_SITES.map(([v, t]) => `<option value="${v}" ${v === judgeSite ? "selected" : ""}>${t}</option>`).join("")}</select></label>
-        <label class="row lb">${poster ? "出图用" : "用哪个 AI"} <select id="site">${SITES.map(([v, t]) => `<option value="${v}" ${v === site ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+        <label class="row lb">${poster || tplMode ? "出图用" : "用哪个 AI"} <select id="site">${SITES.map(([v, t]) => `<option value="${v}" ${v === site ? "selected" : ""}>${t}</option>`).join("")}</select></label>
         <button class="primary" data-act="generate" ${canGo ? "" : "disabled"}>生成 ${n} 张</button></div>
-        <div class="note" style="margin-top:10px">${poster ? (freeMode ? "AI 根据参考图：按“要表达的内容”和选的风格自由发挥，勾了“发送参考图”就把参考图一起发过去。" : "模板：勾上的方案每套出几张，发给 AI 的是草图（字和位置）+ 模板的参考图（风格），字一字不差地照草图画。") + "AI 画字偶尔会错，点图片下面的“AI 审核”，让审核 AI 读一遍图上的字。" : p.mode !== "paste" ? "AI 直接画：把抠好的产品图（铺白底）发给 AI，一步画出带产品的场景，最自然；产品可能被 AI 改一点，不放心就点图片下面的“AI 审核”。喜欢哪张的摆法，点那张的“用这个摆放”。" : "先画背景再融入：AI 画空背景 → 程序把抠好的 PNG 贴到中间 → AI 调光影融入，直接显示 AI 图（原贴图留着可以切换，想让 AI 判断哪张好点“AI 审核”）。"}
-          在服务器上做，关掉网页也不停。${poster ? "" : "默认不加文字。"}</div></div>
+        <div class="note" style="margin-top:10px">${poster ? (freeMode ? "AI 根据参考图：按“要表达的内容”和选的风格自由发挥，勾了“发送参考图”就把参考图一起发过去。" : "模板：勾上的方案每套出几张，发给 AI 的是草图（字和位置）+ 模板的参考图（风格），字一字不差地照草图画。") + "AI 画字偶尔会错，点图片下面的“AI 审核”，让审核 AI 读一遍图上的字。"
+          : tplMode ? "模板：勾上的方案每套出几张，发给 AI 的是草图（产品图已经贴在框里、字都在位置上）+ 产品图（让 AI 别改产品）+ 模板的参考图（风格）。不放心点图片下面的“AI 审核”：看产品有没有被改、字对不对。"
+          : mode === "scene" ? "AI 根据参考图：把产品图（铺白底）、勾了“发送参考图”的参考图发给 AI，按选的背景风格一步画出带产品的场景；产品可能被 AI 改一点，不放心就点图片下面的“AI 审核”。喜欢哪张的摆法，点那张的“用这个摆放”。"
+          : "先画背景再融入：AI 画空背景 → 程序把抠好的 PNG 贴到中间 → AI 调光影融入，直接显示 AI 图（原贴图留着可以切换，想让 AI 判断哪张好点“AI 审核”）。"}
+          在服务器上做，关掉网页也不停。${real && !tplMode ? "默认不加文字。" : ""}</div></div>
       ${pend.length ? `<div class="card pendbox"><div class="head"><div><h3>待确认（${pend.length}）</h3><div class="muted">看过点“采用”；不满意可以调整产品、重新融入、重画背景，或者不要。</div></div></div>
         <div class="mcards">${(await Promise.all(pend.map(itemCard))).join("")}</div></div>` : ""}
       ${done.length ? `<div class="card"><div class="head"><div><h3>已采用（${done.length}）</h3><div class="muted">下载的是 ${p.size}×${p.size} 的 JPG；“下载全部”里另外带一张白底图。</div></div>
@@ -999,8 +1042,8 @@
       e.stopPropagation();
       const id = el.closest("[data-btpl]").dataset.btpl, t = myBoxTpls.find((x) => x.id === id);
       if (!t || !(await confirm(`删除“我的模板”里的 ${t.id}？（所有主图项目都不能再选它，已经写好的方案不受影响）`, "删除", true))) return;
-      myBoxTpls = ((await ST.db.getMeta("posterBoxTpls", [])) || []).filter((x) => x.id !== id);
-      await ST.db.setMeta("posterBoxTpls", myBoxTpls);
+      myBoxTpls = ((await ST.db.getMeta(libKey(), [])) || []).filter((x) => x.id !== id);
+      await ST.db.setMeta(libKey(), myBoxTpls);
       await setFields({ boxPick: (P().boxPick || []).filter((x) => x !== id) });
       render();
     },
@@ -1013,7 +1056,7 @@
     writeBoxPlans: async () => {
       const p = P();
       if (Object.keys(setPend).length) { clearTimeout(setT); const f = setPend; setPend = {}; await op({ op: "set", fields: f }); }
-      if (!String(p.posterContent || p.industry || "").trim()) return APP.toast("先写“要表达的内容”", true);
+      if (!isRealP(p) && !String(p.posterContent || p.industry || "").trim()) return APP.toast("先写“要表达的内容”", true);
       const ids = (p.boxPick || []).filter((id) => boxTpl(id));
       if (!ids.length) return APP.toast("先选模板", true);
       if ((p.plans || []).length && !(await confirm("重新写会替换现在的方案（你改过的字和框也会没了），继续吗？", "重新写"))) return;
@@ -1023,7 +1066,8 @@
       const pl = planOf(el), type = el.dataset.type;
       const n = Math.max(0, ...pl.boxes.map((b) => +String(b.id).slice(1) || 0)) + 1;
       const role = `${BOX_ROLE[type]} ${pl.boxes.filter((b) => b.type === type).length + 1}`;
-      const b = { text: { type, role, x: 30, y: 45, w: 40, h: 8, color: "#111111", bg: "", bold: true, lines: 1, align: "center", text: "" }, icon: { type, role, x: 40, y: 40, w: 20, h: 20, desc: "" }, block: { type, role, x: 0, y: 84, w: 100, h: 16, bg: "#1d4ed8", radius: 0 }, line: { type, role, x: 10, y: 50, w: 80, h: 0.6, color: "#333333" } }[type];
+      const b = NEW_BOX(type, role);
+      if (type === "text") b.text = "";
       b.id = "b" + n;
       type === "block" ? pl.boxes.unshift(b) : pl.boxes.push(b); // 色块放最底下，不挡字
       bsel[pl.id] = b.id;
@@ -1052,8 +1096,8 @@
     },
     boxSaveTpl: async (el) => {
       const pl = planOf(el);
-      const mine = (await ST.db.getMeta("posterBoxTpls", [])) || [];
-      const id = ST.nextDerivedName(pl.tpl, [...ST.BOX_TPLS.map((t) => t.id), ...mine.map((t) => t.id)]);
+      const mine = (await ST.db.getMeta(libKey(), [])) || [];
+      const id = ST.nextDerivedName(pl.tpl, [...builtins().map((t) => t.id), ...mine.map((t) => t.id)]);
       const base = boxTpl(String(pl.tpl).split("-")[0]) || boxTpl(pl.tpl) || {};
       let use = null;
       const ok = await APP.modal(`<p>把方案 ${P().plans.indexOf(pl) + 1} 现在的框（位置、大小、样式，不含字）存成 <b>${esc(id)}</b>，以后所有文字主图项目都能选。</p>
@@ -1063,7 +1107,7 @@
       const boxes = JSON.parse(JSON.stringify(pl.boxes)).map((b) => { delete b.text; return b; });
       const t = { id, name: pl.tplName || base.name || "", use, style: pl.style || "", bg1: pl.bg1, bg2: pl.bg2, bgMode: pl.bgMode || "", bgText: pl.bgText || "", ref: pl.ref || "", refKey: pl.refKey || "", parent: pl.tpl, t: Date.now(), boxes };
       myBoxTpls = [...mine.filter((x) => x.id !== id), t];
-      await ST.db.setMeta("posterBoxTpls", myBoxTpls);
+      await ST.db.setMeta(libKey(), myBoxTpls);
       pl.tpl = id;
       await setFields({ plans: P().plans });
       APP.toast(`存好了：模板 ${id}`);
@@ -1108,13 +1152,13 @@
     // 看大图（滚轮缩放、拖动、← → 切换所有画好的主图）
     view: async (el) => {
       const it0 = itemOf(el);
-      const ready = (it) => (it.mode === "scene" || it.mode === "poster" ? it.scene : it.bg);
+      const ready = (it) => (it.mode === "scene" || it.mode === "poster" || it.mode === "tpl" ? it.scene : it.bg);
       if (!ready(it0)) return;
       const list = P().items.filter(ready);
       const out = [];
       for (const it of list) {
         const c = await compose(it, 1000);
-        out.push({ src: URL.createObjectURL(await ST.toBlob(c.canvas, "image/jpeg", 0.92)), name: `${it.styleName}（${it.mode === "poster" ? "文字版" : it.mode === "scene" ? "AI 直接画" : c.used ? "AI 图" : "原贴图"}）${whoDrew(it) ? " · " + whoDrew(it) : ""}`, png: false });
+        out.push({ src: URL.createObjectURL(await ST.toBlob(c.canvas, "image/jpeg", 0.92)), name: `${it.styleName}（${it.mode === "poster" ? "文字版" : it.mode === "tpl" ? "模板" : it.mode === "scene" ? "AI 直接画" : c.used ? "AI 图" : "原贴图"}）${whoDrew(it) ? " · " + whoDrew(it) : ""}`, png: false });
       }
       VIEWER.open(out, list.indexOf(it0));
     },
@@ -1262,7 +1306,7 @@
     if (!p) return;
     const q = await ST.db.getProject(p.id).catch(() => null);
     if (!q || !P() || P().id !== q.id) return;
-    if (q.mode === "poster") myBoxTpls = (await ST.db.getMeta("posterBoxTpls", []).catch(() => null)) || myBoxTpls;
+    myBoxTpls = (await ST.db.getMeta(libKey(q), []).catch(() => null)) || myBoxTpls;
     if (q.learnDone && q.learnDone !== p.learnDone) APP.toast(`模板 ${q.learnDone} 生成好了，已经选上（鼠标移上去看参考图）`);
     Object.assign(q, setPend); // 还没发出去的输入别被盖掉
     APP.project = q;
